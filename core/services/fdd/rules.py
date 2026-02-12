@@ -11,32 +11,30 @@ import numpy as np
 
 
 # ------------------------------------------------------------
-# Try to reuse your existing codebook (preferred)
+# Codebook canônico para regras e pós-processamento do RF
 # ------------------------------------------------------------
-try:
-    from .fuzzy_diagnostic import DiagnosticCodes, CODE_TO_LABEL  # type: ignore
-except Exception:  # pragma: no cover
-    @dataclass(frozen=True)
-    class DiagnosticCodes:
-        INVALID: int = 0
-        NORMAL: int = 1
-        METEO_ERROR: int = 2
-        SOILING: int = 3
-        DEGRADATION: int = 4
-        SHORT_BYPASS: int = 5
-        STRING_DISCONNECTED: int = 6
-        PARTIAL_SHADING: int = 7
+@dataclass(frozen=True)
+class DiagnosticCodes:
+    INVALID: int = 0
+    NORMAL: int = 1
+    METEO_ERROR: int = 2
+    SOILING: int = 3
+    DEGRADATION: int = 4
+    SHORT_BYPASS: int = 5
+    STRING_DISCONNECTED: int = 6
+    PARTIAL_SHADING: int = 7
 
-    CODE_TO_LABEL: Dict[int, str] = {
-        DiagnosticCodes.INVALID: "invalid",
-        DiagnosticCodes.NORMAL: "normal",
-        DiagnosticCodes.METEO_ERROR: "meteo_error",
-        DiagnosticCodes.SOILING: "soiling",
-        DiagnosticCodes.DEGRADATION: "degradation",
-        DiagnosticCodes.SHORT_BYPASS: "short_bypass",
-        DiagnosticCodes.STRING_DISCONNECTED: "string_disconnected",
-        DiagnosticCodes.PARTIAL_SHADING: "partial_shading",
-    }
+
+CODE_TO_LABEL: Dict[int, str] = {
+    DiagnosticCodes.INVALID: "invalid",
+    DiagnosticCodes.NORMAL: "normal",
+    DiagnosticCodes.METEO_ERROR: "meteo_error",
+    DiagnosticCodes.SOILING: "soiling",
+    DiagnosticCodes.DEGRADATION: "degradation",
+    DiagnosticCodes.SHORT_BYPASS: "short_bypass",
+    DiagnosticCodes.STRING_DISCONNECTED: "string_disconnected",
+    DiagnosticCodes.PARTIAL_SHADING: "partial_shading",
+}
 
 
 # ------------------------------------------------------------

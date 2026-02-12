@@ -707,7 +707,7 @@
       cellW: 10, cellH: 10,
       mL: 76, mT: 22, mR: 12, mB: 18,
       labelKey: null,
-      stats: { cells: 0, cellsMissing: 0, cellsInvalid: 0, cellsWithGRU: 0 },
+      stats: { cells: 0, cellsMissing: 0, cellsInvalid: 0, cellsWithLabel: 0 },
       // NOVO: janela horária em minutos [t0,t1)
       t0: 0, t1: 1440,
       dtm: 15,
@@ -725,7 +725,7 @@
       heatmapState.times = [];
       heatmapState.keyToIdx = null;
       heatmapState.labelKey = null;
-      heatmapState.stats = { cells: 0, cellsMissing: 0, cellsInvalid: 0, cellsWithGRU: 0 };
+      heatmapState.stats = { cells: 0, cellsMissing: 0, cellsInvalid: 0, cellsWithLabel: 0 };
     }
 
     function heatColorDiverging(v, vmin, vmax){
@@ -778,10 +778,8 @@
 
     function pickLabelKey(payload){
       const s = payload?.series || payload || {};
-      if (Array.isArray(s.gru_label)) return "gru_label";
       if (Array.isArray(s.label_t)) return "label_t";
       if (Array.isArray(s.rca_label)) return "rca_label";
-      if (Array.isArray(s.fuzzy_label)) return "fuzzy_label";
       return null;
     }
 
@@ -863,7 +861,7 @@
 
       let cellsInvalid = 0;
       let cellsMissing = 0;
-      let cellsWithGRU = 0;
+      let cellsWithLabel = 0;
 
       for (let i=0; i<x.length; i++){
         const dt = parseDateSafe(x[i]);
@@ -890,7 +888,7 @@
 
         if (!vOK) cellsInvalid += 1;
         if (!Number.isFinite(v)) cellsMissing += 1;
-        if (lbl) cellsWithGRU += 1;
+        if (lbl) cellsWithLabel += 1;
 
         map.set(`${di}|${ti}`, { v, lbl, valid: vOK });
 
@@ -910,7 +908,7 @@
         dt_minutes: dtm,
         metric: "mismatch_rel",
         labelKey,
-        stats: { cells: map.size, cellsInvalid, cellsMissing, cellsWithGRU },
+        stats: { cells: map.size, cellsInvalid, cellsMissing, cellsWithLabel },
         t0, t1
       };
     }
@@ -968,7 +966,6 @@
         "p_ac_model_w":  ["pac_model_w"],
         "valid_model":   ["valid"],
         "g_poa_used":    ["g_poa", "g_poa_wm2"],
-        "gru_label":     ["fuzzy_label", "rca_label", "label_t"],
       };
       const arr = seriesArray(payload, key, ALIASES[key] || []);
       if (!arr) return null;
@@ -976,7 +973,7 @@
     }
 
     function getAnyLabel(payload, idx){
-      const keys = ["gru_label", "label_t", "rca_label", "fuzzy_label"];
+      const keys = ["rca_label", "label_t"];
       for (const k of keys){
         const v = seriesAt(payload, k, idx);
         if (v != null && String(v).trim() !== "") return String(v);
@@ -1125,7 +1122,7 @@
           ${warnNoLabel ? `
             <div class="mini-warn">
               <b>valid_model=true</b>, mas o <b>label</b> veio vazio.
-              Garanta que o backend preenche <span class="mono">series.rca_label</span> (ou <span class="mono">series.fuzzy_label</span> / <span class="mono">series.gru_label</span>).
+              Garanta que o backend preenche <span class="mono">series.rca_label</span>.
             </div>
           ` : ``}
 
@@ -1403,7 +1400,7 @@
       $("debugLabel").textContent =
         `Janela: ${String($("startTime")?.value || "—")}–${String($("endTime")?.value || "—")} • ` +
         `Dias: ${days.length} • Bins: ${times.length} • Células: ${st.cells || 0} ` +
-        `(inválidas: ${st.cellsInvalid || 0}, mismatch n/a: ${st.cellsMissing || 0}, label: ${st.cellsWithGRU || 0}) • ` +
+        `(inválidas: ${st.cellsInvalid || 0}, mismatch n/a: ${st.cellsMissing || 0}, label: ${st.cellsWithLabel || 0}) • ` +
         `Escala: ±${fmt(absScale, 3)}`;
     }
 

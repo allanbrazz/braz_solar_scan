@@ -3023,8 +3023,7 @@ def pv_dashboard_heatmap_api(request: HttpRequest) -> JsonResponse:
 
     Contrato:
       days[]: {date,status,coverage,ratios,critical_run_min,diag{dominant,fractions,n}}
-    (e também retorna "gru" como alias)
-    Suporta:
+        Suporta:
       - year=YYYY  (default: ano atual)
       - OU start=YYYY-MM-DD&end=YYYY-MM-DD (range local inclusivo)
     """
@@ -3321,7 +3320,6 @@ def pv_dashboard_heatmap_api(request: HttpRequest) -> JsonResponse:
                     "ratios": {"normal": 0.0, "meteo": 0.0, "mismatch_warn": 0.0},
                     "critical_run_min": 0,
                     "diag": {"dominant": None, "fractions": {k: 0.0 for k in DIAG_BUCKETS}, "n": 0},
-                    "gru": {"dominant": None, "fractions": {k: 0.0 for k in DIAG_BUCKETS}, "n": 0},
                 }
             )
 
@@ -3432,7 +3430,6 @@ def pv_dashboard_heatmap_api(request: HttpRequest) -> JsonResponse:
                 "critical_run_min": 0,
                 "diag": {"dominant": None, "fractions": {k: 0.0 for k in DIAG_BUCKETS}, "n": 0},
             }
-            day_obj["gru"] = day_obj["diag"]
             days_out.append(day_obj)
             continue
 
@@ -3500,7 +3497,6 @@ def pv_dashboard_heatmap_api(request: HttpRequest) -> JsonResponse:
             "critical_run_min": int(critical_run),
             "diag": {"dominant": dominant, "fractions": diag_fractions, "n": n_lbl},
         }
-        day_obj["gru"] = day_obj["diag"]
         days_out.append(day_obj)
 
     total_points = len(rows)

@@ -1,6 +1,6 @@
 # =================================
 # core/services/diagnostic_ingest.py
-# Diagnostic pipeline (RF or Fuzzy) + DB upsert (PlantDiagnostic15m)
+# Diagnostic pipeline (Random Forest) + DB upsert (PlantDiagnostic15m)
 # =================================
 from __future__ import annotations
 
@@ -21,10 +21,7 @@ from core.services.power_model import (
     plant_from_details,
 )
 
-# Fuzzy (opcional)
-from core.services.fuzzy_diagnostic import FuzzyDiagnosticService
-
-# RF (opção A)
+# RF
 from core.services.fdd.registry import get_default_registry
 from core.services.fdd.rf_inference import InferenceConfig
 
@@ -168,50 +165,7 @@ def _pick_first_array(res: Dict[str, Any], keys: Sequence[str]) -> Optional[np.n
 
 
 # ============================================================
-# Fuzzy helpers (se você ainda quiser manter)
-# ============================================================
-def _build_fuzzy_features_fallback(out_model: Dict[str, Any], *, vac: Optional[np.ndarray]) -> Dict[str, np.ndarray]:
-    """
-    Fallback caso você não tenha `power_model.feature_extraction`.
-    Monta um dicionário mínimo de features que o FuzzyDiagnosticService costuma usar.
-    """
-    def _get(*keys: str, default: float = np.nan) -> np.ndarray:
-        for k in keys:
-            if k in out_model and out_model[k] is not None:
-                return np.asarray(out_model[k], dtype=float).reshape(-1)
-        # tenta inferir tamanho
-        T = 0
-        for kk in ("g_poa_used", "g_poa", "tcell_c", "pac_real_w", "pac_expected_w"):
-            if kk in out_model and out_model[kk] is not None:
-                T = int(np.asarray(out_model[kk]).reshape(-1).size)
-                break
-        return np.full(T, float(default), dtype=float)
-
-    T = int(_get("g_poa_used", "g_poa").size)
-
-    feats: Dict[str, np.ndarray] = {
-        "g_poa": _get("g_poa_used", "g_poa"),
-        "tcell_c": _get("tcell_c"),
-        "pac_real_w": _get("pac_real_w"),
-        "pac_expected_w": _get("pac_expected_w"),
-        "mismatch_rel": _get("mismatch_rel"),
-        "mismatch_abs_w": _get("mismatch_abs_w"),
-        "v_ratio": _get("v_ratio"),
-        "i_ratio": _get("i_ratio"),
-        "g_cv_60m": _get("g_cv_60m"),
-        "sky_stable_mask": np.asarray(out_model.get("sky_stable_mask", np.zeros(T, dtype=bool)), dtype=bool).reshape(-1),
-        "csi": _get("csi"),
-        "v_ac_v": (
-            np.asarray(vac, dtype=float).reshape(-1)
-            if vac is not None and np.asarray(vac).reshape(-1).size == T
-            else _get("v_ac_real_v", "v_ac_v")
-        ),
-    }
-    return feats
-
-
-# ============================================================
-# Pipeline A: expected_and_mismatch -> RF (registry.infer)
+# Pipeline: expected_and_mismatch -> RF (registry.infer)
 # ============================================================
 def run_rf_pipeline(
     inputs: DiagnosticInputs15m,
@@ -319,84 +273,6 @@ def run_rf_pipeline(
 
 
 # ============================================================
-# Pipeline B (opcional): expected_and_mismatch -> fuzzy
-# ============================================================
-def run_fuzzy_pipeline(
-    inputs: DiagnosticInputs15m,
-    *,
-    pv_module_obj: Any,
-    plant_details_obj: Any,
-    inverter_obj: Optional[Any] = None,
-    use_inverter_eff: bool = True,
-    g_min_valid: float = 200.0,
-    dt_minutes: float = 15.0,
-) -> Dict[str, Any]:
-    """
-    1) module/plant
-    2) expected_and_mismatch
-    3) features -> fuzzy -> codes/labels
-    """
-    module = module_from_pvmodule(pv_module_obj)
-    plant = plant_from_details(
-        plant_details_obj,
-        inverter=inverter_obj,
-        use_inverter_eff=use_inverter_eff,
-    )
-
-    G = _to_np_1d(inputs.g_poa_wm2)
-    Ta = _to_np_1d(inputs.tamb_c, n=G.size)
-    y = _to_np_1d(inputs.pac_real_w, n=G.size)
-
-    vdc = _to_np_1d(inputs.vdc_v, n=G.size) if inputs.vdc_v is not None else None
-    idc = _to_np_1d(inputs.idc_a, n=G.size) if inputs.idc_a is not None else None
-    vac = _to_np_1d(inputs.vac_v, n=G.size) if inputs.vac_v is not None else None
-    gclear = _to_np_1d(inputs.g_clear_wm2, n=G.size) if inputs.g_clear_wm2 is not None else None
-
-    out_model: Dict[str, Any] = _call_expected_and_mismatch(
-        g_poa=G,
-        tamb_c=Ta,
-        pac_real_w=y,
-        module=module,
-        plant=plant,
-        v_dc_real_v=vdc,
-        i_dc_real_a=idc,
-        v_ac_real_v=vac,
-        g_clear=gclear,
-        g_min_valid=float(g_min_valid),
-        dt_minutes=float(dt_minutes),
-        window_minutes=60.0,
-        compute_norm=True,
-        compute_rca=False,
-    )
-
-    # Preferir feature_extraction se existir; senão fallback local.
-    try:
-        from core.services.power_model import feature_extraction as _pm_feature_extraction  # type: ignore
-
-        feats = _pm_feature_extraction(out_model, v_ac_real_v=vac)
-        if "csi" not in feats:
-            base = feats.get("g_poa", G)
-            feats["csi"] = np.asarray(out_model.get("csi", np.full_like(np.asarray(base, dtype=float), np.nan)), dtype=float)
-    except Exception:
-        feats = _build_fuzzy_features_fallback(out_model, vac=vac)
-
-    strings_count = getattr(plant, "strings_count", None)
-    try:
-        strings_count_i = int(strings_count) if strings_count is not None else 1
-    except Exception:
-        strings_count_i = 1
-
-    svc = FuzzyDiagnosticService(strings_count=strings_count_i)
-    codes = np.asarray(svc.predict(feats), dtype=int).reshape(-1)
-    labels = np.asarray(svc.to_labels(codes), dtype=object).reshape(-1)
-
-    out_model["fuzzy_code"] = codes
-    out_model["fuzzy_label"] = labels
-    out_model["features_fuzzy"] = feats
-    return out_model
-
-
-# ============================================================
 # DB Upsert
 # ============================================================
 def upsert_diagnostics_15m(
@@ -407,7 +283,7 @@ def upsert_diagnostics_15m(
     plant_details_obj: Any,
     inverter_obj: Optional[Any] = None,
     DiagnosticModelLabel: str = "core.PlantDiagnostic15m",
-    method: str = "rf",                 # "rf" (opção A) ou "fuzzy"
+    method: str = "rf",
     rf_model_name: str = "default",
     rf_cfg: Optional[InferenceConfig] = None,
 ) -> int:
@@ -418,31 +294,20 @@ def upsert_diagnostics_15m(
     Diagnostic = apps.get_model(DiagnosticModelLabel)
 
     method_norm = (method or "").strip().lower()
-    if method_norm not in ("rf", "fuzzy"):
-        raise ValueError("method deve ser 'rf' ou 'fuzzy'.")
+    if method_norm and method_norm != "rf":
+        raise ValueError("method deve ser 'rf'.")
 
-    if method_norm == "rf":
-        out = run_rf_pipeline(
-            inputs,
-            pv_module_obj=pv_module_obj,
-            plant_details_obj=plant_details_obj,
-            inverter_obj=inverter_obj,
-            use_inverter_eff=True,
-            rf_model_name=rf_model_name,
-            rf_cfg=rf_cfg,
-        )
-        codes_raw = out.get("rf_code")
-        labels_raw = out.get("rf_label")
-    else:
-        out = run_fuzzy_pipeline(
-            inputs,
-            pv_module_obj=pv_module_obj,
-            plant_details_obj=plant_details_obj,
-            inverter_obj=inverter_obj,
-            use_inverter_eff=True,
-        )
-        codes_raw = out.get("fuzzy_code")
-        labels_raw = out.get("fuzzy_label")
+    out = run_rf_pipeline(
+        inputs,
+        pv_module_obj=pv_module_obj,
+        plant_details_obj=plant_details_obj,
+        inverter_obj=inverter_obj,
+        use_inverter_eff=True,
+        rf_model_name=rf_model_name,
+        rf_cfg=rf_cfg,
+    )
+    codes_raw = out.get("rf_code")
+    labels_raw = out.get("rf_label")
 
     ts_list = _normalize_ts_to_python_utc(inputs.ts_utc)
     if not ts_list:
