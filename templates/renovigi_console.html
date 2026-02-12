@@ -1,0 +1,336 @@
+{% extends "base.html" %}
+{% block title %}{{ plant.nome }} - Renovigi / ShineMonitor Console{% endblock %}
+
+{% block content %}
+<header class="page-head">
+  <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap;">
+    <div>
+      <h1 class="page-title">{{ plant.nome }} — Renovigi / ShineMonitor Console</h1>
+      <p class="page-sub">
+        Discovery automático (login+senha) → seleciona planta/dispositivo → puxa dados operativos.
+      </p>
+    </div>
+
+    <div style="display:flex; gap:8px; align-items:center;">
+      <a class="btn" href="{% url 'plants:detail' plant.pk %}">Voltar para detalhes</a>
+    </div>
+  </div>
+</header>
+
+<form method="post" novalidate>
+  {% csrf_token %}
+
+  <section class="dash" style="--cols:12;">
+
+    {# ===================== Credenciais ===================== #}
+    <article class="card glass accent-cyan" style="grid-column:1 / -1;">
+      <h3 class="mb-2">Credenciais</h3>
+
+      <div class="grid-form">
+        <div class="span-2">
+          <label class="form-label">Base URL</label>
+          <input class="form-control" value="{{ base_url }}" readonly>
+        </div>
+
+        <div class="span-2">
+          <label class="form-label">Company Key (Renovigi)</label>
+          <input class="form-control" value="{{ company_key }}" readonly>
+        </div>
+
+        <div class="span-2">
+          <label class="form-label">Usuário</label>
+          <input class="form-control" name="username" value="{{ cred.username }}" autocomplete="username">
+        </div>
+
+        <div class="span-2">
+          <label class="form-label">Senha</label>
+          <input class="form-control"
+                 name="password"
+                 type="password"
+                 value=""
+                 autocomplete="current-password"
+                 placeholder="(deixe vazio para usar a senha salva)">
+          <div style="margin-top:6px;">
+            <label style="display:flex; gap:8px; align-items:center;">
+              <input type="checkbox" name="use_saved_password" checked>
+              <span>Usar senha salva (plain por enquanto)</span>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:10px;">
+        <button class="btn btn-primary" name="action" value="discover" type="submit">
+          1) Descobrir plantas/dispositivos
+        </button>
+      </div>
+    </article>
+
+    {# ===================== Vínculo ===================== #}
+    <article class="card glass" style="grid-column:1 / -1;">
+      <h3 class="mb-2">Vínculo (planta → dispositivo)</h3>
+
+      <div class="grid-form">
+        <div class="span-2">
+          <label class="form-label">Planta (plantid)</label>
+          <select class="form-control" name="plantid">
+            <option value="">-- selecione --</option>
+            {% for pl in plants %}
+              {% firstof pl.pid pl.plantid pl.id as pid %}
+              {% firstof pl.name pl.nome "(sem nome)" as pname %}
+              <option value="{{ pid }}"
+                {% if selected_plantid|stringformat:"s" == pid|stringformat:"s" %}selected{% endif %}>
+                #{{ pid }} — {{ pname }}{% if pl.status %} (status={{ pl.status }}){% endif %}
+              </option>
+            {% endfor %}
+          </select>
+          <small class="text-muted help">
+            Lista vem de <code>queryPlants</code>.
+          </small>
+        </div>
+
+        <div class="span-2">
+          <label class="form-label">Dispositivo</label>
+          <select class="form-control" name="device_key">
+            <option value="">-- selecione --</option>
+
+            {% for d in devices %}
+              {% firstof d.pn "" as pn %}
+              {% firstof d.devcode "" as devcode %}
+              {% firstof d.devaddr "" as devaddr %}
+              {% firstof d.sn "" as sn %}
+              {% firstof d.alias "" as alias %}
+
+              {% with device_key=pn|add:"|"|add:devcode|add:"|"|add:devaddr|add:"|"|add:sn %}
+                <option value="{{ device_key }}"
+                  {% if selected_device_key|stringformat:"s" == device_key|stringformat:"s" %}selected{% endif %}>
+                  pn={{ pn }} | devcode={{ devcode }} | devaddr={{ devaddr }} | sn={{ sn }}{% if alias %} ({{ alias }}){% endif %}
+                </option>
+              {% endwith %}
+            {% endfor %}
+          </select>
+
+          <small class="text-muted help">
+            Lista vem de <code>queryPlantDeviceView</code>.
+          </small>
+        </div>
+      </div>
+
+      <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:10px;">
+        <button class="btn btn-primary" name="action" value="bind" type="submit">
+          2) Vincular seleção e pré-preencher
+        </button>
+      </div>
+    </article>
+
+    {# ===================== Fetch / Sync ===================== #}
+    <article class="card glass" style="grid-column:1 / -1;">
+      <h3 class="mb-2">Requisição de dados operativos</h3>
+
+      <div class="grid-form">
+        <div>
+          <label class="form-label">Start day</label>
+          <input class="form-control" name="start_day" placeholder="YYYY-MM-DD"
+                 value="{{ request.POST.start_day|default:'2025-12-20' }}">
+        </div>
+        <div>
+          <label class="form-label">End day</label>
+          <input class="form-control" name="end_day" placeholder="YYYY-MM-DD"
+                 value="{{ request.POST.end_day|default:'2026-01-20' }}">
+        </div>
+
+        <div>
+          <label class="form-label">pn</label>
+          <input class="form-control" name="pn" value="{{ cred.shinemonitor_pn }}">
+        </div>
+        <div>
+          <label class="form-label">devcode</label>
+          <input class="form-control" name="devcode" value="{{ cred.shinemonitor_devcode }}">
+        </div>
+        <div>
+          <label class="form-label">devaddr</label>
+          <input class="form-control" name="devaddr" value="{{ cred.shinemonitor_devaddr }}">
+        </div>
+        <div>
+          <label class="form-label">sn</label>
+          <input class="form-control" name="sn" value="{{ cred.shinemonitor_sn }}">
+        </div>
+      </div>
+
+      <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:10px;">
+        <button class="btn btn-primary" name="action" value="fetch" type="submit">
+          3) Puxar dados (queryDeviceDataOneDayPaging)
+        </button>
+        <button class="btn btn-primary" name="action" value="sync" type="submit">
+          4) Sync (salvar no banco)
+        </button>
+      </div>
+
+      {# ===================== RESULTADOS ===================== #}
+      {% if result %}
+        <hr style="margin:16px 0; opacity:.25;">
+
+        <h3 style="margin:0 0 10px 0;">Resultados</h3>
+
+        {# ---- SYNC ---- #}
+        {% if result.inserted is not None %}
+          <h4>Resultado do Sync</h4>
+          <ul>
+            <li>Inserted: {{ result.inserted }}</li>
+            <li>Requested rows: {{ result.requested_rows }}</li>
+            <li>Bad timestamps: {{ result.bad_ts }}</li>
+            {% if result.range %}
+              <li>Effective start: {{ result.range.effective_start }}</li>
+              <li>Effective end: {{ result.range.effective_end }}</li>
+            {% endif %}
+          </ul>
+        {% endif %}
+
+        {# ---- FETCH ---- #}
+        <h4 style="margin-top:14px;">Resumo (meta)</h4>
+        {% if result.meta %}
+          {{ result.meta|json_script:"meta_json" }}
+          <pre id="meta_pre" style="white-space:pre-wrap; margin:0 0 12px 0;"></pre>
+        {% else %}
+          <p class="text-muted" style="margin:0 0 12px 0;">(sem meta)</p>
+        {% endif %}
+
+        <h4>Linhas retornadas (preview)</h4>
+
+        {% if result.rows and result.rows|length > 0 %}
+          <div style="margin:6px 0 10px 0;">
+            <small class="text-muted help">
+              Total de linhas: {{ result.rows|length }} (mostrando até 200)
+            </small>
+          </div>
+
+          {% if result.headers and result.headers|length > 0 %}
+            <div style="overflow:auto; border:1px solid rgba(255,255,255,.12); border-radius:12px;">
+              <table style="border-collapse:collapse; width:100%; min-width:920px;">
+                <thead>
+                  <tr>
+                    {% for h in result.headers %}
+                      <th style="text-align:left; padding:8px; border-bottom:1px solid rgba(255,255,255,.12); white-space:nowrap;">
+                        {{ h }}
+                      </th>
+                    {% endfor %}
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for row in result.rows|slice:":200" %}
+                    <tr>
+                      {% for cell in row %}
+                        <td style="border-bottom:1px solid rgba(255,255,255,.08); padding:6px; white-space:nowrap;">
+                          {{ cell }}
+                        </td>
+                      {% endfor %}
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          {% else %}
+            <p class="text-muted" style="margin:0 0 8px 0;">
+              (Sem headers. Mostrando as 20 primeiras linhas “cruas”)
+            </p>
+            {{ result.rows|json_script:"rows_json" }}
+            <pre id="rows_pre" style="white-space:pre-wrap; margin:0;"></pre>
+          {% endif %}
+        {% else %}
+          <p class="text-muted" style="margin:0;">
+            Nenhuma linha retornada para o range informado.
+          </p>
+        {% endif %}
+
+        {# ---- DEBUG / RAW ---- #}
+        <details style="margin-top:12px;">
+          <summary style="cursor:pointer;">Debug</summary>
+          {% if result.debug %}
+            {{ result.debug|json_script:"debug_json" }}
+            <pre id="debug_pre" style="white-space:pre-wrap; margin:8px 0 0 0;"></pre>
+          {% else %}
+            <pre style="white-space:pre-wrap; margin:8px 0 0 0;">(sem debug)</pre>
+          {% endif %}
+        </details>
+
+        <details style="margin-top:10px;">
+          <summary style="cursor:pointer;">Raw (para depuração)</summary>
+          {{ result|json_script:"raw_json" }}
+          <pre id="raw_pre" style="white-space:pre-wrap; margin:8px 0 0 0;"></pre>
+        </details>
+
+        <script>
+          (function(){
+            function fillPre(scriptId, preId){
+              var el = document.getElementById(scriptId);
+              var pre = document.getElementById(preId);
+              if (!el || !pre) return;
+              try {
+                var obj = JSON.parse(el.textContent);
+                pre.textContent = JSON.stringify(obj, null, 2);
+              } catch (e) {
+                pre.textContent = "(falha ao parsear JSON) " + e;
+              }
+            }
+            fillPre("meta_json", "meta_pre");
+            fillPre("rows_json", "rows_pre");
+            fillPre("debug_json", "debug_pre");
+            fillPre("raw_json", "raw_pre");
+          })();
+        </script>
+
+      {% endif %}
+    </article>
+
+  </section>
+</form>
+
+<style>
+  .grid-form{
+    display:grid;
+    grid-template-columns:
+      minmax(320px, 2fr)
+      minmax(180px, 1fr)
+      minmax(180px, 1fr)
+      minmax(280px, 1.5fr);
+    gap:12px;
+    align-items:end;
+    grid-auto-flow:dense;
+  }
+  .grid-form .span-2{ grid-column:span 2; }
+  .grid-form > div{ min-width:0; }
+  .help{ display:block; margin-top:4px; }
+
+  @media (max-width: 1100px){
+    .grid-form{
+      grid-template-columns:
+        minmax(280px, 2fr)
+        minmax(180px, 1fr)
+        minmax(180px, 1fr);
+    }
+    .grid-form .span-2{ grid-column:1 / -1; }
+  }
+  @media (max-width: 680px){
+    .grid-form{ grid-template-columns: 1fr; }
+    .grid-form .span-2{ grid-column:auto; }
+  }
+
+  .form-control{
+    display:block;
+    width:100%;
+    max-width:100%;
+    box-sizing:border-box;
+    padding:.65rem .75rem;
+    border-radius:12px;
+    border:1px solid rgba(255,255,255,.18);
+    background: rgba(255,255,255,.06);
+    color: rgba(240,248,255,.95);
+    outline:none;
+  }
+  .form-control:focus{
+    border-color: rgba(255,255,255,.35);
+    background: rgba(255,255,255,.10);
+    box-shadow: 0 0 0 2px rgba(95,160,255,.25);
+  }
+</style>
+{% endblock %}

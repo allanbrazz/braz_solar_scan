@@ -1,0 +1,162 @@
+<!-- radiation_view.html -->
+{% extends "base.html" %}
+{% load static %}
+{% block title %}NSRDB{% endblock %}
+
+{% block content %}
+  <header class="page-head">
+    <h1 class="page-title">NSRDB (NREL) – PSM3</h1>
+    <p class="page-sub">
+      Séries meteorológicas e irradiância (ex.: GHI/DNI/DHI, temperatura do ar e vento) para um ponto (lat/lon).
+      {% comment %}
+        Observação: GPOA/POA exige transposição (modelo + tilt/azimuth). Se/ quando você calcular POA, atualize este texto.
+      {% endcomment %}
+    </p>
+  </header>
+
+  <section class="dash" style="--cols: 12;">
+    <!-- CARD: Filtros -->
+    <article class="card glass accent-cyan" style="grid-column: 1 / -1; width: 100%;">
+      <h3 class="mb-2">Filtros</h3>
+
+      {% if form.non_field_errors %}
+        <div class="alert alert-danger mb-3">{{ form.non_field_errors }}</div>
+      {% endif %}
+
+      <form method="get"
+            style="display:grid; grid-template-columns: repeat(6, minmax(160px, 1fr)); gap: 12px; align-items:end;">
+
+        <div>
+          <label class="form-label">Latitude</label>
+          {{ form.lat }}
+          {% if form.lat.errors %}<div class="text-danger small">{{ form.lat.errors }}</div>{% endif %}
+        </div>
+
+        <div>
+          <label class="form-label">Longitude</label>
+          {{ form.lon }}
+          {% if form.lon.errors %}<div class="text-danger small">{{ form.lon.errors }}</div>{% endif %}
+        </div>
+
+        <div>
+          <label class="form-label">
+            Tilt (°) <small class="text-muted">(opcional)</small>
+          </label>
+          {{ form.tilt }}
+          {% if form.tilt.errors %}<div class="text-danger small">{{ form.tilt.errors }}</div>{% endif %}
+          <small class="text-muted d-block">
+            Usado apenas se você calcular POA/GPOA por transposição.
+          </small>
+        </div>
+
+        <div>
+          <label class="form-label">
+            Azimute (°) <small class="text-muted">(opcional)</small>
+          </label>
+          {{ form.azimuth }}
+          {% if form.azimuth.errors %}<div class="text-danger small">{{ form.azimuth.errors }}</div>{% endif %}
+          <small class="text-muted d-block">
+            Usado apenas se você calcular POA/GPOA por transposição.
+          </small>
+        </div>
+
+        <div>
+          <label class="form-label">Início</label>
+          {{ form.start }}
+          {% if form.start.errors %}<div class="text-danger small">{{ form.start.errors }}</div>{% endif %}
+        </div>
+
+        <div>
+          <label class="form-label">Fim</label>
+          {{ form.end }}
+          {% if form.end.errors %}<div class="text-danger small">{{ form.end.errors }}</div>{% endif %}
+        </div>
+
+        {% comment %}
+          Se você adicionar campos no form (ex.: interval, utc), o template pode exibi-los sem quebrar:
+          - form.interval
+          - form.utc
+          Basta descomentar e garantir que existam no formulário.
+        {% endcomment %}
+
+        {% if form.interval %}
+          <div>
+            <label class="form-label">Intervalo (min)</label>
+            {{ form.interval }}
+            {% if form.interval.errors %}<div class="text-danger small">{{ form.interval.errors }}</div>{% endif %}
+          </div>
+        {% endif %}
+
+        {% if form.utc %}
+          <div>
+            <label class="form-label">Horário em UTC</label>
+            <div style="display:flex; align-items:center; gap:8px;">
+              {{ form.utc }}
+              <small class="text-muted">Quando marcado, timestamps vêm em UTC.</small>
+            </div>
+            {% if form.utc.errors %}<div class="text-danger small">{{ form.utc.errors }}</div>{% endif %}
+          </div>
+        {% endif %}
+
+        <div>
+          <label class="form-label">Limite de linhas</label>
+          <input type="number" name="limit" class="form-control" value="{{ request.GET.limit|default:'200' }}">
+        </div>
+
+        <div style="display:flex; gap:8px;">
+          <button type="submit" class="btn btn-primary">Carregar</button>
+        </div>
+      </form>
+
+      <div class="mt-2">
+        <small class="text-muted">
+          Dica: para grandes intervalos, use cache no backend para evitar baixar o CSV da NSRDB a cada requisição.
+        </small>
+      </div>
+    </article>
+
+    <!-- CARD: Tabela -->
+    <article class="card glass accent-green" style="grid-column: 1 / -1; width: 100%;">
+      <div class="flex-between" style="display:flex; justify-content:space-between; align-items:center;">
+        <h3>Resultados</h3>
+        {% if meta.count_total %}
+          <small class="text-muted">
+            Mostrando {{ meta.count_shown }} de {{ meta.count_total }} registros
+            (fuso: {{ meta.tz|default:"America/Montevideo" }})
+          </small>
+        {% endif %}
+      </div>
+
+      {% for message in messages %}
+        <div class="alert alert-{{ message.tags }} mb-3">{{ message }}</div>
+      {% endfor %}
+
+      {% if meta.cadence %}
+        <p class="text-muted small mb-2">{{ meta.cadence }}</p>
+      {% endif %}
+
+      {% if rows %}
+        <div class="table-responsive" style="max-height: 70vh; overflow:auto;">
+          <table class="table table-sm table-striped align-middle" style="width:100%;">
+            <thead class="table-light">
+              <tr>
+                {% for c in cols %}<th scope="col">{{ c }}</th>{% endfor %}
+              </tr>
+            </thead>
+            <tbody>
+              {% for r in rows %}
+                <tr>
+                  {% for cell in r %}
+                    <td>{{ cell }}</td>
+                  {% endfor %}
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p class="text-muted">Selecione as datas e clique em “Carregar” para ver a tabela.</p>
+      {% endif %}
+    </article>
+  </section>
+{% endblock %}

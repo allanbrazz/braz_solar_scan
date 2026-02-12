@@ -1,0 +1,335 @@
+/* =================== THEME GLOBAL (SUAVE) =================== */
+/* tipografia */
+:root{
+  --font-ui: "Chakra Petch", system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  --font-display: "Orbitron", "Chakra Petch", system-ui, sans-serif;
+
+
+
+/* app.css – rolagem normal nas páginas internas */
+body.app-body{
+  position: relative;
+  min-height: 100vh;
+  overflow: auto;       /* rolar normalmente */
+}
+
+
+  /* intensidade default (subtle) do tema no app */
+  --sunAlpha: .25;
+  --gridAlpha: .22;
+
+  /* cores de UI */
+  --ink: #eaf6ff;
+  --ink-dim: #b7d7f8;
+  --surface: rgba(10, 32, 54, 0.35);   /* mais transparente que no login */
+  --surface-bd: rgba(100, 200, 255, 0.18);
+  --accent: #25b7ff;
+}
+
+/* reset essencial + rolagem normal */
+html, body { margin:0; padding:0; min-height:100%; }
+body.app-body{
+  font-family: var(--font-ui);
+  color: var(--ink);
+  background:#04101c;             /* fallback */
+}
+
+/* ===== Wrapper do tema em TODAS as páginas ===== */
+.theme-bg{
+  position:fixed; inset:0; z-index:0; pointer-events:none;
+}
+.sun{ opacity: var(--sunAlpha); }
+.solar-grid{ opacity: var(--gridAlpha); }
+.page, .site-nav{ position:relative; z-index:1; }
+
+/* ===== Sol (versão realista que fizemos) ===== */
+.sun{
+  position:absolute; top:-140px; right:-140px;
+  width:320px; height:320px; border-radius:50%;
+  background-image:
+    radial-gradient(circle at 48% 46%, #fff8c9 0%, #ffe066 35%, #ffbf3a 60%, #ff9e22 76%, rgba(255,158,34,0) 80%),
+    repeating-radial-gradient(circle at 45% 50%, rgba(255,255,255,.05) 0 1.5px, rgba(0,0,0,0) 1.5px 5px);
+  background-blend-mode: screen, normal;
+  box-shadow: 0 0 120px 40px rgba(255,196,64,.28), 0 0 260px 120px rgba(255,170,0,.14);
+  filter:saturate(110%) contrast(105%);
+  animation:sunPulse 10s ease-in-out infinite;
+}
+.sun::before{
+  content:""; position:absolute; inset:-14%; border-radius:50%;
+  background: radial-gradient(circle, rgba(255,236,140,.45) 0 40%, rgba(255,200,64,.20) 58%, rgba(255,160,0,.08) 72%, rgba(255,140,0,0) 86%);
+  filter:blur(18px); mix-blend-mode:screen; animation:coronaBreathe 8s ease-in-out infinite;
+}
+.sun::after{
+  content:""; position:absolute; inset:-30%; border-radius:50%;
+  background: repeating-conic-gradient(from 0deg, rgba(255,210,80,0) 0 10deg, rgba(255,210,80,.12) 10deg 11.5deg);
+  mask: radial-gradient(circle at 50% 50%, transparent 0 78%, black 82% 100%);
+  -webkit-mask: radial-gradient(circle at 50% 50%, transparent 0 78%, black 82% 100%);
+  filter:blur(14px); mix-blend-mode:screen; animation:coronaSpin 60s linear infinite;
+}
+
+/* ===== Campo FV com módulos + células (subtle) ===== */
+:root{
+  /* passo do “quadrado” do módulo nas páginas internas */
+  --mod-w: 100px;
+  --mod-h: 60px;
+  --cols: 6; --rows: 10;               /* 60 células (6x10) */
+  --module-line: 2px;
+  --cell-gap: 1.6px;
+  --cell-line: rgba(230,245,255,.10);
+  --frame-v:  rgba(174,199,218,.20);
+  --frame-h:  rgba(167,201,227,.18);
+  --half-cut: rgba(255,255,255,.14);
+}
+.solar-grid{
+  position:absolute; bottom:-120px; left:50%;
+  transform: translateX(-50%) perspective(900px) rotateX(65deg);
+  width:160vw; height:125vh; pointer-events:none;
+  background:
+    repeating-linear-gradient(to right, var(--frame-v) 0 var(--module-line), transparent var(--module-line) var(--mod-w)),
+    repeating-linear-gradient(to bottom, var(--frame-h) 0 var(--module-line), transparent var(--module-line) var(--mod-h)),
+    linear-gradient(180deg, #0d2540 0%, #0a1e34 60%, #07182a 100%);
+  background-size: var(--mod-w) 100%, 100% var(--mod-h), auto auto;
+  mask-image: linear-gradient(to top, black 55%, transparent 100%);
+  animation: gridGlow 8s linear infinite;
+}
+.solar-grid::before{
+  content:""; position:absolute; inset:0;
+  --cell-w: calc((var(--mod-w) - (var(--cols) - 1)*var(--cell-gap)) / var(--cols));
+  --cell-h: calc((var(--mod-h) - (var(--rows) - 1)*var(--cell-gap)) / var(--rows));
+  background-image:
+    linear-gradient(to bottom, transparent 0 50%, var(--half-cut) 50% calc(50% + 2px), transparent calc(50% + 2px) 100%),
+    repeating-linear-gradient(to right, transparent 0 calc(var(--cell-w)), var(--cell-line) calc(var(--cell-w)) calc(var(--cell-w) + var(--cell-gap))),
+    repeating-linear-gradient(to bottom, transparent 0 calc(var(--cell-h)), var(--cell-line) calc(var(--cell-h)) calc(var(--cell-h) + var(--cell-gap)));
+  background-size: var(--mod-w) var(--mod-h), var(--mod-w) var(--mod-h), var(--mod-w) var(--mod-h);
+  background-repeat: repeat; mix-blend-mode: screen; opacity:.9; pointer-events:none;
+}
+
+/* animações do tema */
+@keyframes sunPulse{ 0%,100%{ transform:scale(1); filter:saturate(110%) brightness(1); }
+                     50%{ transform:scale(1.02); filter:saturate(122%) brightness(1.05);} }
+@keyframes coronaBreathe{ 0%,100%{ opacity:.5; transform:rotate(0) scale(1); }
+                          50%{ opacity:.75; transform:rotate(2deg) scale(1.04);} }
+@keyframes coronaSpin{ 0%{transform:rotate(0)} 100%{transform:rotate(360deg)} }
+@keyframes gridGlow{ 0%{filter:drop-shadow(0 0 0 rgba(90,200,255,.18))}
+                     50%{filter:drop-shadow(0 0 14px rgba(90,200,255,.30))}
+                     100%{filter:drop-shadow(0 0 0 rgba(90,200,255,.18))} }
+
+/* =================== COMPONENTES GENÉRICOS =================== */
+.page{ min-height:100vh; padding: 2rem 1rem; }
+.page--narrow{ max-width: 720px; margin: 0 auto; }
+.site-nav{
+  display:flex; gap:1rem; align-items:center;
+  padding: .75rem 1rem;
+  background: rgba(5,18,32,.25);
+  border-bottom: 1px solid rgba(100,200,255,.12);
+  backdrop-filter: blur(6px);
+}
+.site-nav a{ color: var(--ink); text-decoration:none; }
+.site-nav a:hover{ text-decoration: underline; }
+
+/* card genérico (não é o card de login) */
+.card.glass{
+  background: var(--surface);
+  border: 1px solid var(--surface-bd);
+  border-radius: 16px;
+  padding: 20px;
+  box-shadow: 0 10px 26px rgba(0,0,0,.35), 0 0 0 1px rgba(100,200,255,.10) inset;
+  backdrop-filter: blur(8px);
+}
+
+/* campos e botões (sem depender de classes nos inputs) */
+.form-grid{ display:grid; gap:12px; }
+.form-grid .field{ display:grid; gap:6px; }
+.form-grid label{ color: var(--ink-dim); font-size:.94rem; }
+input[type="text"], input[type="password"], input[type="email"],
+select, textarea{
+  width:100%; box-sizing:border-box;
+  border:1px solid rgba(120,200,255,.25);
+  background: rgba(4,18,30,.6);
+  color: var(--ink);
+  border-radius:12px; padding:12px 14px; font-size:1rem;
+  outline:none; transition: border-color .2s, box-shadow .2s, transform .04s;
+}
+input:focus, select:focus, textarea:focus{
+  border-color: rgba(120,200,255,.55);
+  box-shadow: 0 0 0 3px rgba(80,180,255,.20);
+}
+.button-row{ display:flex; gap:.75rem; }
+.btn-primary{
+  padding: 12px 14px; border-radius:12px; border:0;
+  background: linear-gradient(90deg, #2aa0ff, #00d9ff);
+  color:#04101c; font-weight:700; letter-spacing:.3px; cursor:pointer;
+  transition: filter .2s, transform .04s;
+}
+.btn-primary:hover{ filter:brightness(1.05); }
+.btn-primary:active{ transform: translateY(1px); }
+
+/* mensagens */
+.messages{ margin: 1rem 0; }
+.messages li{ list-style:none; margin:.25rem 0; padding:.5rem .75rem; border-radius:10px; }
+.messages .success{ background: rgba(40,200,120,.15); border:1px solid rgba(40,200,120,.4); }
+.messages .error{ background: rgba(255,90,94,.12);  border:1px solid rgba(255,90,94,.45); }
+
+/* ===== MODO LEVE: menos efeitos e sem animação ao fundo ===== */
+
+/* intensidade sutil por padrão */
+.theme-bg{ --sunAlpha:.18; --gridAlpha:.16; }
+
+/* desligar animações pesadas nas páginas internas */
+.theme-bg .sun,
+.theme-bg .sun::before,
+.theme-bg .sun::after { animation: none !important; }
+
+.theme-bg .solar-grid { animation: none !important; }
+
+/* baratear o custo dos layers */
+.theme-bg .sun{
+  /* remover filtros caros; o look ainda fica bom com o gradiente */
+  filter: none !important;
+  /* sombras menores */
+  box-shadow:
+    0 0 80px 28px rgba(255,196,64,.18),
+    0 0 180px 80px rgba(255,170,0,.10) !important;
+}
+
+.theme-bg .solar-grid::before{
+  /* tirar blend-mode (caro) nas internas */
+  mix-blend-mode: normal !important;
+  opacity: .7; /* compensa visual */
+}
+
+/* ================= SIDENAV FOTOVOLTAICA ================= */
+:root{
+  --nav-w: 84px;              /* largura fechada (ícones) */
+  --nav-w-expanded: 220px;    /* largura ao hover (mostra textos) */
+  --nav-bg: rgba(5,18,32,.48);
+  --nav-bd: rgba(100,200,255,.18);
+  --nav-ink: #eaf6ff;
+  --nav-ink-dim: #b7d7f8;
+  --nav-accent: #25b7ff;      /* ciano “elétrico” */
+  --nav-highlight: #ffd95e;   /* amarelo “solar” */
+}
+
+/* Layout fixo à esquerda, acima do tema de fundo */
+.sidenav{
+  position:fixed; inset:0 auto 0 0;
+  width:var(--nav-w); height:100vh;
+  z-index:2;
+  display:flex; flex-direction:column; justify-content:space-between;
+  background: var(--nav-bg);
+  border-right:1px solid var(--nav-bd);
+  backdrop-filter: blur(8px);
+  transition: width .18s ease;
+  overflow: hidden;
+}
+
+/* Expande suavemente ao hover (desktop) */
+@media (hover:hover){
+  .sidenav:hover{ width: var(--nav-w-expanded); }
+}
+
+/* Topo da marca */
+.sidenav-brand{
+  display:flex; align-items:center; gap:.75rem;
+  height:72px; padding: 0 .9rem;
+  border-bottom:1px solid rgba(100,200,255,.10);
+}
+.sidenav .brand-mark{ width:36px; height:36px; object-fit:contain; }
+.sidenav .brand-name{
+  color:var(--nav-ink);
+  font-family: var(--font-display);
+  text-transform: uppercase; letter-spacing:.06em;
+  white-space:nowrap; opacity:0; transform: translateX(-8px);
+  transition: opacity .18s, transform .18s;
+}
+@media (hover:hover){
+  .sidenav:hover .brand-name{ opacity:1; transform:none; }
+}
+
+/* Lista de itens */
+.sidenav-nav{ display:flex; flex-direction:column; padding:.5rem 0; gap:.25rem; }
+.nav-item{
+  display:flex; align-items:center; gap:.85rem;
+  padding:.6rem .9rem; margin:0 .35rem; border-radius:12px;
+  color:var(--nav-ink); text-decoration:none; position:relative;
+  border-left:3px solid transparent;
+  transition: background .15s ease, border-color .15s ease, transform .04s ease;
+}
+.nav-item .icon{ width:26px; height:26px; flex:0 0 26px; }
+.nav-item span{
+  white-space:nowrap; opacity:0; transform: translateX(-8px);
+  transition: opacity .18s, transform .18s;
+  color: var(--nav-ink);
+}
+@media (hover:hover){
+  .sidenav:hover .nav-item span{ opacity:1; transform:none; }
+}
+
+/* Hover com “varredura solar” */
+.nav-item::after{
+  content:""; position:absolute; inset:0;
+  background: linear-gradient(120deg, transparent 0%, rgba(255,255,255,.08) 50%, transparent 100%);
+  transform: translateX(-120%); opacity:0; pointer-events:none;
+}
+.nav-item:hover::after{
+  animation: sweep .6s ease forwards;
+}
+@keyframes sweep{
+  to{ transform: translateX(120%); opacity:1; }
+}
+
+/* Ativo = glow ciano + leve vidro */
+.nav-item.active{
+  background: linear-gradient(180deg, rgba(46,143,255,.16), rgba(30,110,210,.12));
+  border-left-color: var(--nav-accent);
+  box-shadow: inset 0 0 0 1px rgba(100,200,255,.18), 0 0 14px rgba(37,183,255,.15);
+}
+
+/* Ícones com “piscadinha solar” no hover */
+.nav-item:hover .icon path,
+.nav-item:hover .icon circle,
+.nav-item:hover .icon rect{
+  filter: drop-shadow(0 0 6px rgba(255,217,94,.6));
+}
+
+/* Footer (config + sair) gruda na base */
+.sidenav-footer{ padding:.5rem 0 .75rem; border-top:1px solid rgba(100,200,255,.10); }
+.nav-logout{ margin:0 .35rem; }
+.nav-logout .as-link{
+  display:flex; align-items:center; gap:.85rem;
+  width:100%; padding:.6rem .9rem; border-radius:12px; border:0; background:transparent;
+  color:var(--nav-ink-dim); cursor:pointer; text-align:left;
+}
+.nav-logout .as-link:hover{ background: rgba(255,255,255,.05); color:var(--nav-ink); }
+
+/* Página dá espaço para a sidenav (conteúdo não “anda” no hover) */
+.page--with-sidenav{ margin-left: var(--nav-w); }
+@media (hover:hover){
+  .sidenav:hover ~ .page--with-sidenav{ margin-left: var(--nav-w); } /* não desloca */
+}
+
+/* Mobile: mantém compacta (só ícones) */
+@media (max-width: 900px){
+  .sidenav{ width:var(--nav-w); }
+  .page--with-sidenav{ margin-left: var(--nav-w); }
+}
+
+
+/* estilos iguais para <select> */
+select.form-control{
+  display:block;
+  width:100%;
+  max-width:100%;
+  box-sizing:border-box;
+  padding:.65rem .75rem;
+  border-radius:12px;
+  border:1px solid rgba(255,255,255,.18);
+  background: rgba(255,255,255,.06);
+  color: rgba(240,248,255,.95);
+  outline:none;
+}
+select.form-control:focus{
+  border-color: rgba(255,255,255,.35);
+  background: rgba(255,255,255,.10);
+  box-shadow: 0 0 0 2px rgba(95,160,255,.25);
+}

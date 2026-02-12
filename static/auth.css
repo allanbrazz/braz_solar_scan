@@ -1,0 +1,402 @@
+/* === LOCK TOTAL DO VIEWPORT (sem rolagem/arrasto/zoom) === */
+
+/* reset + trava */
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;          /* NUNCA 0% */
+  overflow: hidden;      /* remove scrollbars */
+}
+
+/* corpo do login ocupa o viewport inteiro e fica fixo */
+body.auth-body {
+  position: fixed;
+  inset: 0;              /* top:0; right:0; bottom:0; left:0 */
+  width: 100%;
+  height: 100%;
+  overflow: hidden;      /* redundância deliberada */
+  font-family: var(--font-ui);
+  letter-spacing: 0.1px;
+}
+
+/* impedir "pull-to-refresh"/bounce em mobile e wheel scroll agressivo */
+html, body, .auth-bg {
+  overscroll-behavior: none;
+  touch-action: none;    /* bloqueia scroll por gesto (cuidado: desativa pinch/scroll) */
+}
+
+/* container de fundo 100% da tela, sem padding vertical que force overflow */
+.auth-bg {
+  position: fixed;       /* gruda no viewport */
+  inset: 0;
+  display: grid;
+  place-items: center;   /* centraliza o card */
+  padding: 0 1rem;       /* apenas horizontal para respiro */
+  background:
+    radial-gradient(1200px 600px at 80% -10%, rgba(212, 181, 69, 0.25), transparent 60%),
+    linear-gradient(180deg, #a9c7e8 0%, #bfd8f1 60%, #408bec 100%);
+}
+
+/* elementos de fundo continuam grandes, mas são CLIPADOS pelo overflow:hidden */
+.solar-grid {
+  position: absolute;
+  bottom: -120px;
+  left: 50%;
+  transform: translateX(-50%) perspective(900px) rotateX(65deg);
+  width: 160vw;          /* pode ultrapassar, ficará clipado */
+  height: 125vh;         /* idem */
+  pointer-events: none;  /* não “pega” rolagem/gestos */
+}
+
+/* fontes "tech" aplicadas a tudo no login */
+:root{
+  --font-ui: "Chakra Petch", system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  --font-display: "Orbitron", "Chakra Petch", system-ui, sans-serif;
+}
+body.auth-body,
+body.auth-body h1,
+body.auth-body h2,
+body.auth-body h3,
+body.auth-body p,
+body.auth-body label,
+body.auth-body input,
+body.auth-body button,
+body.auth-body a {
+  font-family: var(--font-ui) !important;
+}
+body.auth-body .brand h1{
+  font-family: var(--font-display) !important;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+}
+
+/* título da marca com a fonte “display” */
+body.auth-body .brand h1{
+  font-family: var(--font-display) !important;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+}
+/* ocupar a tela inteira e não rolar */
+html, body { height: 0%; }
+body.auth-body { 
+  margin: 0; 
+  padding: 0; 
+  height: 100vh;       /* garante altura de viewport */
+  overflow: hidden;    /* oculta scroll */
+}
+
+/* ajuste do container de fundo para caber sem rolagem */
+.auth-bg{
+  height: 100vh;       /* em vez de min-height + grande padding */
+  padding: 0 1rem;     /* reduza/zerar o padding vertical para evitar overflow */
+  display: grid;
+  place-items: center; /* mantém o card centralizado */
+}
+html, body { margin: 0; padding: 0; }
+body.auth-body{ 
+  font-family: var(--font-ui);
+  letter-spacing: 0.1px;
+}
+
+/* títulos / marca mais futurista */
+.brand h1{
+  font-family: var(--font-display);
+  text-transform: uppercase;
+  letter-spacing: .06em;
+}
+
+/* opcional: botões/campos com a mesma família */
+.field label,
+.field input,
+.btn-primary,
+.links { font-family: var(--font-ui); }
+html, body { margin: 0; padding: 0; }
+body.auth-body { background: #63b1ff; } /* seu fundo escuro */
+.auth-bg {
+  position: relative;
+  min-height: calc(100vh - 0px);
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  padding: 4rem 1rem;
+  background:
+    radial-gradient(1200px 600px at 80% -10%, rgba(212, 181, 69, 0.25), transparent 60%),
+    linear-gradient(180deg, #187be4 0%, #2586e7 60%, #408bec 100%);
+}
+
+/* === SOL MAIS REALISTA (fotosfera + limb darkening + corona + raios) === */
+.sun{
+  position:absolute; top:-140px; right:-140px;
+  width:350px; height:350px; border-radius:50%;
+  pointer-events:none;
+
+  /* Fotosfera com escurecimento na borda + granulação sutil */
+  background-image:
+    radial-gradient(circle at 48% 46%,
+      #fff8c9 0%,
+      #ffe066 35%,
+      #ffbf3a 60%,
+      #ff9e22 76%,
+      rgba(255,158,34,0) 80%),
+    /* granulação leve (grains) */
+    repeating-radial-gradient(circle at 45% 50%,
+      rgba(255,255,255,.05) 0 1.5px,
+      rgba(0,0,0,0) 1.5px 5px);
+  background-blend-mode: screen, normal;
+
+  /* brilho/bloom ao redor */
+  box-shadow:
+    0 0 120px 40px rgba(255,196,64,.35),
+    0 0 260px 120px rgba(255,170,0,.18);
+
+  filter:saturate(110%) contrast(105%);
+  animation:sunPulse 10s ease-in-out infinite;
+}
+
+/* Corona “respirando” */
+.sun::before{
+  content:""; position:absolute; inset:-14%; border-radius:50%;
+  background: radial-gradient(circle,
+     rgba(255,236,140,.55) 0 40%,
+     rgba(255,200,64,.25) 58%,
+     rgba(255,160,0,.10) 72%,
+     rgba(255,140,0,0) 86%);
+  filter:blur(18px);
+  mix-blend-mode:screen;
+  animation:coronaBreathe 8s ease-in-out infinite;
+}
+
+/* Raios finos ao redor do disco */
+.sun::after{
+  content:""; position:absolute; inset:-30%; border-radius:50%;
+  background: repeating-conic-gradient(
+    from 0deg,
+    rgba(255,210,80,0) 0 10deg,
+    rgba(255,210,80,.16) 10deg 11.5deg
+  );
+  /* só aparece no anel externo */
+  mask: radial-gradient(circle at 50% 50%, transparent 0 78%, black 82% 100%);
+  -webkit-mask: radial-gradient(circle at 50% 50%, transparent 0 78%, black 82% 100%);
+  filter:blur(14px);
+  mix-blend-mode:screen;
+  animation:coronaSpin 60s linear infinite;
+}
+
+/* Animações */
+@keyframes sunPulse{
+  0%,100%{ transform:scale(1);   filter:saturate(110%) brightness(1); }
+  50%    { transform:scale(1.03);filter:saturate(125%) brightness(1.06); }
+}
+@keyframes coronaBreathe{
+  0%,100%{ opacity:.55; transform:rotate(0deg) scale(1); }
+  50%    { opacity:.80; transform:rotate(2deg) scale(1.04); }
+}
+@keyframes coronaSpin{
+  0%{   transform:rotate(0deg); }
+  100%{ transform:rotate(360deg); }
+}
+
+/* ===== Parâmetros do módulo (mantém seu tamanho de “quadrado”) ===== */
+:root{
+  --mod-w: 100px;              /* Largura do módulo (era 100 no seu grid)  */
+  --mod-h: 60px;               /* Altura do módulo (era 60 no seu grid)    */
+  --cols: 6;                   /* 6 colunas de células por módulo          */
+  --rows: 10;                  /* 10 linhas de células por módulo          */
+  --module-line: 2px;          /* espessura das linhas entre módulos       */
+  --cell-gap: 1.6px;           /* fresta entre células                      */
+  --cell-line: rgba(230,245,255,.10); /* cor da fresta interna (EVA/reflexo) */
+  --frame-v:  rgba(174,199,218,.28);  /* linhas verticais entre módulos      */
+  --frame-h:  rgba(167,201,227,.26);  /* linhas horizontais entre módulos    */
+  --half-cut: rgba(255,255,255,.18);  /* linha central do módulo             */
+}
+
+/* ===== Campo FV com o MESMO passo de módulo, agora com células ===== */
+.solar-grid{
+  position: absolute;
+  bottom: -120px;
+  left: 50%;
+  transform: translateX(-50%) perspective(900px) rotateX(65deg);
+  width: 160vw;
+  height: 125vh;
+  pointer-events: none;
+  background:
+    /* suas linhas de “módulo” (mantêm o tamanho) */
+    repeating-linear-gradient(to right, var(--frame-v) 0 var(--module-line), transparent var(--module-line) var(--mod-w)),
+    repeating-linear-gradient(to bottom, var(--frame-h) 0 var(--module-line), transparent var(--module-line) var(--mod-h)),
+    /* fundo */
+    linear-gradient(180deg, #002144 0%, #01274e 60%, #011f48 100%);
+  background-size:
+    var(--mod-w) 100%,
+    100% var(--mod-h),
+    auto auto;
+  background-repeat: repeat;
+  box-shadow: 0 -40px 120px 0 rgba(0,140,255,.15) inset;
+  mask-image: linear-gradient(to top, black 55%, transparent 100%);
+  animation: gridGlow 8s linear infinite;
+}
+
+/* CÉLULAS dentro de cada módulo (6×10) + linha half-cut no meio */
+.solar-grid::before{
+  content:"";
+  position:absolute; inset:0;
+  /* calcula tamanho útil de cada célula dentro do módulo, respeitando a fresta */
+  --cell-w: calc((var(--mod-w) - (var(--cols) - 1)*var(--cell-gap)) / var(--cols));
+  --cell-h: calc((var(--mod-h) - (var(--rows) - 1)*var(--cell-gap)) / var(--rows));
+
+  background-image:
+    /* half-cut: uma linha no meio de cada módulo */
+    linear-gradient(to bottom, transparent 0 50%, var(--half-cut) 50% calc(50% + 2px), transparent calc(50% + 2px) 100%),
+
+    /* frestas verticais entre células (repetem dentro do módulo) */
+    repeating-linear-gradient(
+      to right,
+      transparent 0 calc(var(--cell-w)),
+      var(--cell-line) calc(var(--cell-w)) calc(var(--cell-w) + var(--cell-gap))
+    ),
+
+    /* frestas horizontais entre células (repetem dentro do módulo) */
+    repeating-linear-gradient(
+      to bottom,
+      transparent 0 calc(var(--cell-h)),
+      var(--cell-line) calc(var(--cell-h)) calc(var(--cell-h) + var(--cell-gap))
+    );
+
+  /* cada um destes padrões “encaixa” exatamente no tamanho do módulo */
+  background-size:
+    var(--mod-w) var(--mod-h),
+    var(--mod-w) var(--mod-h),
+    var(--mod-w) var(--mod-h);
+
+  background-repeat: repeat;
+  mix-blend-mode: screen;
+  opacity: .95;
+  pointer-events: none;
+}
+
+/* (mantém sua animação) */
+@keyframes gridGlow {
+  0%   { filter: drop-shadow(0 0 0 rgba(90,200,255,.20)); }
+  50%  { filter: drop-shadow(0 0 16px rgba(90,200,255,.33)); }
+  100% { filter: drop-shadow(0 0 0 rgba(90,200,255,.20)); }
+}
+
+/* ===== Card de Login (glass / neon) ===== */
+/* garante tipografia e sem rolagem (como já combinamos) */
+html, body { height: 100%; margin: 0; padding: 0; }
+body.auth-body { height: 100vh; overflow: hidden; }
+
+/* marca com a logo */
+.brand {
+  display: grid;
+  grid-template-columns: 56px 1fr;
+  gap: 14px;
+  align-items: center;
+  margin-bottom: 18px;
+}
+.brand-mark {
+  width: 64px; height: 64px; object-fit: contain; display: block;
+}
+.login-card {
+  position: relative;
+  width: min(440px, 94vw);
+  border-radius: 18px;
+  padding: 28px;
+  z-index: 2;
+  color: #eaf6ff;
+}
+.glass {
+  background: linear-gradient(180deg, rgba(10, 32, 54, 0.65), rgba(8, 22, 38, 0.65));
+  border: 1px solid rgba(100, 200, 255, 0.25);
+  box-shadow:
+    0 10px 30px rgba(0, 0, 0, 0.4),
+    0 0 0 1px rgba(100, 200, 255, 0.12) inset;
+  backdrop-filter: blur(8px);
+}
+
+
+
+/* Mensagens de erro */
+.alert {
+  background: rgba(255, 89, 94, 0.12);
+  border: 1px solid rgba(255, 89, 94, 0.5);
+  color: #ffdfe0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  margin-bottom: 12px;
+  font-size: 0.94rem;
+}
+.error {
+  color: #ffb9bc;
+  font-size: 0.85rem;
+  margin-top: 6px;
+}
+
+/* Campos */
+.field {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.field label {
+  color: #b7d7f8;
+  font-size: 0.92rem;
+}
+.field input {
+  appearance: none;
+  outline: none;
+  border: 1px solid rgba(120, 200, 255, 0.25);
+  background: rgba(4, 18, 30, 0.7);
+  color: #eaf6ff;
+  padding: 12px 14px;
+  border-radius: 12px;
+  font-size: 1rem;
+  transition: border-color 0.2s, box-shadow 0.2s, transform 0.04s ease;
+}
+.field input:focus {
+  border-color: rgba(120, 200, 255, 0.6);
+  box-shadow: 0 0 0 3px rgba(80, 180, 255, 0.2);
+}
+.field input:active {
+  transform: scale(0.998);
+}
+
+/* Botão */
+.btn-primary {
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 0;
+  background: linear-gradient(90deg, #2aa0ff, #00d9ff);
+  color: #04101c;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  cursor: pointer;
+  transition: filter 0.2s ease, transform 0.04s ease;
+}
+.btn-primary:hover { filter: brightness(1.05); }
+.btn-primary:active { transform: translateY(1px); }
+
+/* Links */
+.links {
+  margin-top: 14px;
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  align-items: center;
+  color: #a8c8e8;
+  font-size: 0.95rem;
+}
+.links a {
+  color: #bfe3ff;
+  text-decoration: none;
+}
+.links a:hover { text-decoration: underline; }
+
+/* Responsivo */
+@media (max-width: 420px) {
+  .brand {
+    grid-template-columns: 48px 1fr;
+  }
+  .brand svg { width: 48px; height: 48px; }
+}
+

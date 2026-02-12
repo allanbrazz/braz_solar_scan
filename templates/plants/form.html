@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+{% block title %}{% if form.instance.pk %}Editar planta{% else %}Nova planta{% endif %}{% endblock %}
+
+{% block content %}
+<header class="page-head">
+  <h1 class="page-title">{% if form.instance.pk %}Editar planta{% else %}Nova planta{% endif %}</h1>
+  <p class="page-sub">Informe o nome e as coordenadas da planta. O restante (módulos, inversores, strings e monitoramento) você define depois.</p>
+</header>
+
+{% if form.errors or form.non_field_errors %}
+<section class="dash" style="--cols:12;">
+  <article class="card glass accent-rose" style="grid-column:1 / -1;">
+    <h3 class="mb-2">Erros no formulário</h3>
+    {% if form.non_field_errors %}<div class="alert alert-danger mb-2">{{ form.non_field_errors }}</div>{% endif %}
+    <ul class="mb-0">
+      {% for field in form %}
+        {% for e in field.errors %}
+          <li><strong>{{ field.label }}:</strong> {{ e }}</li>
+        {% endfor %}
+      {% endfor %}
+    </ul>
+  </article>
+</section>
+{% endif %}
+
+<form method="post" novalidate>
+  {% csrf_token %}
+  <section class="dash" style="--cols:12;">
+    <article class="card glass accent-cyan" style="grid-column:1 / -1;">
+      <h3 class="mb-2">Identificação & Localização</h3>
+
+      <div class="grid-form">
+        <div class="span-2">
+          <label class="form-label" for="{{ form.nome.id_for_label }}">
+            {{ form.nome.label }}{% if form.nome.field.required %}*{% endif %}
+          </label>
+          {{ form.nome }}
+          {% if form.nome.errors %}<div class="text-danger small">{{ form.nome.errors }}</div>{% endif %}
+        </div>
+
+        <div>
+          <label class="form-label" for="{{ form.latitude.id_for_label }}">
+            {{ form.latitude.label }}{% if form.latitude.field.required %}*{% endif %}
+          </label>
+          {{ form.latitude }}
+          <small class="text-muted help">graus decimais (−90 a +90)</small>
+          {% if form.latitude.errors %}<div class="text-danger small">{{ form.latitude.errors }}</div>{% endif %}
+        </div>
+
+        <div>
+          <label class="form-label" for="{{ form.longitude.id_for_label }}">
+            {{ form.longitude.label }}{% if form.longitude.field.required %}*{% endif %}
+          </label>
+          {{ form.longitude }}
+          <small class="text-muted help">graus decimais (−180 a +180)</small>
+          {% if form.longitude.errors %}<div class="text-danger small">{{ form.longitude.errors }}</div>{% endif %}
+        </div>
+
+        <div class="span-2">
+          <label class="form-label" for="{{ form.timezone.id_for_label }}">
+            {{ form.timezone.label }}
+          </label>
+          {{ form.timezone }}
+          <small class="text-muted help">selecione o fuso horário</small>
+          {% if form.timezone.errors %}<div class="text-danger small">{{ form.timezone.errors }}</div>{% endif %}
+        </div>
+      </div>
+    </article>
+
+    <article class="card glass" style="grid-column:1 / -1;">
+      <div style="display:flex; gap:8px; justify-content:flex-end; align-items:center;">
+        <a href="{% url 'plants:list' %}" class="btn">Cancelar</a>
+        <button type="submit" class="btn btn-primary">Salvar</button>
+      </div>
+    </article>
+  </section>
+</form>
+
+<style>
+  /* GRID estável e responsivo */
+  .grid-form{
+    display:grid;
+    grid-template-columns:
+      minmax(320px, 2fr)
+      minmax(180px, 1fr)
+      minmax(180px, 1fr)
+      minmax(280px, 1.5fr);
+    gap:12px;
+    align-items:end;
+    grid-auto-flow:dense;
+  }
+  .grid-form .span-2{ grid-column:span 2; }
+  .grid-form > div{ min-width:0; } /* evita overflow */
+  .help{ display:block; margin-top:4px; }
+
+  @media (max-width: 1100px){
+    .grid-form{
+      grid-template-columns:
+        minmax(280px, 2fr)
+        minmax(180px, 1fr)
+        minmax(180px, 1fr);
+    }
+    .grid-form .span-2{ grid-column:1 / -1; }
+  }
+  @media (max-width: 680px){
+    .grid-form{ grid-template-columns: 1fr; }
+    .grid-form .span-2{ grid-column:auto; }
+  }
+
+  /* Visual unificado dos controles */
+  .form-control{
+    display:block;
+    width:100%;
+    max-width:100%;
+    box-sizing:border-box;
+    padding:.65rem .75rem;
+    border-radius:12px;
+    border:1px solid rgba(255,255,255,.18);
+    background: rgba(255,255,255,.06);
+    color: rgba(240,248,255,.95);
+    outline:none;
+  }
+  .form-control:focus{
+    border-color: rgba(255,255,255,.35);
+    background: rgba(255,255,255,.10);
+    box-shadow: 0 0 0 2px rgba(95,160,255,.25);
+  }
+
+  /* number: remover spinners no WebKit e aparência uniforme */
+  input[type="number"].form-control::-webkit-outer-spin-button,
+  input[type="number"].form-control::-webkit-inner-spin_button{ -webkit-appearance:none; margin:0; }
+  input[type="number"].form-control{ appearance:textfield; }
+
+  /* contraste do card */
+  .card.glass.accent-cyan{ color: rgba(240,248,255,.95); }
+</style>
+{% endblock %}

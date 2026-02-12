@@ -1,0 +1,212 @@
+{# templates/plants/detail.html #}
+{% extends "base.html" %}
+{% block title %}{{ p.nome }} • Detalhes da Planta{% endblock %}
+
+{% block content %}
+<header class="page-head">
+  <h1 class="page-title">{{ p.nome }}</h1>
+  <p class="page-sub">Coordenadas: {{ p.latitude }}, {{ p.longitude }} • Fuso: {{ p.timezone }}</p>
+</header>
+
+<section class="dash" style="--cols:12;">
+
+  {# ===================== Hardware ===================== #}
+  <article class="card glass accent-cyan" style="grid-column: 1 / -1;">
+    <div class="flex-between" style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+      <h3>Hardware</h3>
+      <div style="display:flex; gap:8px;">
+        <a class="btn btn-primary" href="{% url 'plants:edit' p.pk %}">Editar planta</a>
+        <a class="btn btn-primary" href="{% url 'plants:details_edit' p.pk %}">Editar detalhes</a>
+      </div>
+    </div>
+
+    <div style="display:grid; grid-template-columns: repeat(3, minmax(200px, 1fr)); gap:12px;">
+      <div>
+        <div class="text-muted small">Módulo</div>
+        <div class="h5">
+          {% if d and d.module %}
+            {{ d.module.fabricante }} — {{ d.module.nome }}
+          {% else %}
+            <span class="text-muted">não definido</span>
+          {% endif %}
+        </div>
+      </div>
+
+      <div>
+        <div class="text-muted small">Inversor</div>
+        <div class="h5">
+          {% if d and d.inverter %}
+            {{ d.inverter.fabricante }} — {{ d.inverter.modelo }}
+          {% else %}
+            <span class="text-muted">não definido</span>
+          {% endif %}
+        </div>
+      </div>
+
+      <div>
+        <div class="text-muted small">Eficiência inv.</div>
+        <div class="h5">
+          {% if d and d.inverter and d.inverter.eficiencia_max_pct %}
+            {{ d.inverter.eficiencia_max_pct }}%
+          {% else %}—{% endif %}
+        </div>
+      </div>
+    </div>
+  </article>
+
+  {# ===================== Configuração elétrica ===================== #}
+  <article class="card glass accent-green" style="grid-column: 1 / -1;">
+    <div class="flex-between" style="display:flex; justify-content:space-between; align-items:center;">
+      <h3>Configuração elétrica</h3>
+      <a class="btn btn-primary" href="{% url 'plants:details_edit' p.pk %}">Configurar</a>
+    </div>
+
+    <div style="display:grid; grid-template-columns: repeat(4, minmax(160px, 1fr)); gap:12px;">
+      <div>
+        <div class="text-muted small">Strings</div>
+        <div class="h5">
+          {% if d %}
+            {{ d.strings_count|default_if_none:"—" }}
+          {% else %}—{% endif %}
+        </div>
+      </div>
+
+      <div>
+        <div class="text-muted small">Módulos/string</div>
+        <div class="h5">
+          {% if d %}
+            {{ d.modules_per_string|default_if_none:"—" }}
+          {% else %}—{% endif %}
+        </div>
+      </div>
+
+      <div>
+        <div class="text-muted small">Total módulos</div>
+        <div class="h5">
+          {% if d %}
+            {{ d.modules_total|default_if_none:"—" }}
+          {% else %}—{% endif %}
+        </div>
+      </div>
+
+      <div>
+        <div class="text-muted small">Tilt / Azimute</div>
+        <div class="h5">
+          {% if d and d.tilt_deg %}{{ d.tilt_deg }}°{% else %}—{% endif %} /
+          {% if d and d.azimuth_deg %}{{ d.azimuth_deg }}°{% else %}—{% endif %}
+        </div>
+      </div>
+    </div>
+  </article>
+
+  {# ===================== Cabeamento ===================== #}
+  <article class="card glass accent-amber" style="grid-column: 1 / -1;">
+    <div class="flex-between" style="display:flex; justify-content:space-between; align-items:center;">
+      <h3>Cabeamento (opcional)</h3>
+      <a class="btn btn-primary" href="{% url 'plants:cables_edit' p.pk %}">Editar cabos</a>
+    </div>
+
+    <div class="table-wrap" style="max-height:40vh; overflow:auto;">
+      <table class="glass-table">
+        <thead>
+          <tr>
+            <th>Trecho</th>
+            <th>Descrição</th>
+            <th class="num">Compr. (m)</th>
+            <th class="num">Seção (mm²)</th>
+            <th>Material</th>
+            <th class="num">Paralelos</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for c in p.cable_segments.all %}
+            <tr>
+              <td>{{ c.get_segment_display }}</td>
+              <td>{{ c.description|default:"—" }}</td>
+              <td class="num">{{ c.length_m }}</td>
+              <td class="num">{{ c.cross_section_mm2 }}</td>
+              <td>{{ c.get_material_display }}</td>
+              <td class="num">{{ c.qty_parallel }}</td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="6" class="text-muted">Nenhum trecho cadastrado.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </article>
+
+  {# ===================== Credenciais ===================== #}
+  <article class="card glass accent-purple" style="grid-column: 1 / -1;">
+    <div class="flex-between" style="display:flex; justify-content:space-between; align-items:center;">
+      <h3>Credenciais de monitoramento</h3>
+
+      {# Decide se habilita o botão Renovigi #}
+      {% with has_renovigi=False %}
+        {% for c in p.credentials.all %}
+          {% if c.provedor == "RENOVIGI" and c.username %}
+            {% with has_renovigi=True %}{% endwith %}
+          {% endif %}
+        {% endfor %}
+
+        {% if has_renovigi_cred %}
+          <a class="btn btn-primary" href="{{ renovigi_console_url }}">
+            Dados operativos (Renovigi)
+          </a>
+          <a class="btn btn-primary" href="{% url 'opdata_list' p.pk %}">
+            Ver dados operativos (salvos)
+          </a>
+        {% else %}
+          <a class="btn btn-primary disabled" href="#" aria-disabled="true"
+            title="Cadastre uma credencial RENOVIGI para habilitar">
+            Dados operativos (Renovigi)
+          </a>
+        {% endif %}
+      {% endwith %}
+    </div>
+
+    <div class="mb-2" style="margin-top:10px;">
+      <ul>
+        {% for cred in p.credentials.all %}
+          <li><strong>{{ cred.provedor }}</strong>: {{ cred.username|default:"(sem usuário)" }}</li>
+        {% empty %}
+          <li class="text-muted">Nenhuma credencial cadastrada ainda.</li>
+        {% endfor %}
+      </ul>
+    </div>
+
+    <div class="text-muted small" style="margin-top:6px;">
+      Para habilitar “Dados operativos (Renovigi)”, salve uma credencial com provedor <strong>RENOVIGI</strong> e usuário/senha abaixo.
+    </div>
+
+    <form method="post" action="{% url 'plants:cred_save' p.pk %}" class="mt-2" novalidate>
+      {% csrf_token %}
+      <div style="display:grid; grid-template-columns: repeat(3, minmax(180px, 1fr)); gap:12px; align-items:end;">
+        <div>
+          <label class="form-label" for="{{ cred_form.provedor.id_for_label }}">{{ cred_form.provedor.label }}</label>
+          {{ cred_form.provedor }}
+        </div>
+        <div>
+          <label class="form-label" for="{{ cred_form.username.id_for_label }}">{{ cred_form.username.label }}</label>
+          {{ cred_form.username }}
+        </div>
+        <div>
+          <label class="form-label" for="{{ cred_form.password.id_for_label }}">{{ cred_form.password.label }}</label>
+          {{ cred_form.password }}
+        </div>
+      </div>
+      <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:8px;">
+        <button class="btn btn-primary" type="submit">Salvar credenciais</button>
+      </div>
+    </form>
+  </article>
+
+</section>
+
+<style>
+  .glass-table{ width:100%; border-collapse:separate; border-spacing:0; color:rgba(240,248,255,.95);}
+  .glass-table thead th{ position:sticky; top:0; background:rgba(15,40,80,.45); padding:.6rem .75rem; }
+  .glass-table tbody td{ padding:.55rem .75rem; border-bottom:1px solid rgba(255,255,255,.08); }
+  .glass-table .num{ text-align:right; }
+</style>
+{% endblock %}

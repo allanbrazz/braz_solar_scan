@@ -1,0 +1,254 @@
+{# templates/pvmodules/list.html #}
+{% extends "base.html" %}
+{% load static %}
+{% block title %}Módulos Fotovoltaicos{% endblock %}
+
+{% block content %}
+  <header class="page-head">
+    <h1 class="page-title">Módulos Fotovoltaicos</h1>
+    <p class="page-sub">Visualize, filtre e ordene os modelos cadastrados.</p>
+  </header>
+
+  <section class="dash" style="--cols: 12;">
+
+    <!-- CARD: Filtros / Ações -->
+    <article class="card glass accent-cyan" style="grid-column: 1 / -1;">
+      <div class="filters-toolbar">
+        <h3>Filtros</h3>
+        <div class="actions">
+          <a href="{% url 'pvmodules:upload' %}" class="btn btn-primary">⇪ Importar CSV</a>
+          <a href="{% url 'pvmodules:create' %}" class="btn btn-primary">+ Novo módulo</a>
+        </div>
+      </div>
+
+      <form method="get" class="filters-grid">
+        <div>
+          <label class="form-label">Busca</label>
+          <input type="text" name="q" value="{{ q }}" placeholder="Buscar por nome/fabricante" class="form-control">
+        </div>
+
+        <div>
+          <label class="form-label">Fabricante</label>
+          <select name="fab" class="form-control">
+            <option value="">— todos —</option>
+            {% for f in fabricantes %}
+              <option value="{{ f }}" {% if f == fab %}selected{% endif %}>{{ f }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="filters-buttons">
+          <button type="submit" class="btn btn-primary">Filtrar</button>
+          <a href="{% url 'pvmodules:list' %}" class="btn btn-primary">Limpar</a>
+        </div>
+      </form>
+    </article>
+
+    {% if messages %}
+      <article class="card glass accent-rose" style="grid-column: 1 / -1;">
+        {% for message in messages %}
+          <div class="alert alert-{{ message.tags }} mb-2">{{ message }}</div>
+        {% endfor %}
+      </article>
+    {% endif %}
+
+    <!-- CARD: Resultados -->
+    <article class="card glass accent-green" style="grid-column: 1 / -1;">
+      <div class="flex-between" style="display:flex; justify-content:space-between; align-items:center;">
+        <h3 class="mb-2">Resultados</h3>
+        {% if is_paginated %}
+          <small class="text-muted">Página {{ page_obj.number }} de {{ page_obj.paginator.num_pages }}</small>
+        {% endif %}
+      </div>
+
+      <div class="table-wrap">
+        <table class="glass-table">
+          <thead>
+            {% with current_order=order|default:'asc' %}
+            <tr>
+              <th>
+                <a href="?q={{ q }}&fab={{ fab }}&sort=fabricante&order={% if sort == 'fabricante' and current_order == 'asc' %}desc{% else %}asc{% endif %}">
+                  Fabricante
+                  {% if sort == 'fabricante' %}<span class="sort {% if current_order == 'desc' %}desc{% else %}asc{% endif %}"></span>{% endif %}
+                </a>
+              </th>
+              <th>
+                <a href="?q={{ q }}&fab={{ fab }}&sort=nome&order={% if sort == 'nome' and current_order == 'asc' %}desc{% else %}asc{% endif %}">
+                  Nome
+                  {% if sort == 'nome' %}<span class="sort {% if current_order == 'desc' %}desc{% else %}asc{% endif %}"></span>{% endif %}
+                </a>
+              </th>
+              <th class="num">
+                <a href="?q={{ q }}&fab={{ fab }}&sort=pmp&order={% if sort == 'pmp' and current_order == 'asc' %}desc{% else %}asc{% endif %}">
+                  Pmp (W)
+                  {% if sort == 'pmp' %}<span class="sort {% if current_order == 'desc' %}desc{% else %}asc{% endif %}"></span>{% endif %}
+                </a>
+              </th>
+              <th class="num">
+                <a href="?q={{ q }}&fab={{ fab }}&sort=vmp&order={% if sort == 'vmp' and current_order == 'asc' %}desc{% else %}asc{% endif %}">
+                  Vmp
+                  {% if sort == 'vmp' %}<span class="sort {% if current_order == 'desc' %}desc{% else %}asc{% endif %}"></span>{% endif %}
+                </a>
+              </th>
+              <th class="num">
+                <a href="?q={{ q }}&fab={{ fab }}&sort=imp&order={% if sort == 'imp' and current_order == 'asc' %}desc{% else %}asc{% endif %}">
+                  Imp
+                  {% if sort == 'imp' %}<span class="sort {% if current_order == 'desc' %}desc{% else %}asc{% endif %}"></span>{% endif %}
+                </a>
+              </th>
+              <th class="num">
+                <a href="?q={{ q }}&fab={{ fab }}&sort=voc&order={% if sort == 'voc' and current_order == 'asc' %}desc{% else %}asc{% endif %}">
+                  Voc
+                  {% if sort == 'voc' %}<span class="sort {% if current_order == 'desc' %}desc{% else %}asc{% endif %}"></span>{% endif %}
+                </a>
+              </th>
+              <th class="num">
+                <a href="?q={{ q }}&fab={{ fab }}&sort=isc&order={% if sort == 'isc' and current_order == 'asc' %}desc{% else %}asc{% endif %}">
+                  Isc
+                  {% if sort == 'isc' %}<span class="sort {% if current_order == 'desc' %}desc{% else %}asc{% endif %}"></span>{% endif %}
+                </a>
+              </th>
+              <th class="num">
+                <a href="?q={{ q }}&fab={{ fab }}&sort=eficiencia&order={% if sort == 'eficiencia' and current_order == 'asc' %}desc{% else %}asc{% endif %}">
+                  Eficiência (%)
+                  {% if sort == 'eficiencia' %}<span class="sort {% if current_order == 'desc' %}desc{% else %}asc{% endif %}"></span>{% endif %}
+                </a>
+              </th>
+              <th>Power Tol.</th>
+              <th class="num">
+                <a href="?q={{ q }}&fab={{ fab }}&sort=celulas&order={% if sort == 'celulas' and current_order == 'asc' %}desc{% else %}asc{% endif %}">
+                  Células
+                  {% if sort == 'celulas' %}<span class="sort {% if current_order == 'desc' %}desc{% else %}asc{% endif %}"></span>{% endif %}
+                </a>
+              </th>
+              <!-- NOVOS: Rs, Rp, a -->
+              <th class="num">
+                <a href="?q={{ q }}&fab={{ fab }}&sort=rs&order={% if sort == 'rs' and current_order == 'asc' %}desc{% else %}asc{% endif %}">
+                  Rs (Ω)
+                  {% if sort == 'rs' %}<span class="sort {% if current_order == 'desc' %}desc{% else %}asc{% endif %}"></span>{% endif %}
+                </a>
+              </th>
+              <th class="num">
+                <a href="?q={{ q }}&fab={{ fab }}&sort=rp&order={% if sort == 'rp' and current_order == 'asc' %}desc{% else %}asc{% endif %}">
+                  Rp (Ω)
+                  {% if sort == 'rp' %}<span class="sort {% if current_order == 'desc' %}desc{% else %}asc{% endif %}"></span>{% endif %}
+                </a>
+              </th>
+              <th class="num">
+                <a href="?q={{ q }}&fab={{ fab }}&sort=a&order={% if sort == 'a' and current_order == 'asc' %}desc{% else %}asc{% endif %}">
+                  a
+                  {% if sort == 'a' %}<span class="sort {% if current_order == 'desc' %}desc{% else %}asc{% endif %}"></span>{% endif %}
+                </a>
+              </th>
+              <th class="actions-col">Ações</th>
+            </tr>
+            {% endwith %}
+          </thead>
+
+          <tbody>
+            {% for m in modulos %}
+              <tr>
+                <td>{{ m.fabricante }}</td>
+                <td class="truncate">
+                  <a class="pill-link" href="{% url 'pvmodules:detail' m.pk %}">{{ m.nome }}</a>
+                </td>
+                <td class="num">{{ m.pmp_w }}</td>
+                <td class="num">{{ m.vmp_v }}</td>
+                <td class="num">{{ m.imp_a }}</td>
+                <td class="num">{{ m.voc_v }}</td>
+                <td class="num">{{ m.isc_a }}</td>
+                <td class="num">{{ m.eficiencia_pct }}</td>
+                <td>{{ m.power_tolerance|default:"—" }}</td>
+                <td class="num">{{ m.num_celulas }}</td>
+                <td class="num">{{ m.rs_ohm }}</td>
+                <td class="num">{{ m.rp_ohm }}</td>
+                <td class="num">{{ m.diode_a }}</td>
+                <td class="table-actions">
+                  <a href="{% url 'pvmodules:edit' m.pk %}" class="btn btn-primary btn-sm">Editar</a>
+                </td>
+              </tr>
+            {% empty %}
+              <tr><td colspan="14" class="text-muted">Nenhum módulo encontrado.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      {% if is_paginated %}
+        <div class="pagination-ctrl">
+          {% if page_obj.has_previous %}
+            <a class="btn" href="?q={{ q }}&fab={{ fab }}&page={{ page_obj.previous_page_number }}&sort={{ sort }}&order={{ order|default:'asc' }}">Anterior</a>
+          {% endif %}
+          <span class="text-muted">Página {{ page_obj.number }} de {{ page_obj.paginator.num_pages }}</span>
+          {% if page_obj.has_next %}
+            <a class="btn" href="?q={{ q }}&fab={{ fab }}&page={{ page_obj.next_page_number }}&sort={{ sort }}&order={{ order|default:'asc' }}">Próxima</a>
+          {% endif %}
+        </div>
+      {% endif %}
+    </article>
+
+  </section>
+
+  <style>
+    /* toolbar do card de filtros */
+    .filters-toolbar{
+      display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:10px;
+    }
+    .filters-grid{
+      display:grid; grid-template-columns: repeat(6, minmax(160px, 1fr));
+      gap:12px; align-items:end;
+    }
+    .filters-buttons{ display:flex; gap:8px; }
+
+    /* tabela "glass" com melhor contraste e header colante */
+    .table-wrap{ max-height: 70vh; overflow:auto; border-radius:12px; }
+    .glass-table{
+      width:100%; border-collapse:separate; border-spacing:0; color: rgba(240,248,255,.95);
+      font-variant-numeric: tabular-nums;
+    }
+    .glass-table thead th{
+      position: sticky; top: 0; z-index: 2;
+      background: rgba(15, 40, 80, .45);
+      backdrop-filter: blur(6px) saturate(140%);
+      text-align:left; padding:.65rem .75rem; white-space:nowrap;
+      border-bottom: 1px solid rgba(255,255,255,.12);
+    }
+    .glass-table thead a{
+      color: inherit; text-decoration:none; display:inline-flex; align-items:center; gap:6px;
+    }
+    .glass-table thead a:hover{ text-decoration: underline; text-underline-offset: 2px; }
+    .glass-table tbody td{
+      padding:.6rem .75rem; border-bottom: 1px solid rgba(255,255,255,.06);
+    }
+    .glass-table tbody tr:nth-child(odd){ background: rgba(255,255,255,.02); }
+    .glass-table tbody tr:hover{ background: rgba(255,255,255,.05); }
+    .glass-table .num{ text-align:right; }
+    .truncate{ max-width: 320px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    /* setas de ordenação */
+    .sort{
+      width:0; height:0; border-left:5px solid transparent; border-right:5px solid transparent;
+      border-top:7px solid currentColor; opacity:.7; transform: translateY(1px);
+    }
+    .sort.desc{ border-top:none; border-bottom:7px solid currentColor; transform: translateY(-1px); }
+
+    /* ações como botões visíveis no vidro */
+    .pill-link{
+      display:inline-block; padding:.25rem .5rem; border-radius:999px;
+      background: rgba(255,255,255,.10); color:#e9f6ff; text-decoration:none; font-weight:600;
+    }
+    .pill-link:hover{ background: rgba(255,255,255,.18); }
+
+    .table-actions{ display:flex; gap:.4rem; justify-content:flex-end; }
+    .btn-sm{ padding:.35rem .6rem; border-radius:10px; font-size:.875rem; }
+    .btn-ghost{
+      background: transparent; border:1px solid rgba(255,255,255,.35); color:#fff;
+    }
+    .btn-ghost:hover{ background: rgba(255,255,255,.10); }
+    .actions-col{ text-align:right; }
+    .pagination-ctrl{ display:flex; gap:.5rem; justify-content:flex-end; align-items:center; margin-top:.5rem; }
+
+    /* leve reforço de contraste nos cards de lista */
+    .card.glass.accent-green, .card.glass.accent-cyan{ color: rgba(240,248,255,.95); }
+  </style>
+{% endblock %}

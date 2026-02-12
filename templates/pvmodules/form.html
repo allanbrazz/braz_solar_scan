@@ -1,0 +1,172 @@
+{# templates/pvmodules/form.html #}
+{% extends "base.html" %}
+{% block title %}{% if form.instance.pk %}Editar módulo{% else %}Novo módulo{% endif %}{% endblock %}
+
+{% block content %}
+  <header class="page-head">
+    <h1 class="page-title">
+      {% if form.instance.pk %}Editar módulo{% else %}Novo módulo{% endif %}
+    </h1>
+    <p class="page-sub">Cadastro de especificações do módulo fotovoltaico.</p>
+  </header>
+
+  {% if form.errors or form.non_field_errors %}
+    <section class="dash" style="--cols: 12;">
+      <article class="card glass accent-rose" style="grid-column: 1 / -1;">
+        <h3 class="mb-2">Erros no formulário</h3>
+        {% if form.non_field_errors %}
+          <div class="alert alert-danger mb-2">{{ form.non_field_errors }}</div>
+        {% endif %}
+        <ul class="mb-0">
+          {% for field in form %}
+            {% for e in field.errors %}
+              <li><strong>{{ field.label }}:</strong> {{ e }}</li>
+            {% endfor %}
+          {% endfor %}
+        </ul>
+      </article>
+    </section>
+  {% endif %}
+
+  <form method="post" novalidate>
+    {% csrf_token %}
+
+    <section class="dash" style="--cols: 12;">
+      <!-- CARD: Identificação -->
+      <article class="card glass accent-cyan" style="grid-column: 1 / -1;">
+        <h3 class="mb-2">Identificação</h3>
+        <div style="display:grid; grid-template-columns: repeat(3, minmax(180px, 1fr)); gap:12px;">
+          <div>
+            <label class="form-label" for="{{ form.nome.id_for_label }}">{{ form.nome.label }}{% if form.nome.field.required %}*{% endif %}</label>
+            {{ form.nome }}
+            {% if form.nome.errors %}<div class="text-danger small">{{ form.nome.errors }}</div>{% endif %}
+          </div>
+          <div>
+            <label class="form-label" for="{{ form.fabricante.id_for_label }}">{{ form.fabricante.label }}{% if form.fabricante.field.required %}*{% endif %}</label>
+            {{ form.fabricante }}
+            {% if form.fabricante.errors %}<div class="text-danger small">{{ form.fabricante.errors }}</div>{% endif %}
+          </div>
+          <div>
+            <label class="form-label" for="{{ form.num_celulas.id_for_label }}">{{ form.num_celulas.label }}{% if form.num_celulas.field.required %}*{% endif %}</label>
+            {{ form.num_celulas }}
+            {% if form.num_celulas.errors %}<div class="text-danger small">{{ form.num_celulas.errors }}</div>{% endif %}
+          </div>
+        </div>
+      </article>
+
+      <!-- CARD: Elétricos @ MPP -->
+      <article class="card glass accent-blue" style="grid-column: 1 / -1;">
+        <h3 class="mb-2">Elétricos @ MPP</h3>
+        <div style="display:grid; grid-template-columns: repeat(3, minmax(160px, 1fr)); gap:12px;">
+          <div>
+            <label class="form-label" for="{{ form.pmp_w.id_for_label }}">{{ form.pmp_w.label }}{% if form.pmp_w.field.required %}*{% endif %}</label>
+            {{ form.pmp_w }}
+            <small class="text-muted">Watts (W)</small>
+            {% if form.pmp_w.errors %}<div class="text-danger small">{{ form.pmp_w.errors }}</div>{% endif %}
+          </div>
+          <div>
+            <label class="form-label" for="{{ form.vmp_v.id_for_label }}">{{ form.vmp_v.label }}{% if form.vmp_v.field.required %}*{% endif %}</label>
+            {{ form.vmp_v }}
+            <small class="text-muted">Volts (V)</small>
+            {% if form.vmp_v.errors %}<div class="text-danger small">{{ form.vmp_v.errors }}</div>{% endif %}
+          </div>
+          <div>
+            <label class="form-label" for="{{ form.imp_a.id_for_label }}">{{ form.imp_a.label }}{% if form.imp_a.field.required %}*{% endif %}</label>
+            {{ form.imp_a }}
+            <small class="text-muted">Ampères (A)</small>
+            {% if form.imp_a.errors %}<div class="text-danger small">{{ form.imp_a.errors }}</div>{% endif %}
+          </div>
+        </div>
+      </article>
+
+      <!-- CARD: Voc / Isc -->
+      <article class="card glass accent-purple" style="grid-column: 1 / -1;">
+        <h3 class="mb-2">Circuito aberto / curto-circuito</h3>
+        <div style="display:grid; grid-template-columns: repeat(2, minmax(160px, 1fr)); gap:12px;">
+          <div>
+            <label class="form-label" for="{{ form.voc_v.id_for_label }}">{{ form.voc_v.label }}{% if form.voc_v.field.required %}*{% endif %}</label>
+            {{ form.voc_v }}
+            <small class="text-muted">Volts (V)</small>
+            {% if form.voc_v.errors %}<div class="text-danger small">{{ form.voc_v.errors }}</div>{% endif %}
+          </div>
+          <div>
+            <label class="form-label" for "{{ form.isc_a.id_for_label }}">{{ form.isc_a.label }}{% if form.isc_a.field.required %}*{% endif %}</label>
+            {{ form.isc_a }}
+            <small class="text-muted">Ampères (A)</small>
+            {% if form.isc_a.errors %}<div class="text-danger small">{{ form.isc_a.errors }}</div>{% endif %}
+          </div>
+        </div>
+      </article>
+
+      <!-- CARD: Eficiência e Tolerância -->
+      <article class="card glass accent-green" style="grid-column: 1 / -1;">
+        <h3 class="mb-2">Eficiência e tolerância</h3>
+        <div style="display:grid; grid-template-columns: repeat(2, minmax(160px, 1fr)); gap:12px;">
+          <div>
+            <label class="form-label" for="{{ form.eficiencia_pct.id_for_label }}">{{ form.eficiencia_pct.label }}{% if form.eficiencia_pct.field.required %}*{% endif %}</label>
+            {{ form.eficiencia_pct }}
+            <small class="text-muted">%</small>
+            {% if form.eficiencia_pct.errors %}<div class="text-danger small">{{ form.eficiencia_pct.errors }}</div>{% endif %}
+          </div>
+          <div>
+            <label class="form-label" for="{{ form.power_tolerance.id_for_label }}">{{ form.power_tolerance.label }}</label>
+            {{ form.power_tolerance }}
+            {% if form.power_tolerance.help_text %}<small class="text-muted">{{ form.power_tolerance.help_text }}</small>{% endif %}
+            {% if form.power_tolerance.errors %}<div class="text-danger small">{{ form.power_tolerance.errors }}</div>{% endif %}
+          </div>
+        </div>
+      </article>
+
+      <!-- CARD: Coeficientes de Temperatura -->
+      <article class="card glass accent-amber" style="grid-column: 1 / -1;">
+        <h3 class="mb-2">Coeficientes de temperatura</h3>
+        <div style="display:grid; grid-template-columns: repeat(2, minmax(160px, 1fr)); gap:12px;">
+          <div>
+            <label class="form-label" for="{{ form.temp_coeff_voc_pct_c.id_for_label }}">{{ form.temp_coeff_voc_pct_c.label }}{% if form.temp_coeff_voc_pct_c.field.required %}*{% endif %}</label>
+            {{ form.temp_coeff_voc_pct_c }}
+            <small class="text-muted">%/°C (geralmente negativo)</small>
+            {% if form.temp_coeff_voc_pct_c.errors %}<div class="text-danger small">{{ form.temp_coeff_voc_pct_c.errors }}</div>{% endif %}
+          </div>
+          <div>
+            <label class="form-label" for="{{ form.temp_coeff_isc_pct_c.id_for_label }}">{{ form.temp_coeff_isc_pct_c.label }}{% if form.temp_coeff_isc_pct_c.field.required %}*{% endif %}</label>
+            {{ form.temp_coeff_isc_pct_c }}
+            <small class="text-muted">%/°C (geralmente positivo)</small>
+            {% if form.temp_coeff_isc_pct_c.errors %}<div class="text-danger small">{{ form.temp_coeff_isc_pct_c.errors }}</div>{% endif %}
+          </div>
+        </div>
+      </article>
+
+      <!-- CARD: Parâmetros do modelo elétrico -->
+      <article class="card glass accent-purple" style="grid-column: 1 / -1;">
+        <h3 class="mb-2">Parâmetros do modelo elétrico</h3>
+        <div style="display:grid; grid-template-columns: repeat(3, minmax(160px, 1fr)); gap:12px;">
+          <div>
+            <label class="form-label" for="{{ form.rs_ohm.id_for_label }}">{{ form.rs_ohm.label }}{% if form.rs_ohm.field.required %}*{% endif %}</label>
+            {{ form.rs_ohm }}
+            <small class="text-muted">Ω</small>
+            {% if form.rs_ohm.errors %}<div class="text-danger small">{{ form.rs_ohm.errors }}</div>{% endif %}
+          </div>
+          <div>
+            <label class="form-label" for="{{ form.rp_ohm.id_for_label }}">{{ form.rp_ohm.label }}{% if form.rp_ohm.field.required %}*{% endif %}</label>
+            {{ form.rp_ohm }}
+            <small class="text-muted">Ω</small>
+            {% if form.rp_ohm.errors %}<div class="text-danger small">{{ form.rp_ohm.errors }}</div>{% endif %}
+          </div>
+          <div>
+            <label class="form-label" for="{{ form.diode_a.id_for_label }}">{{ form.diode_a.label }}{% if form.diode_a.field.required %}*{% endif %}</label>
+            {{ form.diode_a }}
+            <small class="text-muted">adimensional (≈ 1.0–2.0)</small>
+            {% if form.diode_a.errors %}<div class="text-danger small">{{ form.diode_a.errors }}</div>{% endif %}
+          </div>
+        </div>
+      </article>
+      <!-- CARD: Ações -->
+      <article class="card glass" style="grid-column: 1 / -1;">
+        <div style="display:flex; gap:8px; justify-content:flex-end; align-items:center;">
+          <a href="{% url 'pvmodules:list' %}" class="btn">Cancelar</a>
+          <button type="submit" class="btn btn-primary">Salvar</button>
+        </div>
+      </article>
+    </section>
+  </form>
+{% endblock %}

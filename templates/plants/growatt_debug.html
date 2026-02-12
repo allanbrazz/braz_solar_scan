@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Growatt • Debug • {{ p.nome }}{% endblock %}
+
+{% block content %}
+<header class="page-head">
+  <h1 class="page-title">Growatt – Debug</h1>
+  <p class="page-sub">{{ p.nome }}</p>
+</header>
+
+<section class="dash" style="--cols:12;">
+  <article class="card glass accent-purple" style="grid-column:1 / -1;">
+    <h3 class="mb-2">Plantas retornadas pela conta Growatt</h3>
+
+    {% if growatt_plants %}
+      <div class="table-wrap">
+        <table class="glass-table">
+          <thead>
+            <tr>
+              <th>Nome</th>
+              <th>ID</th>
+              <th>Local</th>
+              <th>Potência (kW)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for g in growatt_plants %}
+              <tr>
+                <td>{{ g.plantName|default:g.plant_name|default:"(sem nome)" }}</td>
+                <td>{{ g.plantId|default:g.id }}</td>
+                <td>{{ g.city|default:"" }}</td>
+                <td class="num">{{ g.power|default:"" }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      <p class="text-muted small mt-2">
+        Anote o <strong>ID</strong> da planta desejada para usar na URL JSON:<br>
+        <code>/plantas/{{ p.pk }}/growatt/daily.json?plant_id=SEU_ID&amp;date=2025-11-22</code>
+      </p>
+    {% else %}
+      <p class="text-muted">Nenhuma planta retornada pela API Growatt.</p>
+    {% endif %}
+
+    <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:8px;">
+      <a class="btn" href="{% url 'plants:detail' p.pk %}">Voltar</a>
+    </div>
+  </article>
+</section>
+
+<style>
+  .glass-table{ width:100%; border-collapse:separate; border-spacing:0; color:rgba(240,248,255,.95);}
+  .glass-table thead th{ position:sticky; top:0; background:rgba(15,40,80,.45); padding:.6rem .75rem; }
+  .glass-table tbody td{ padding:.55rem .75rem; border-bottom:1px solid rgba(255,255,255,.08); }
+  .glass-table .num{ text-align:right; }
+</style>
+{% endblock %}

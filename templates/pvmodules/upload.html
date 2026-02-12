@@ -1,0 +1,36 @@
+{# templates/pvmodules/upload.html #}
+{% extends "base.html" %}
+{% block content %}
+<h1>Importar módulos via CSV</h1>
+
+<p>O arquivo deve ter cabeçalhos exatamente:
+<code>nome,fabricante,pmp_w,vmp_v,imp_a,voc_v,isc_a,eficiencia_pct,power_tolerance,num_celulas,temp_coeff_voc_pct_c,temp_coeff_isc_pct_c,rs_ohm,rp_ohm,diode_a</code></p>
+
+<pre>
+nome,fabricante,pmp_w,vmp_v,imp_a,voc_v,isc_a,eficiencia_pct,power_tolerance,num_celulas,temp_coeff_voc_pct_c,temp_coeff_isc_pct_c,rs_ohm,rp_ohm,diode_a
+CS3W-450MS,Canadian,450,41.2,10.93,49.5,11.52,20.6,±3%,144,-0.28,0.045,0.320,520.0,1.300
+</pre>
+
+<form method="post" enctype="multipart/form-data">
+  {% csrf_token %}
+  {{ form.non_field_errors }}
+  <div>
+    <label>{{ form.arquivo.label }}</label>
+    {{ form.arquivo }}
+    {% for e in form.arquivo.errors %}<div class="error">{{ e }}</div>{% endfor %}
+  </div>
+  <div>
+    <label>{{ form.atualizar_existentes.label }}</label>
+    {{ form.atualizar_existentes }} <small>{{ form.atualizar_existentes.help_text }}</small>
+  </div>
+  <button type="submit">Enviar</button>
+  <a href="{% url 'pvmodules:list' %}">Voltar</a>
+</form>
+
+<hr>
+<h3>Exemplo de CSV</h3>
+<pre>
+nome,fabricante,pmp_w,vmp_v,imp_a,voc_v,isc_a,eficiencia_pct,power_tolerance,num_celulas,temp_coeff_voc_pct_c,temp_coeff_isc_pct_c
+Módulo X 450,ACME,450,41.2,10.93,49.5,11.52,20.6,±3%,144,-0.28,0.045
+</pre>
+{% endblock %}

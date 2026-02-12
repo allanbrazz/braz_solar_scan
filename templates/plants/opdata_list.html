@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+{% block title %}{{ plant.nome }} • Dados operativos{% endblock %}
+
+{% block content %}
+<header class="page-head">
+  <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap;">
+    <div>
+      <h1 class="page-title">{{ plant.nome }} — Dados operativos</h1>
+      <p class="page-sub">
+        Dados já salvos no banco (UTC). Use filtros para reduzir volume e acelerar.
+      </p>
+    </div>
+    <div style="display:flex; gap:8px; align-items:center;">
+      <a class="btn" href="{% url 'plants:detail' plant.pk %}">Voltar</a>
+    </div>
+  </div>
+</header>
+
+<section class="dash" style="--cols:12;">
+  <article class="card glass" style="grid-column:1 / -1;">
+    <h3 class="mb-2">Filtros</h3>
+
+    <form method="get" class="grid-form" style="margin-bottom:12px;">
+      <div>
+        <label class="form-label">Start (YYYY-MM-DD)</label>
+        <input class="form-control" name="start" value="{{ start }}">
+      </div>
+      <div>
+        <label class="form-label">End (YYYY-MM-DD)</label>
+        <input class="form-control" name="end" value="{{ end }}">
+      </div>
+
+      <div>
+        <label class="form-label">pn (opcional)</label>
+        <input class="form-control" name="pn" value="{{ pn }}" placeholder="ex: Q0D...">
+      </div>
+      <div>
+        <label class="form-label">sn (opcional)</label>
+        <input class="form-control" name="sn" value="{{ sn }}" placeholder="ex: 1402...">
+      </div>
+
+      <div>
+        <label class="form-label">Page size</label>
+        <input class="form-control" name="page_size" value="{{ page_size }}">
+      </div>
+
+      <div style="display:flex; justify-content:flex-end; align-items:flex-end;">
+        <button class="btn btn-primary" type="submit">Aplicar filtros</button>
+      </div>
+    </form>
+
+    <div class="text-muted" style="margin-bottom:10px;">
+      Total nesta página: {{ page_obj.object_list|length }} • Página {{ page_obj.number }} de {{ page_obj.paginator.num_pages }}
+    </div>
+
+    <div style="overflow:auto; border:1px solid rgba(255,255,255,.12); border-radius:12px;">
+      <table style="border-collapse:collapse; width:100%; min-width:980px;">
+        <thead>
+          <tr>
+            <th style="text-align:left; padding:8px; border-bottom:1px solid rgba(255,255,255,.12);">ts_utc</th>
+            <th style="text-align:left; padding:8px; border-bottom:1px solid rgba(255,255,255,.12);">pn</th>
+            <th style="text-align:left; padding:8px; border-bottom:1px solid rgba(255,255,255,.12);">devcode</th>
+            <th style="text-align:left; padding:8px; border-bottom:1px solid rgba(255,255,255,.12);">devaddr</th>
+            <th style="text-align:left; padding:8px; border-bottom:1px solid rgba(255,255,255,.12);">sn</th>
+            <th style="text-align:left; padding:8px; border-bottom:1px solid rgba(255,255,255,.12);">payload (compacto)</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for o in page_obj.object_list %}
+            <tr>
+              <td style="padding:6px; border-bottom:1px solid rgba(255,255,255,.08); white-space:nowrap;">
+                {{ o.ts_utc|date:"Y-m-d H:i:s" }}
+              </td>
+              <td style="padding:6px; border-bottom:1px solid rgba(255,255,255,.08); white-space:nowrap;">{{ o.pn }}</td>
+              <td style="padding:6px; border-bottom:1px solid rgba(255,255,255,.08); white-space:nowrap;">{{ o.devcode }}</td>
+              <td style="padding:6px; border-bottom:1px solid rgba(255,255,255,.08); white-space:nowrap;">{{ o.devaddr }}</td>
+              <td style="padding:6px; border-bottom:1px solid rgba(255,255,255,.08); white-space:nowrap;">{{ o.sn }}</td>
+              <td style="padding:6px; border-bottom:1px solid rgba(255,255,255,.08);">
+                <code style="white-space:pre-wrap; word-break:break-word;">
+                  {{ o.payload|safe }}
+                </code>
+              </td>
+            </tr>
+          {% empty %}
+            <tr>
+              <td colspan="6" class="text-muted" style="padding:10px;">Nenhum dado encontrado no período.</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div style="display:flex; gap:10px; justify-content:space-between; margin-top:12px; flex-wrap:wrap;">
+      <div>
+        {% if page_obj.has_previous %}
+          <a class="btn" href="?start={{ start }}&end={{ end }}&pn={{ pn }}&sn={{ sn }}&page_size={{ page_size }}&page={{ page_obj.previous_page_number }}">Anterior</a>
+        {% endif %}
+      </div>
+      <div>
+        {% if page_obj.has_next %}
+          <a class="btn" href="?start={{ start }}&end={{ end }}&pn={{ pn }}&sn={{ sn }}&page_size={{ page_size }}&page={{ page_obj.next_page_number }}">Próxima</a>
+        {% endif %}
+      </div>
+    </div>
+
+  </article>
+</section>
+
+<style>
+  .grid-form{
+    display:grid;
+    grid-template-columns: repeat(6, minmax(160px, 1fr));
+    gap:12px;
+    align-items:end;
+  }
+  @media (max-width: 1100px){
+    .grid-form{ grid-template-columns: repeat(2, minmax(160px, 1fr)); }
+  }
+  @media (max-width: 680px){
+    .grid-form{ grid-template-columns: 1fr; }
+  }
+</style>
+{% endblock %}

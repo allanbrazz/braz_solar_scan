@@ -1,0 +1,73 @@
+
+{% load static %}
+
+{% block extra_head %}
+  <!-- fontes com vibe tecnológica -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;600;700&family=Orbitron:wght@600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{% static 'auth.css' %}">
+
+  <!-- ajustes locais (centralização + tamanho legível da logo) -->
+  <style>
+    /* Centraliza o bloco da marca dentro do card */
+    .login-card .brand{
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      text-align: center;
+      margin: 0 0 1.1rem 0;
+      padding: 0;
+      width: 100%;
+    }
+
+    /* Logo responsiva, grande o suficiente e sem distorção */
+    .login-card .brand-mark{
+      display: block;
+      width: clamp(160px, 38vw, 260px); /* ajuste fino aqui, se quiser maior/menor */
+      max-width: 100%;
+      height: auto;
+      object-fit: contain;
+      margin-inline: auto;
+    }
+  </style>
+{% endblock %}
+
+
+{% block content %}
+<div class="auth-bg">
+  <div class="sun"></div>
+  <div class="solar-grid"></div>
+
+  <div class="login-card glass">
+    <div class="brand">
+      <img src="{% static 'img/logo_login.png' %}" alt="Braz Solar Scan" class="brand-mark">
+      
+    </div>
+
+    {% if form.non_field_errors %}
+      <div class="alert">{{ form.non_field_errors }}</div>
+    {% endif %}
+
+    <form method="post" novalidate>
+      {% csrf_token %}
+      <div class="field">
+        <label for="{{ form.username.id_for_label }}">Usuário</label>
+        {{ form.username }}
+      </div>
+      <div class="field">
+        <label for="{{ form.password.id_for_label }}">Senha</label>
+        {{ form.password }}
+      </div>
+
+      <button type="submit" class="btn-primary">Entrar</button>
+
+      <div class="links">
+        <a href="{% url 'password_reset' %}">Esqueci minha senha</a>
+        <span>•</span>
+        <a href="{% url 'signup' %}">Criar conta</a>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}

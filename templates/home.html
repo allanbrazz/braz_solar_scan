@@ -1,0 +1,781 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}Home{% endblock %}
+
+{% block extra_head %}
+  <!-- Leaflet (mapa) -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+{% endblock %}
+
+{% block content %}
+<style>
+  /* =========================
+     HOME / APRESENTAÇÃO
+     - JS sem tags Django (evita erros no VSCode)
+     - Grid robusto (sem overflow)
+     ========================= */
+
+  .dash, .dash *{ box-sizing: border-box; }
+  .dash{
+    display:grid;
+    grid-template-columns: repeat(auto-fit, minmax(330px, 1fr));
+    gap: 1rem;
+    align-items:start;
+    align-content:start;
+    grid-auto-rows: min-content;
+  }
+  .dash > .card{ min-width:0; }
+
+  .wrap-anywhere,
+  .dash a,
+  .dash .sub,
+  .dash .mini-sub{
+    overflow-wrap:anywhere;
+    word-break: break-word;
+  }
+
+  /* HERO */
+  .home-hero{
+    display:grid;
+    grid-template-columns: 1.2fr .8fr;
+    gap:1rem;
+    align-items:stretch;
+    margin-bottom:1rem;
+  }
+  .home-hero .hero-left{ padding:1.2rem; border-radius:18px; }
+  .home-hero .hero-right{ padding:1.05rem; border-radius:18px; }
+
+  .home-title{
+    margin:0 0 .35rem 0;
+    font-size: clamp(1.4rem, 2.2vw, 2.1rem);
+    letter-spacing:.2px;
+  }
+  .home-sub{
+    margin:0;
+    opacity:.92;
+    max-width:78ch;
+  }
+
+  .chip-row{ display:flex; gap:.5rem; flex-wrap:wrap; margin-top:.85rem; }
+  .chip{
+    display:inline-flex; align-items:center; gap:.45rem;
+    padding:.38rem .6rem;
+    border-radius:999px;
+    border:1px solid rgba(255,255,255,.14);
+    background: rgba(10,20,40,.28);
+    backdrop-filter: blur(8px);
+    font-size:.92rem;
+    opacity:.95;
+    user-select:none;
+    max-width:100%;
+    min-width:0;
+  }
+  .chip .chip-txt{
+    min-width:0;
+    max-width:260px;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+  }
+
+  .dot{ width:9px; height:9px; border-radius:50%; background:#5dffa5; box-shadow:0 0 0 4px rgba(93,255,165,.15); }
+  .dot.warn{ background:#ffd95e; box-shadow:0 0 0 4px rgba(255,217,94,.15); }
+  .dot.bad{ background:#ff6b6b; box-shadow:0 0 0 4px rgba(255,107,107,.16); }
+
+  /* Cards clicáveis */
+  .card-click{
+    cursor:pointer;
+    transition: transform .18s ease, box-shadow .18s ease;
+  }
+  .card-click:hover{
+    transform: translateY(-2px);
+    box-shadow: 0 18px 45px rgba(0,0,0,.22);
+  }
+  .card-click:focus-visible{
+    outline: 2px solid rgba(255,217,94,.85);
+    outline-offset: 2px;
+  }
+
+  /* Painel do card da direita */
+  .scan-panel{
+    position:relative;
+    border-radius:16px;
+    overflow:hidden;
+    border:1px solid rgba(255,255,255,.14);
+    background: linear-gradient(180deg, rgba(10,20,40,.32), rgba(10,20,40,.18));
+    padding:.9rem;
+  }
+
+  /* ✅ MAPA MAIOR: preenche mais o card */
+  .map-frame{
+    height: 220px;               /* antes: 120px */
+    border-radius: 14px;
+    overflow:hidden;
+    border:1px solid rgba(255,255,255,.10);
+    position:relative;
+    background: rgba(10,20,40,.25);
+  }
+  .map-frame::after{
+    content:"";
+    position:absolute;
+    left:-20%;
+    top:18%;
+    width:140%;
+    height:12px;
+    background: rgba(95,176,255,.20);
+    box-shadow: 0 0 18px rgba(95,176,255,.18);
+    transform: skewY(-8deg);
+    animation: mapScan 3.2s ease-in-out infinite;
+    pointer-events:none;
+    z-index: 450;
+  }
+  @keyframes mapScan{
+    0%{ top:18%; opacity:.35 }
+    50%{ top:78%; opacity:.70 }
+    100%{ top:18%; opacity:.35 }
+  }
+  .map-frame .leaflet-container{
+    width:100%;
+    height:100%;
+    background: rgba(10,20,40,.25);
+    font-family: inherit;
+  }
+  .map-frame .leaflet-control-attribution,
+  .map-frame .leaflet-control-zoom{
+    display:none !important;
+  }
+  .map-empty{
+    position:absolute;
+    inset:0;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    text-align:center;
+    padding: .85rem;
+    color: rgba(233,246,255,.85);
+    background: linear-gradient(180deg, rgba(10,20,40,.25), rgba(10,20,40,.10));
+    border-radius:14px;
+    pointer-events:none;
+    z-index: 500;
+  }
+
+  /* KPI blocks */
+  .metric{
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:1rem;
+  }
+  .metric > div{ min-width:0; }
+  .metric h3{ margin:0; }
+  .metric .val{
+    font-weight:800;
+    font-size: clamp(1.25rem, 2.2vw, 1.65rem);
+    line-height:1;
+  }
+  .metric .sub{
+    opacity:.86;
+    margin-top:.35rem;
+    font-size:.92rem;
+  }
+  .kpi-icon{
+    width:28px; height:28px;
+    opacity:.95;
+    flex:0 0 auto;
+  }
+
+  /* Pipeline */
+  .pipeline{
+    display:grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap:.9rem;
+    margin-top:.9rem;
+  }
+  .step-card{
+    padding:.95rem;
+    border-radius:18px;
+    min-width:0;
+  }
+  .step-top{
+    display:flex; align-items:center; justify-content:space-between; gap:.6rem;
+    margin-bottom:.55rem;
+  }
+  .step-title{ font-weight:800; letter-spacing:.2px; }
+  .step-meta{ opacity:.85; font-size:.9rem; }
+
+  .span-full{ grid-column: 1 / -1; }
+
+  /* Admin (exclusão) */
+  details.admin{
+    border-radius:18px;
+    overflow:hidden;
+    border:1px solid rgba(255,255,255,.14);
+    background: rgba(10,20,40,.22);
+  }
+  details.admin > summary{
+    cursor:pointer;
+    list-style:none;
+    padding:1rem 1rem;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:1rem;
+    user-select:none;
+  }
+  details.admin > summary::-webkit-details-marker{ display:none; }
+  .admin-body{ padding: 0 1rem 1rem 1rem; }
+  .summary-left{ display:flex; align-items:center; gap:.65rem; min-width:0; }
+  .badge-warn{
+    display:inline-flex; align-items:center; gap:.45rem;
+    padding:.35rem .6rem; border-radius:999px;
+    border:1px solid rgba(255,120,120,.55);
+    background: rgba(255,120,120,.10);
+    color:#ffd7d7;
+    font-size:.92rem;
+    white-space:nowrap;
+  }
+
+  /* Form de exclusão */
+  .ctl-row{ display:flex; flex-wrap:wrap; gap:.8rem; align-items:flex-end; }
+  .ctl{
+    display:flex;
+    flex-direction:column;
+    gap:.35rem;
+    flex: 1 1 260px;
+    min-width: 220px;
+    max-width: 100%;
+  }
+  .ctl-actions{ flex: 0 0 auto; min-width: 190px; }
+  .ctl label{ font-size:.85rem; opacity:.85; }
+  .ctl select,
+  .ctl input[type="text"]{
+    width:100%;
+    max-width:100%;
+    box-sizing:border-box;
+  }
+
+  /* =========================================================
+     Botões (SEU MODELO) + ajustes
+     ========================================================= */
+  .btn-glow{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    gap:.55rem;
+
+    padding: .70rem .95rem;
+
+    border-radius: 14px;
+    border: 1px solid rgba(110,210,255,.35);
+    background: linear-gradient(180deg, rgba(110,210,255,.22), rgba(90,200,255,.08));
+    color: rgba(233,246,255,.96);
+    text-decoration:none;
+    font-weight: 750;
+    letter-spacing: .2px;
+
+    box-shadow: 0 10px 24px rgba(0,0,0,.22);
+    transition: transform .12s ease, box-shadow .12s ease, border-color .12s ease, background .12s ease;
+
+    cursor: pointer;
+    appearance: none;
+    -webkit-appearance: none;
+    outline: none;
+
+    max-width:100%;
+    min-width:0;
+    white-space: nowrap;
+  }
+  .btn-glow:hover{
+    transform: translateY(-1px);
+    border-color: rgba(110,210,255,.55);
+    box-shadow: 0 14px 34px rgba(0,0,0,.28);
+    background: linear-gradient(180deg, rgba(110,210,255,.28), rgba(90,200,255,.10));
+  }
+  .btn-glow:active{
+    transform: translateY(0px);
+    box-shadow: 0 8px 18px rgba(0,0,0,.22);
+  }
+  .btn-glow:disabled{
+    opacity: .65;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: 0 8px 18px rgba(0,0,0,.18);
+  }
+
+  .btn-glow .icon{ width:18px; height:18px; opacity:.95; flex:0 0 auto; }
+  .btn-glow .label{ display:inline-block; line-height:1; min-width:0; }
+
+  .btn-heatmap{ width: 90%; }
+  .btn-update{ width: 100%; }
+
+  .btn-row{ display:flex; flex-wrap:wrap; gap:.6rem; margin-top:.9rem; }
+  .btn-row .btn-glow{ flex: 1 1 240px; }
+  .btn-row .btn-heatmap{ flex: 1 1 100%; width:auto; }
+  .btn-row .btn-update{ width:auto; }
+
+  .hero-help{ font-size:.85rem; opacity:.80; line-height:1.35; }
+  .mini-steps{ display:flex; flex-direction:column; gap:8px; margin-top:8px; }
+  .step{ display:flex; gap:.6rem; align-items:flex-start; }
+  .step .step-ico{ width:16px; height:16px; margin-top:2px; opacity:.9; flex:0 0 auto; }
+  .step .txt{ font-size:.85rem; opacity:.85; line-height:1.35; min-width:0; }
+  .step .txt b{ opacity:.95; }
+
+  @media (max-width: 980px){
+    .home-hero{ grid-template-columns: 1fr; }
+    .map-frame{ height: 240px; }
+  }
+</style>
+
+<!-- ===== HERO / APRESENTAÇÃO ===== -->
+<section class="home-hero">
+  <article class="card glass accent-cyan hero-left">
+    <h1 class="home-title">Braz Solar Scan</h1>
+    <p class="home-sub">
+      Uma camada tecnológica sobre a sua operação fotovoltaica: telemetria + meteorologia + consolidação temporal,
+      transformando dados brutos em visibilidade e ação.
+    </p>
+
+    <div class="chip-row">
+      <span class="chip"><span class="dot"></span><span class="chip-txt">Online</span></span>
+      <span class="chip"><span class="dot warn"></span><span class="chip-txt">Auditoria e rastreabilidade</span></span>
+      <span class="chip"><span class="dot"></span><span class="chip-txt">Pronto para diagnóstico</span></span>
+    </div>
+
+    <div style="display:flex; gap:.6rem; flex-wrap:wrap; margin-top: 1rem;">
+      <a class="btn-glow" href="{% url 'pv_dashboard' %}">
+        <svg class="icon" viewBox="0 0 64 64" aria-hidden="true">
+          <circle cx="50" cy="14" r="6" fill="#ffd95e"/>
+          <rect x="10" y="34" width="8" height="20" rx="2" fill="#7cc4ff"/>
+          <rect x="24" y="28" width="8" height="26" rx="2" fill="#5fb0ff"/>
+          <rect x="38" y="20" width="8" height="34" rx="2" fill="#4aa3ff"/>
+        </svg>
+        <span class="label">Abrir Dashboard</span>
+      </a>
+
+      <a class="btn-glow" href="{% url 'plants:list' %}">
+        <svg class="icon" viewBox="0 0 64 64" aria-hidden="true">
+          <circle cx="50" cy="12" r="6" fill="#ffd95e"/>
+          <rect x="8" y="34" width="48" height="14" rx="2" fill="#4aa3ff"/>
+          <path d="M12 34v14M20 34v14M28 34v14M36 34v14M44 34v14M52 34v14"
+                stroke="#e6f2ff" stroke-width="1" opacity=".9"/>
+        </svg>
+        <span class="label">Plantas</span>
+      </a>
+
+      <a class="btn-glow" href="{% url 'inverter_list' %}">
+        <svg class="icon" viewBox="0 0 64 64" aria-hidden="true">
+          <rect x="14" y="14" width="36" height="36" rx="6" fill="#4aa3ff"/>
+          <rect x="22" y="22" width="20" height="10" rx="2" fill="#e6f2ff" opacity="0.95"/>
+          <path d="M20 40H44" stroke="#e6f2ff" stroke-width="3" stroke-linecap="round"/>
+          <path d="M24 46H24M32 46H32M40 46H40" stroke="#e6f2ff" stroke-width="3" stroke-linecap="round"/>
+        </svg>
+        <span class="label">Inversores</span>
+      </a>
+
+      <a class="btn-glow" href="{% url 'merge_run_view' %}">
+        <svg class="icon" viewBox="0 0 64 64" aria-hidden="true">
+          <rect x="8" y="12" width="20" height="16" rx="2" fill="#4aa3ff"/>
+          <rect x="36" y="12" width="20" height="16" rx="2" fill="#7cc4ff"/>
+          <path d="M28 20h8" stroke="#ffd95e" stroke-width="3" stroke-linecap="round"/>
+          <rect x="8" y="36" width="48" height="16" rx="2" fill="#5fb0ff"/>
+        </svg>
+        <span class="label">Merge</span>
+      </a>
+    </div>
+
+    <div class="mini-steps">
+      <div class="step">
+        <svg class="step-ico" viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="10" fill="#5dffa5"/></svg>
+        <div class="txt"><b>Telemetria</b> do inversor organizada por planta e período.</div>
+      </div>
+      <div class="step">
+        <svg class="step-ico" viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="10" fill="#ffd95e"/></svg>
+        <div class="txt"><b>Meteorologia</b> integrada para consistência e perdas.</div>
+      </div>
+      <div class="step">
+        <svg class="step-ico" viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="10" fill="#5fb0ff"/></svg>
+        <div class="txt"><b>Merge 15 min</b> pronto para diagnóstico e relatórios.</div>
+      </div>
+    </div>
+
+    <div style="margin-top: .9rem; opacity:.86;">
+      <b>Objetivo:</b> reduzir indisponibilidade, acelerar análises e aumentar confiança na base de dados.
+    </div>
+  </article>
+
+  <!-- ===== CARD: Leitura Inteligente (COM MAPA) ===== -->
+  <article class="card glass hero-right">
+    <div class="scan-panel">
+      <div style="display:flex; align-items:center; justify-content:space-between; gap:1rem; margin-bottom:.55rem;">
+        <div style="font-weight:800; letter-spacing:.2px;">Leitura Inteligente</div>
+        <div style="opacity:.85; font-size:.9rem;" class="wrap-anywhere">scan • consistência • contexto</div>
+      </div>
+
+      <div class="map-frame" aria-label="Mapa de plantas">
+        <div id="plantsMap" style="width:100%; height:100%;"></div>
+        <div id="mapEmpty" class="map-empty" style="display:none;">
+          Nenhuma planta com coordenadas configuradas.<br>
+          Preencha latitude/longitude para exibir no mapa.
+        </div>
+      </div>
+
+      <div style="display:flex; justify-content:space-between; gap:1rem; margin-top:.55rem; font-size:.92rem; opacity:.88; flex-wrap:wrap;">
+        <span>ingestão</span><span>normalização</span><span>consolidação</span>
+      </div>
+
+      <div class="hero-help" style="margin-top:.6rem;">
+        Dica: use <b>Meteorologia</b> para atualizar irradiação e <b>Merge</b> para consolidar as séries antes de análises.
+      </div>
+    </div>
+  </article>
+</section>
+
+<!-- ===== CARDS / KPIs ===== -->
+<section class="dash">
+
+  <article class="card glass accent-cyan card-click"
+           role="link" tabindex="0"
+           data-href="{% url 'plants:list' %}"
+           aria-label="Ir para Plantas">
+    <div class="metric">
+      <div>
+        <h3>Plantas cadastradas</h3>
+        <div class="val">{{ plants|length }}</div>
+        <div class="sub">Base organizada por planta para telemetria, meteo e dados consolidados.</div>
+      </div>
+      <svg class="kpi-icon" viewBox="0 0 64 64" aria-hidden="true">
+        <circle cx="50" cy="14" r="6" fill="#ffd95e"/>
+        <rect x="10" y="34" width="44" height="14" rx="2" fill="#5fb0ff"/>
+        <path d="M14 34v14M22 34v14M30 34v14M38 34v14M46 34v14"
+              stroke="#e6f2ff" stroke-width="1" opacity=".9"/>
+      </svg>
+    </div>
+
+    {% if plants %}
+      <div style="margin-top:.8rem; display:flex; flex-wrap:wrap; gap:.45rem;">
+        {% for p in plants|slice:":10" %}
+          <span class="chip" style="opacity:.92;">
+            <span class="dot"></span>
+            <span class="chip-txt">{{ p.nome }}</span>
+          </span>
+        {% endfor %}
+        {% if plants|length > 10 %}
+          <span class="chip" style="opacity:.85;"><span class="chip-txt">+ {{ plants|length }} no total</span></span>
+        {% endif %}
+      </div>
+    {% else %}
+      <div class="sub" style="margin-top:.8rem;">Nenhuma planta cadastrada ainda — comece pelo menu <b>Plantas</b>.</div>
+    {% endif %}
+  </article>
+
+  <article class="card glass accent-cyan card-click"
+           role="link" tabindex="0"
+           data-href="{% url 'pv_dashboard' %}"
+           aria-label="Ir para Dashboard">
+    <div class="metric">
+      <div>
+        <h3>Painel Operacional</h3>
+        <div class="val">{{ health_pct|default:"84" }}%</div>
+        <div class="sub">Saúde consolidada (telemetria + consistência) com visão executiva.</div>
+      </div>
+      <svg class="kpi-icon" viewBox="0 0 64 64" aria-hidden="true">
+        <circle cx="20" cy="20" r="7" fill="#ffd95e"/>
+        <rect x="10" y="32" width="10" height="22" rx="2" fill="#7cc4ff"/>
+        <rect x="27" y="26" width="10" height="28" rx="2" fill="#5fb0ff"/>
+        <rect x="44" y="18" width="10" height="36" rx="2" fill="#4aa3ff"/>
+      </svg>
+    </div>
+
+    <div class="sub wrap-anywhere" style="margin-top:.8rem; display:flex; gap:.5rem; flex-wrap:wrap;">
+      <span>Última atualização: <b>{{ last_refresh|default:"—" }}</b></span>
+      <span style="opacity:.85;">•</span>
+      <span>Período: <b>{{ data_start|default:"—" }}</b> → <b>{{ data_end|default:"—" }}</b></span>
+    </div>
+  </article>
+
+  <article class="card glass accent-amber" aria-label="Meteorologia">
+    <div class="metric">
+      <div>
+        <h3>Meteorologia</h3>
+        <div class="val">{{ meteo_points|default:"—" }}</div>
+        <div class="sub">Base para comparação esperado × real e análise de perdas.</div>
+        <div class="sub wrap-anywhere" style="margin-top:.6rem;">Última sincronização: <b>{{ meteo_last_sync|default:"—" }}</b></div>
+
+        <div style="margin-top:.85rem;">
+          <a class="btn-glow btn-update" href="{% url 'nsrdb_view' %}">
+            <svg class="icon" viewBox="0 0 64 64" aria-hidden="true">
+              <circle cx="46" cy="18" r="6" fill="#ffd95e"/>
+              <path d="M46 6v6M46 24v6M34 18h6M52 18h6" stroke="#ffd95e" stroke-width="2" stroke-linecap="round" opacity=".9"/>
+              <path d="M22 44h22a10 10 0 0 0 0-20 14 14 0 0 0-27-2A9 9 0 0 0 22 44z" fill="#5fb0ff" opacity=".9"/>
+            </svg>
+            <span class="label">Abrir solicitação</span>
+          </a>
+        </div>
+      </div>
+
+      <svg class="kpi-icon" viewBox="0 0 64 64" aria-hidden="true">
+        <circle cx="46" cy="18" r="6" fill="#ffd95e"/>
+        <path d="M46 6v6M46 24v6M34 18h6M52 18h6" stroke="#ffd95e" stroke-width="2" stroke-linecap="round" opacity=".9"/>
+        <path d="M22 44h22a10 10 0 0 0 0-20 14 14 0 0 0-27-2A9 9 0 0 0 22 44z" fill="#5fb0ff" opacity=".9"/>
+      </svg>
+    </div>
+  </article>
+
+  <article class="card glass accent-cyan" aria-label="Consolidação 15 minutos">
+    <div class="metric">
+      <div>
+        <h3>Consolidação (15 min)</h3>
+        <div class="val">{{ merged_points|default:"—" }}</div>
+        <div class="sub">Séries alinhadas para diagnóstico, relatórios e auditoria.</div>
+        <div class="sub wrap-anywhere" style="margin-top:.6rem;">Último merge: <b>{{ merged_last_sync|default:"—" }}</b></div>
+
+        <div style="margin-top:.85rem;">
+          <a class="btn-glow btn-update" href="{% url 'merge_run_view' %}">
+            <svg class="icon" viewBox="0 0 64 64" aria-hidden="true">
+              <rect x="8" y="12" width="20" height="16" rx="2" fill="#4aa3ff"/>
+              <rect x="36" y="12" width="20" height="16" rx="2" fill="#7cc4ff"/>
+              <path d="M28 20h8" stroke="#ffd95e" stroke-width="3" stroke-linecap="round"/>
+              <rect x="8" y="36" width="48" height="16" rx="2" fill="#5fb0ff"/>
+            </svg>
+            <span class="label">Rodar / Ver Merge</span>
+          </a>
+        </div>
+      </div>
+
+      <svg class="kpi-icon" viewBox="0 0 64 64" aria-hidden="true">
+        <rect x="8" y="12" width="20" height="16" rx="2" fill="#4aa3ff"/>
+        <rect x="36" y="12" width="20" height="16" rx="2" fill="#7cc4ff"/>
+        <path d="M28 20h8" stroke="#ffd95e" stroke-width="3" stroke-linecap="round"/>
+        <rect x="8" y="36" width="48" height="16" rx="2" fill="#5fb0ff"/>
+      </svg>
+    </div>
+  </article>
+
+  <article class="card glass list span-full">
+    <h3>Fluxo do Braz Solar Scan</h3>
+    <div class="sub" style="margin-top:.35rem;">
+      Um pipeline simples para o cliente entender (e técnico o suficiente para operação):
+    </div>
+
+    <div class="pipeline">
+      <div class="card glass step-card">
+        <div class="step-top"><span class="step-title">1) Operativo</span><span class="dot"></span></div>
+        <div class="step-meta">Inversor / telemetria</div>
+        <div class="sub wrap-anywhere" style="margin-top:.6rem;">Última sincronização: <b>{{ oper_last_sync|default:"—" }}</b></div>
+      </div>
+
+      <div class="card glass step-card">
+        <div class="step-top"><span class="step-title">2) Meteo</span><span class="dot warn"></span></div>
+        <div class="step-meta">NSRDB / irradiação</div>
+        <div class="sub wrap-anywhere" style="margin-top:.6rem;">Última sincronização: <b>{{ meteo_last_sync|default:"—" }}</b></div>
+      </div>
+
+      <div class="card glass step-card">
+        <div class="step-top"><span class="step-title">3) Merge</span><span class="dot"></span></div>
+        <div class="step-meta">Consolidação 15m</div>
+        <div class="sub wrap-anywhere" style="margin-top:.6rem;">Último merge: <b>{{ merged_last_sync|default:"—" }}</b></div>
+      </div>
+
+      <div class="card glass step-card">
+        <div class="step-top"><span class="step-title">4) Diagnóstico</span><span class="dot"></span></div>
+        <div class="step-meta">Alertas e insights</div>
+        <div class="sub wrap-anywhere" style="margin-top:.6rem;">Alertas críticos: <b>{{ critical_alerts|default:"0" }}</b></div>
+      </div>
+    </div>
+
+    <div class="btn-row">
+      <a class="btn-glow btn-heatmap" href="/pv/heatmap/">
+        <svg class="icon" viewBox="0 0 64 64" aria-hidden="true">
+          <path d="M32 8l24 44H8L32 8z" fill="#ff6b6b"/>
+          <path d="M32 22v14M32 44v4" stroke="#fff" stroke-width="3" stroke-linecap="round"/>
+        </svg>
+        <span class="label">Mapa de ocorrências</span>
+      </a>
+
+      <a class="btn-glow btn-update" href="{% url 'nsrdb_view' %}">
+        <svg class="icon" viewBox="0 0 64 64" aria-hidden="true">
+          <circle cx="46" cy="18" r="6" fill="#ffd95e"/>
+          <path d="M46 6v6M46 24v6M34 18h6M52 18h6" stroke="#ffd95e" stroke-width="2" stroke-linecap="round" opacity=".9"/>
+          <path d="M22 44h22a10 10 0 0 0 0-20 14 14 0 0 0-27-2A9 9 0 0 0 22 44z" fill="#5fb0ff" opacity=".9"/>
+        </svg>
+        <span class="label">Atualizar Meteorologia</span>
+      </a>
+
+      <a class="btn-glow btn-update" href="{% url 'merge_run_view' %}">
+        <svg class="icon" viewBox="0 0 64 64" aria-hidden="true">
+          <rect x="8" y="12" width="20" height="16" rx="2" fill="#4aa3ff"/>
+          <rect x="36" y="12" width="20" height="16" rx="2" fill="#7cc4ff"/>
+          <path d="M28 20h8" stroke="#ffd95e" stroke-width="3" stroke-linecap="round"/>
+          <rect x="8" y="36" width="48" height="16" rx="2" fill="#5fb0ff"/>
+        </svg>
+        <span class="label">Rodar Merge</span>
+      </a>
+    </div>
+  </article>
+
+  <!-- ===== EXCLUSÃO (MANTIDA) ===== -->
+  <article class="card glass list accent-red span-full">
+    <details class="admin">
+      <summary>
+        <div class="summary-left">
+          <svg class="icon" viewBox="0 0 64 64" aria-hidden="true" style="width:20px; height:20px;">
+            <path d="M32 8l24 44H8L32 8z" fill="#ff6b6b"/>
+            <path d="M32 22v14M32 44v4" stroke="#fff" stroke-width="3" stroke-linecap="round"/>
+          </svg>
+          <div style="min-width:0;">
+            <div style="font-weight:900;">Manutenção de Base (Exclusão)</div>
+            <div style="opacity:.86; font-size:.92rem;" class="wrap-anywhere">
+              Irreversível • use apenas para correções e recargas
+            </div>
+          </div>
+        </div>
+        <span class="badge-warn">ação crítica</span>
+      </summary>
+
+      <div class="admin-body">
+        <div class="mini-sub wrap-anywhere" style="white-space:pre-wrap;">
+          Excluir dados operativos/meteorológicos/merged de uma planta (irreversível).
+          Use apenas para correções e recargas.
+        </div>
+
+        <form method="post" action="{% url 'home' %}" style="margin-top:.8rem;">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="purge_plant_data">
+
+          <div class="ctl-row" style="margin-top:.6rem;">
+            <div class="ctl">
+              <label for="purgePlant">Planta</label>
+              <select id="purgePlant" name="plant_id" required>
+                <option value="" selected>— selecione —</option>
+                {% for p in plants %}
+                  <option value="{{ p.id }}">{{ p.nome }}</option>
+                {% endfor %}
+              </select>
+            </div>
+
+            <div class="ctl">
+              <label>Bases a apagar</label>
+              <div style="display:flex; gap:1rem; flex-wrap:wrap; align-items:center;">
+                <label style="display:flex; gap:.4rem; align-items:center;">
+                  <input type="checkbox" name="purge_oper" checked> Operativo
+                </label>
+                <label style="display:flex; gap:.4rem; align-items:center;">
+                  <input type="checkbox" name="purge_meteo" checked> Meteo
+                </label>
+                <label style="display:flex; gap:.4rem; align-items:center;">
+                  <input type="checkbox" name="purge_merged" checked> Merged (15m)
+                </label>
+              </div>
+            </div>
+
+            <div class="ctl">
+              <label for="confirmText">Digite <b>EXCLUIR</b> para confirmar</label>
+              <input id="confirmText" name="confirm_text" type="text" placeholder="EXCLUIR" required>
+            </div>
+
+            <div class="ctl-actions">
+              <button type="submit" class="btn-glow"
+                      style="border-color: rgba(255,120,120,.55); background: linear-gradient(180deg, rgba(255,120,120,.18), rgba(255,120,120,.08));">
+                <svg class="icon" viewBox="0 0 64 64" aria-hidden="true">
+                  <path d="M20 18h24l-2 36H22l-2-36z" fill="#ff6b6b" opacity=".9"/>
+                  <path d="M24 18V14h16v4" stroke="#ffd7d7" stroke-width="3" stroke-linecap="round"/>
+                </svg>
+                <span class="label">Excluir dados</span>
+              </button>
+            </div>
+          </div>
+        </form>
+
+        <div class="mini-sub wrap-anywhere" style="margin-top:.75rem; opacity:.86;">
+          Dica: apague apenas o necessário (Operativo / Meteo / Merged) para reduzir reprocessamentos.
+        </div>
+      </div>
+    </details>
+  </article>
+
+</section>
+
+<!-- ✅ Dados das plantas como JSON (sem “bagunçar” o JS do editor) -->
+{{ plants|json_script:"plants-data" }}
+
+<!-- Leaflet JS -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<script>
+  // Cards clicáveis (sem âncoras aninhadas)
+  (function(){
+    const cards = document.querySelectorAll('.card-click[data-href]');
+    cards.forEach(card => {
+      card.addEventListener('click', () => { window.location.href = card.dataset.href; });
+      card.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          window.location.href = card.dataset.href;
+        }
+      });
+    });
+  })();
+
+  // ===== Mapa de plantas (Leaflet) =====
+  (function(){
+    const el = document.getElementById('plantsMap');
+    if (!el || typeof L === 'undefined') return;
+
+    const dataEl = document.getElementById('plants-data');
+    const raw = dataEl ? JSON.parse(dataEl.textContent || '[]') : [];
+
+    // raw: [{id,nome,latitude,longitude}, ...]
+    const plants = raw.map(p => ({
+      id: p.id,
+      name: p.nome,
+      lat: Number(p.latitude),
+      lon: Number(p.longitude)
+    })).filter(p =>
+      Number.isFinite(p.lat) && Number.isFinite(p.lon)
+    );
+
+    const map = L.map('plantsMap', {
+      zoomControl: false,
+      attributionControl: false,
+      scrollWheelZoom: false,
+      doubleClickZoom: false,
+      boxZoom: false,
+      keyboard: false,
+      dragging: true,
+      tap: false
+    });
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18 }).addTo(map);
+
+    const empty = document.getElementById('mapEmpty');
+
+    if (!plants.length){
+      map.setView([-32.8, -56.0], 5);
+      if (empty) empty.style.display = 'flex';
+      // ainda assim, garante o layout do leaflet (caso blur/anim afete)
+      setTimeout(() => map.invalidateSize(), 250);
+      return;
+    }
+    if (empty) empty.style.display = 'none';
+
+    const bounds = [];
+    plants.forEach(p => {
+      const m = L.circleMarker([p.lat, p.lon], {
+        radius: 6,
+        weight: 2,
+        opacity: 0.9,
+        fillOpacity: 0.55
+      }).addTo(map);
+
+      m.bindPopup(`<b>${p.name}</b>`);
+      bounds.push([p.lat, p.lon]);
+    });
+
+    if (bounds.length === 1) map.setView(bounds[0], 12);
+    else map.fitBounds(bounds, { padding: [10, 10] });
+
+    // ✅ evita mapa “cortado” dentro de cards com blur/transform
+    setTimeout(() => map.invalidateSize(), 250);
+  })();
+</script>
+{% endblock %}

@@ -1,0 +1,156 @@
+{# templates/plants/cables_form.html #}
+{% extends "base.html" %}
+{% block title %}Cabeamento • {{ plant.nome }}{% endblock %}
+
+{% block content %}
+<header class="page-head">
+  <h1 class="page-title">Cabeamento</h1>
+  <p class="page-sub">{{ plant.nome }}</p>
+</header>
+
+<form method="post" novalidate>
+  {% csrf_token %}
+
+  {# management_form é OBRIGATÓRIO em formsets #}
+  {{ formset.management_form }}
+  {# erros não-relacionados a um form específico #}
+  {% if formset.non_form_errors %}
+    <section class="dash" style="--cols:12;">
+      <article class="card glass accent-rose" style="grid-column:1 / -1;">
+        <h3 class="mb-2">Erros gerais</h3>
+        <ul class="mb-0">
+          {% for e in formset.non_form_errors %}
+            <li>{{ e }}</li>
+          {% endfor %}
+        </ul>
+      </article>
+    </section>
+  {% endif %}
+
+  <section class="dash" style="--cols:12;">
+    <article class="card glass accent-amber" style="grid-column:1 / -1;">
+      <h3 class="mb-2">Trechos</h3>
+
+      <div class="table-wrap">
+        <table class="glass-table">
+          <thead>
+            <tr>
+              <th>Segmento</th>
+              <th>Descrição</th>
+              <th class="form-label">Compr. (m)</th>
+              <th class="form-label">Seção (mm²)</th>
+              <th>Material</th>
+              <th class="num">Paralelos</th>
+              <th>Excluir</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for f in formset.forms %}
+              <tr>
+                {# Hidden fields (ex.: id) — precisam ser enviados #}
+                {% for h in f.hidden_fields %}{{ h }}{% endfor %}
+
+                <td>
+                  {{ f.segment }}
+                  {% if f.segment.errors %}
+                    <div class="text-danger small">{{ f.segment.errors|join:", " }}</div>
+                  {% endif %}
+                </td>
+                <td>
+                  {{ f.description }}
+                  {% if f.description.errors %}
+                    <div class="text-danger small">{{ f.description.errors|join:", " }}</div>
+                  {% endif %}
+                </td>
+                <td class="num">
+                  {{ f.length_m }}
+                  {% if f.length_m.errors %}
+                    <div class="text-danger small">{{ f.length_m.errors|join:", " }}</div>
+                  {% endif %}
+                </td>
+                <td class="num">
+                  {{ f.cross_section_mm2 }}
+                  {% if f.cross_section_mm2.errors %}
+                    <div class="text-danger small">{{ f.cross_section_mm2.errors|join:", " }}</div>
+                  {% endif %}
+                </td>
+                <td>
+                  {{ f.material }}
+                  {% if f.material.errors %}
+                    <div class="text-danger small">{{ f.material.errors|join:", " }}</div>
+                  {% endif %}
+                </td>
+                <td class="num">
+                  {{ f.qty_parallel }}
+                  {% if f.qty_parallel.errors %}
+                    <div class="text-danger small">{{ f.qty_parallel.errors|join:", " }}</div>
+                  {% endif %}
+                </td>
+                <td class="num">
+                  {% if f.instance.pk %}
+                    {{ f.DELETE }}
+                  {% else %}
+                    &mdash;
+                  {% endif %}
+                  {% if f.non_field_errors %}
+                    <div class="text-danger small">{{ f.non_field_errors|join:", " }}</div>
+                  {% endif %}
+                </td>
+              </tr>
+            {% empty %}
+              {# fallback: quando não há forms (em geral extra>=1 evita isso) #}
+              <tr><td colspan="7" class="btn btn-primary">Nenhum trecho. Clique “Adicionar linha”.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      <div class="mt-2" style="display:flex; justify-content:flex-end; gap:8px;">
+        <button class="btn btn-primary" name="_addrow" value="1">Adicionar linha</button>
+        <button class="btn btn-primary" type="submit">Salvar</button>
+        <a class="btn btn-primary" href="{% url 'plants:detail' plant.pk %}">Voltar</a>
+      </div>
+    </article>
+  </section>
+</form>
+
+<style>
+  .glass-table{ width:100%; border-collapse:separate; border-spacing:0; color:rgba(240,248,255,.95);}
+  .glass-table thead th{
+    position:sticky; top:0; background:rgba(15,40,80,.45);
+    padding:.6rem .75rem; text-align:left; white-space:nowrap; border-bottom:1px solid rgba(255,255,255,.12);
+  }
+  .glass-table tbody td{ padding:.55rem .75rem; border-bottom:1px solid rgba(255,255,255,.08); vertical-align:top; }
+  .glass-table .num{ text-align:right; }
+  .text-danger.small{ margin-top:.25rem; font-size:.8rem; color:#ffb3b3; }
+
+  /* --- NOVO: padroniza inputs/selects (inclui number) na tabela --- */
+  .glass-table input[type="text"].form-control,
+  .glass-table input[type="number"].form-control,
+  .glass-table select.form-control,
+  .glass-table textarea.form-control {
+    width: 100%;
+    background: rgba(0, 20, 40, .35);
+    color: #e9f6ff;
+    border: 1px solid rgba(255,255,255,.25);
+    border-radius: 12px;
+    padding: .50rem .60rem;
+    outline: none;
+  }
+  .glass-table input[type="text"].form-control::placeholder,
+  .glass-table textarea.form-control::placeholder {
+    color: rgba(233,246,255,.55);
+  }
+
+  /* remove “spinners” e aparência branca de number */
+  .glass-table input[type="number"].form-control::-webkit-outer-spin-button,
+  .glass-table input[type="number"].form-control::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+  
+
+  /* checkbox DELETE centralizado */
+  .glass-table input[type="checkbox"]{
+    transform: scale(1.1);
+    accent-color: #5fb0ff;
+  }
+</style>
+{% endblock %}

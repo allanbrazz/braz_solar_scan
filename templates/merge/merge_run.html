@@ -1,0 +1,173 @@
+{% extends "base.html" %}
+{% block title %}Merge de Séries{% endblock %}
+
+{% block content %}
+<header class="page-head">
+  <h1 class="page-title">Casar Operativo (5 min) + Meteo (15 min)</h1>
+  <p class="page-sub">
+    Executa o merge em 15 minutos (agrega o inversor e alinha meteo) e opcionalmente persiste no banco.
+  </p>
+</header>
+
+<section class="dash" style="grid-template-columns: 1.2fr .8fr; align-items: start;">
+
+  <article class="card glass accent-cyan">
+    <h3 style="margin-bottom:.8rem;">Executar merge</h3>
+
+    <form method="post" novalidate>
+      {% csrf_token %}
+
+      <div style="display:grid; grid-template-columns: 1fr; gap:.8rem;">
+        <div>
+          <label class="form-label">{{ form.plant.label }}</label>
+          {{ form.plant }}
+          {% if form.plant.errors %}<div class="form-error">{{ form.plant.errors }}</div>{% endif %}
+        </div>
+
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:.8rem;">
+          <div>
+            <label class="form-label">{{ form.start_date.label }}</label>
+            {{ form.start_date }}
+            {% if form.start_date.errors %}<div class="form-error">{{ form.start_date.errors }}</div>{% endif %}
+          </div>
+          <div>
+            <label class="form-label">{{ form.end_date.label }}</label>
+            {{ form.end_date }}
+            {% if form.end_date.errors %}<div class="form-error">{{ form.end_date.errors }}</div>{% endif %}
+          </div>
+        </div>
+
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:.8rem;">
+          <div>
+            <label class="form-label">{{ form.source_oper.label }}</label>
+            {{ form.source_oper }}
+          </div>
+          <div>
+            <label class="form-label">{{ form.source_meteo.label }}</label>
+            {{ form.source_meteo }}
+          </div>
+        </div>
+
+        <div style="display:flex; gap:1.2rem; align-items:center; flex-wrap:wrap; padding-top:.2rem;">
+          <label style="display:flex; gap:.5rem; align-items:center;">
+            {{ form.persist }} <span>{{ form.persist.label }}</span>
+          </label>
+          <label style="display:flex; gap:.5rem; align-items:center;">
+            {{ form.want_hourly }} <span>{{ form.want_hourly.label }}</span>
+          </label>
+        </div>
+
+        {% if form.non_field_errors %}
+          <div class="flash flash-error">{{ form.non_field_errors }}</div>
+        {% endif %}
+
+        <div style="display:flex; gap:.6rem; align-items:center; margin-top:.4rem;">
+          <button class="btn btn-primary" type="submit">Executar</button>
+          <span style="opacity:.8;">Preview mostra apenas primeiras linhas.</span>
+        </div>
+      </div>
+    </form>
+  </article>
+
+  <article class="card glass accent-amber">
+    <h3 style="margin-bottom:.8rem;">Resumo</h3>
+
+    {% if stats %}
+      <div style="display:grid; gap:.35rem; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size:.92rem;">
+        <div><b>Período (UTC):</b> {{ stats.dt_start_utc }} → {{ stats.dt_end_utc }}</div>
+        <div><b>Operativo raw:</b> {{ stats.inv_rows_raw }}</div>
+        <div><b>Meteo raw:</b> {{ stats.meteo_rows_raw }}</div>
+        <div><b>Merge 15 min:</b> {{ stats.merged_rows_15 }} / {{ stats.expected_rows_15 }}</div>
+        <div><b>Saved 15 min:</b> {{ stats.saved_rows_15m }}</div>
+
+        {% if stats.inv_coverage_mean %}
+          <div><b>inv_coverage_mean:</b> {{ stats.inv_coverage_mean|floatformat:3 }}</div>
+        {% endif %}
+        {% if stats.inv_lowcov_frac %}
+          <div><b>inv_lowcov_frac:</b> {{ stats.inv_lowcov_frac|floatformat:3 }}</div>
+        {% endif %}
+        {% if stats.meteo_missing_frac %}
+          <div><b>meteo_missing_frac:</b> {{ stats.meteo_missing_frac|floatformat:3 }}</div>
+        {% endif %}
+        {% if stats.good_bucket_frac %}
+          <div><b>good_bucket_frac:</b> {{ stats.good_bucket_frac|floatformat:3 }}</div>
+        {% endif %}
+      </div>
+    {% else %}
+      <p style="opacity:.85;">Execute o merge para ver estatísticas.</p>
+    {% endif %}
+  </article>
+
+</section>
+
+{% if rows15 %}
+  <section class="dash" style="grid-template-columns: 1fr;">
+    <article class="card glass accent-cyan">
+      <h3 style="margin-bottom:.8rem;">Preview (15 min)</h3>
+
+      <div style="overflow:auto; border-radius:12px; border:1px solid rgba(255,255,255,.12);">
+        <table style="width:100%; border-collapse:collapse; font-size:.92rem;">
+          <thead style="position:sticky; top:0; background:rgba(10,20,40,.85); backdrop-filter: blur(6px);">
+            <tr>
+              {% for c in cols15 %}
+                <th style="text-align:left; padding:.55rem .6rem; border-bottom:1px solid rgba(255,255,255,.12); white-space:nowrap;">
+                  {{ c }}
+                </th>
+              {% endfor %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in rows15 %}
+              <tr>
+                {% for val in row %}
+                  <td style="padding:.45rem .6rem; border-bottom:1px solid rgba(255,255,255,.08); white-space:nowrap;">
+                    {{ val }}
+                  </td>
+                {% endfor %}
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      <p style="margin-top:.6rem; opacity:.8;">
+        Dica: para 2025 inteiro em 15 min, o esperado é 35040 buckets (ano não-bissexto).
+      </p>
+    </article>
+  </section>
+{% endif %}
+
+{% if rowsh %}
+  <section class="dash" style="grid-template-columns: 1fr;">
+    <article class="card glass accent-amber">
+      <h3 style="margin-bottom:.8rem;">Preview (roll-up horário)</h3>
+
+      <div style="overflow:auto; border-radius:12px; border:1px solid rgba(255,255,255,.12);">
+        <table style="width:100%; border-collapse:collapse; font-size:.92rem;">
+          <thead style="position:sticky; top:0; background:rgba(10,20,40,.85); backdrop-filter: blur(6px);">
+            <tr>
+              {% for c in colsh %}
+                <th style="text-align:left; padding:.55rem .6rem; border-bottom:1px solid rgba(255,255,255,.12); white-space:nowrap;">
+                  {{ c }}
+                </th>
+              {% endfor %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in rowsh %}
+              <tr>
+                {% for val in row %}
+                  <td style="padding:.45rem .6rem; border-bottom:1px solid rgba(255,255,255,.08); white-space:nowrap;">
+                    {{ val }}
+                  </td>
+                {% endfor %}
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </article>
+  </section>
+{% endif %}
+
+{% endblock %}

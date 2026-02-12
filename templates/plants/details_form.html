@@ -1,0 +1,402 @@
+{% extends "base.html" %}
+{% block title %}Editar detalhes • {{ plant.nome }}{% endblock %}
+
+{% block content %}
+<header class="page-head">
+  <h1 class="page-title">Editar detalhes da planta</h1>
+  <p class="page-sub">{{ plant.nome }}</p>
+</header>
+
+<form method="post" novalidate class="details-form" id="detailsForm">
+  {% csrf_token %}
+
+  {# ===== ERROS GERAIS ===== #}
+  {% if form.non_field_errors or strings_formset.non_form_errors %}
+    <section class="dash" style="--cols:12;">
+      <article class="card glass accent-rose" style="grid-column:1 / -1;">
+        <ul class="mb-0">
+          {% for e in form.non_field_errors %}<li>{{ e }}</li>{% endfor %}
+          {% for e in strings_formset.non_form_errors %}<li>{{ e }}</li>{% endfor %}
+        </ul>
+      </article>
+    </section>
+  {% endif %}
+
+  <section class="dash" style="--cols:12;">
+
+    {# ===== ASSOCIAÇÕES ===== #}
+    <article class="card glass accent-cyan" style="grid-column:1 / -1;">
+      <h3 class="mb-2">Associações</h3>
+      <div class="grid-2">
+        <div class="field">
+          <label class="form-label">{{ form.module.label }}</label>
+          {{ form.module }}
+          {% if form.module.errors %}<div class="text-danger small">{{ form.module.errors|join:", " }}</div>{% endif %}
+        </div>
+        <div class="field">
+          <label class="form-label">{{ form.inverter.label }}</label>
+          {{ form.inverter }}
+          {% if form.inverter.errors %}<div class="text-danger small">{{ form.inverter.errors|join:", " }}</div>{% endif %}
+        </div>
+      </div>
+    </article>
+
+    {# ===== STRINGS (FORMSET) ===== #}
+    <article class="card glass accent-green" style="grid-column:1 / -1;">
+      <div class="row-head">
+        <div>
+          <h3 class="mb-1">Configuração elétrica (Strings)</h3>
+          <div class="muted">
+            Total de módulos = <span class="mono">Σ(strings_qty × modules_per_string)</span>.
+          </div>
+        </div>
+        <div class="row-actions">
+          <button type="button" class="btn btn-primary" id="btnAddRow">Adicionar string</button>
+        </div>
+      </div>
+
+      {# ESSENCIAL: management_form dentro do form #}
+      {{ strings_formset.management_form }}
+
+      <div class="strings-table-wrap">
+        <table class="strings-table">
+          <thead>
+            <tr>
+              <th style="width:38%;">Nome/Label</th>
+              <th style="width:18%;">Qtd. strings</th>
+              <th style="width:18%;">Módulos/string</th>
+              <th style="width:18%;">Total módulos</th>
+              <th style="width:8%;">Remover</th>
+            </tr>
+          </thead>
+
+          <tbody id="stringsTbody">
+            {% for f in strings_formset.forms %}
+              <tr class="row-string">
+
+                <td>
+                  {# erros do form do formset (por linha) #}
+                  {% if f.non_field_errors %}
+                    <div class="text-danger small">{{ f.non_field_errors|join:", " }}</div>
+                  {% endif %}
+
+                  <div class="field">
+                    {% if f.label %}
+                      {{ f.label }}
+                      {% if f.label.errors %}<div class="text-danger small">{{ f.label.errors|join:", " }}</div>{% endif %}
+                    {% elif f.name %}
+                      {{ f.name }}
+                      {% if f.name.errors %}<div class="text-danger small">{{ f.name.errors|join:", " }}</div>{% endif %}
+                    {% else %}
+                      <div class="muted">Seu formset não tem campo “label” nem “name”.</div>
+                    {% endif %}
+                  </div>
+
+                  {# Se existir campo hidden id no seu form, mantém (não atrapalha) #}
+                  {{ f.id }}
+                </td>
+
+                <td>
+                  <div class="field">
+                    {{ f.strings_qty }}
+                    {% if f.strings_qty.errors %}<div class="text-danger small">{{ f.strings_qty.errors|join:", " }}</div>{% endif %}
+                  </div>
+                </td>
+
+                <td>
+                  <div class="field">
+                    {{ f.modules_per_string }}
+                    {% if f.modules_per_string.errors %}<div class="text-danger small">{{ f.modules_per_string.errors|join:", " }}</div>{% endif %}
+                  </div>
+                </td>
+
+                <td class="mono"><span class="rowTotal">—</span></td>
+
+                <td style="text-align:center;">
+                  <div class="field" style="display:flex; justify-content:center;">
+                    {% if f.DELETE %}
+                      <label class="chk">
+                        {{ f.DELETE }}
+                        <span class="muted">X</span>
+                      </label>
+                    {% endif %}
+                  </div>
+                </td>
+
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      <div class="totals-bar">
+        <div class="totals-item">
+          <div class="muted">Strings (total)</div>
+          <div class="big mono"><span id="totStrings">—</span></div>
+        </div>
+        <div class="totals-item">
+          <div class="muted">Módulos (total)</div>
+          <div class="big mono"><span id="totModules">—</span></div>
+        </div>
+        <div class="totals-item">
+          <div class="muted">Módulos/string (único)</div>
+          <div class="big mono"><span id="totMpsUnique">—</span></div>
+          <div class="muted small">Se “MIX”, há valores diferentes.</div>
+        </div>
+      </div>
+
+      <hr class="sep"/>
+
+      {# ===== PARÂMETROS ===== #}
+      <h4 class="mb-2">Geometria & parâmetros do modelo</h4>
+      <div class="grid-4">
+        <div class="field">
+          <label class="form-label">{{ form.tilt_deg.label }}</label>
+          {{ form.tilt_deg }}
+          {% if form.tilt_deg.errors %}<div class="text-danger small">{{ form.tilt_deg.errors|join:", " }}</div>{% endif %}
+        </div>
+        <div class="field">
+          <label class="form-label">{{ form.azimuth_deg.label }}</label>
+          {{ form.azimuth_deg }}
+          {% if form.azimuth_deg.errors %}<div class="text-danger small">{{ form.azimuth_deg.errors|join:", " }}</div>{% endif %}
+        </div>
+        <div class="field">
+          <label class="form-label">{{ form.k_sys.label }}</label>
+          {{ form.k_sys }}
+          {% if form.k_sys.errors %}<div class="text-danger small">{{ form.k_sys.errors|join:", " }}</div>{% endif %}
+        </div>
+        <div class="field">
+          <label class="form-label">{{ form.noct_c.label }}</label>
+          {{ form.noct_c }}
+          {% if form.noct_c.errors %}<div class="text-danger small">{{ form.noct_c.errors|join:", " }}</div>{% endif %}
+        </div>
+      </div>
+    </article>
+
+    {# ===== AÇÕES ===== #}
+    <article class="card glass" style="grid-column:1 / -1;">
+      <div style="display:flex; gap:8px; justify-content:flex-end;">
+        {% if pk %}
+          <a href="{% url 'plants:detail' pk=pk %}" class="btn btn-primary">Cancelar</a>
+        {% else %}
+          <a href="{% url 'plants:list' %}" class="btn btn-primary">Cancelar</a>
+        {% endif %}
+        <button class="btn btn-primary" type="submit">Salvar</button>
+      </div>
+    </article>
+
+  </section>
+</form>
+
+{# ===== TEMPLATE DA LINHA (empty_form com __prefix__) ===== #}
+<template id="rowTemplate">
+  {% with f=strings_formset.empty_form %}
+  <tr class="row-string">
+    <td>
+      <div class="field">
+        {% if f.label %}{{ f.label }}{% elif f.name %}{{ f.name }}{% endif %}
+      </div>
+      {{ f.id }}
+    </td>
+    <td><div class="field">{{ f.strings_qty }}</div></td>
+    <td><div class="field">{{ f.modules_per_string }}</div></td>
+    <td class="mono"><span class="rowTotal">—</span></td>
+    <td style="text-align:center;">
+      <div class="field" style="display:flex; justify-content:center;">
+        {% if f.DELETE %}
+          <label class="chk">{{ f.DELETE }} <span class="muted">X</span></label>
+        {% endif %}
+      </div>
+    </td>
+  </tr>
+  {% endwith %}
+</template>
+
+<style>
+  .details-form .grid-2{ display:grid; grid-template-columns:repeat(2,minmax(220px,1fr)); gap:12px; }
+  .details-form .grid-4{ display:grid; grid-template-columns:repeat(4,minmax(160px,1fr)); gap:12px; }
+  .details-form .field{ min-width:0; }
+
+  .details-form select,
+  .details-form textarea,
+  .details-form input[type="text"],
+  .details-form input[type="number"]{
+    display:block;
+    width:100%;
+    box-sizing:border-box;
+    position:static;
+    z-index:auto;
+    background:rgba(0,20,40,.35);
+    color:#e9f6ff;
+    border:1px solid rgba(255,255,255,.25);
+    border-radius:12px;
+    padding:.50rem .60rem;
+    outline:none;
+  }
+  .details-form input[type="number"]::-webkit-outer-spin-button,
+  .details-form input[type="number"]::-webkit-inner-spin-button{ -webkit-appearance:none; margin:0; }
+
+  .muted{ opacity:.78; }
+  .mono{font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono","Courier New", monospace;}
+  .text-danger.small{ margin-top:.25rem; font-size:.8rem; color:#ffb3b3; }
+
+  .row-head{display:flex; justify-content:space-between; gap:12px; align-items:flex-start;}
+  .row-actions{display:flex; gap:8px; align-items:center;}
+
+  .strings-table-wrap{ margin-top:.8rem; overflow:auto; border-radius:14px; border:1px solid rgba(255,255,255,.14); }
+  .strings-table{ width:100%; border-collapse:separate; border-spacing:0; min-width:820px; background: rgba(0,0,0,.06); }
+  .strings-table thead th{
+    text-align:left; font-size:.85rem; opacity:.9;
+    padding:.65rem .75rem; border-bottom:1px solid rgba(255,255,255,.12);
+    background: rgba(0,0,0,.10); position:sticky; top:0;
+  }
+  .strings-table td{ padding:.60rem .75rem; border-bottom:1px solid rgba(255,255,255,.08); vertical-align:top; }
+  .strings-table tr:last-child td{ border-bottom:0; }
+
+  .chk{display:flex; align-items:center; gap:.4rem; cursor:pointer; user-select:none;}
+  .chk input{ transform: translateY(1px); }
+
+  .totals-bar{
+    margin-top:.9rem;
+    display:grid;
+    grid-template-columns:repeat(3, minmax(160px, 1fr));
+    gap:12px;
+  }
+  .totals-item{
+    border:1px solid rgba(255,255,255,.12);
+    background: rgba(255,255,255,.05);
+    border-radius:14px;
+    padding:.65rem .75rem;
+  }
+  .totals-item .big{ font-size:1.15rem; font-weight:700; margin-top:.15rem; }
+  .sep{ border:0; border-top:1px solid rgba(255,255,255,.10); margin:1rem 0; }
+</style>
+
+<script>
+(function(){
+  function q(sel, root){ return (root || document).querySelector(sel); }
+  function qa(sel, root){ return Array.from((root || document).querySelectorAll(sel)); }
+  function int0(v){ const n = Number(v); return Number.isFinite(n) ? Math.max(0, Math.trunc(n)) : 0; }
+
+  // Prefix FIXO: tem que bater com a view (PVStringGroupFormSet(prefix="strings"))
+  const prefix = "strings";
+
+  const tbody = q("#stringsTbody");
+  const btnAdd = q("#btnAddRow");
+  const tpl = q("#rowTemplate");
+  const totalForms = q("#id_" + prefix + "-TOTAL_FORMS");
+
+  const elTotStrings = q("#totStrings");
+  const elTotModules = q("#totModules");
+  const elTotMpsUnique = q("#totMpsUnique");
+
+  const formEl = q("#detailsForm");
+
+  if(!tbody || !btnAdd || !tpl || !totalForms){
+    console.error("Strings UI: elementos essenciais não encontrados.", {
+      tbody: !!tbody, btnAdd: !!btnAdd, tpl: !!tpl, totalForms: !!totalForms
+    });
+    return;
+  }
+
+  function recalc(){
+    const rows = qa("tr.row-string", tbody);
+
+    let totStrings = 0;
+    let totModules = 0;
+    const mpsSet = new Set();
+
+    rows.forEach(row => {
+      const del = q('input[type="checkbox"][name$="-DELETE"]', row);
+      const isDeleted = del ? del.checked : false;
+
+      const qtyInput = q('input[name$="-strings_qty"]', row);
+      const mpsInput = q('input[name$="-modules_per_string"]', row);
+
+      const qty = int0(qtyInput ? qtyInput.value : 0);
+      const mps = int0(mpsInput ? mpsInput.value : 0);
+
+      const rowTot = (!isDeleted) ? (qty * mps) : 0;
+      const rowTotalEl = q(".rowTotal", row);
+      if (rowTotalEl) rowTotalEl.textContent = rowTot ? String(rowTot) : "—";
+
+      if (!isDeleted){
+        if (qty > 0) totStrings += qty;
+        if (rowTot > 0) totModules += rowTot;
+        if (mps > 0) mpsSet.add(mps);
+      }
+    });
+
+    elTotStrings.textContent = totStrings ? String(totStrings) : "—";
+    elTotModules.textContent = totModules ? String(totModules) : "—";
+    elTotMpsUnique.textContent =
+      (mpsSet.size === 0) ? "—" :
+      (mpsSet.size === 1) ? String(Array.from(mpsSet)[0]) : "MIX";
+  }
+
+  function wireRow(row){
+    const qtyInput = q('input[name$="-strings_qty"]', row);
+    const mpsInput = q('input[name$="-modules_per_string"]', row);
+    const del = q('input[type="checkbox"][name$="-DELETE"]', row);
+
+    if (qtyInput) qtyInput.addEventListener("input", recalc);
+    if (mpsInput) mpsInput.addEventListener("input", recalc);
+    if (del) del.addEventListener("change", recalc);
+  }
+
+  function addRow(){
+    const idx = int0(totalForms.value);
+
+    // IMPORTANTÍSSIMO: o empty_form usa __prefix__ nos names/ids
+    const html = tpl.innerHTML.trim().replace(/__prefix__/g, String(idx));
+
+    const tmp = document.createElement("tbody");
+    tmp.innerHTML = html;
+    const row = tmp.firstElementChild;
+    if(!row) return;
+
+    tbody.appendChild(row);
+    totalForms.value = String(idx + 1);
+
+    wireRow(row);
+    recalc();
+  }
+
+  function autofillLabels(){
+    const rows = qa("tr.row-string", tbody);
+    let k = 1;
+    rows.forEach(row => {
+      const del = q('input[type="checkbox"][name$="-DELETE"]', row);
+      if (del && del.checked) return;
+
+      const inp =
+        q('input[name$="-label"]', row) ||
+        q('input[name$="-name"]', row);
+
+      if (inp && !String(inp.value || "").trim()){
+        inp.value = "S" + k;
+      }
+      k++;
+    });
+  }
+
+  document.addEventListener("DOMContentLoaded", () => {
+    qa("tr.row-string", tbody).forEach(wireRow);
+
+    btnAdd.addEventListener("click", (e) => {
+      e.preventDefault();
+      addRow();
+    });
+
+    if (formEl){
+      formEl.addEventListener("submit", () => {
+        autofillLabels();
+        recalc();
+      });
+    }
+
+    recalc();
+  });
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,202 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}Plantas Fotovoltaicas{% endblock %}
+
+{% block content %}
+  <header class="page-head">
+    <h1 class="page-title">Plantas Fotovoltaicas</h1>
+    <p class="page-sub">Visualize, filtre e ordene suas plantas cadastradas.</p>
+  </header>
+
+  <section class="dash" style="--cols: 12;">
+
+    <!-- CARD: Filtros / Ações -->
+    <article class="card glass accent-cyan" style="grid-column: 1 / -1;">
+      <div class="filters-toolbar">
+        <h3>Filtros</h3>
+        <div class="actions">
+          <a href="{% url 'plants:create' %}" class="btn btn-primary">+ Nova planta</a>
+        </div>
+      </div>
+
+      <form method="get" class="filters-grid">
+        <div>
+          <label class="form-label">Busca</label>
+          <input type="text" name="q" value="{{ q }}" placeholder="Buscar por nome" class="form-control">
+        </div>
+
+        {# opcional: filtro por fuso, se você passar tz_options no contexto #}
+        <div>
+          <label class="form-label">Fuso horário</label>
+          <select name="tz" class="form-control">
+            <option value="">— todos —</option>
+            {% for tz in tz_options %}
+              <option value="{{ tz }}" {% if tz == request.GET.tz %}selected{% endif %}>
+                {{ tz|default_if_none:"" }}
+              </option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="filters-buttons">
+          <button type="submit" class="btn btn-primary">Filtrar</button>
+          <a href="{% url 'plants:list' %}" class="btn btn-primary">Limpar</a>
+        </div>
+      </form>
+    </article>
+
+    {% if messages %}
+      <article class="card glass accent-rose" style="grid-column: 1 / -1;">
+        {% for message in messages %}
+          <div class="alert alert-{{ message.tags }} mb-2">{{ message }}</div>
+        {% endfor %}
+      </article>
+    {% endif %}
+
+    <!-- CARD: Resultados -->
+    <article class="card glass accent-green" style="grid-column: 1 / -1;">
+      <div class="flex-between" style="display:flex; justify-content:space-between; align-items:center;">
+        <h3 class="mb-2">Resultados</h3>
+        {% if is_paginated %}
+          <small class="text-muted">Página {{ page_obj.number }} de {{ page_obj.paginator.num_pages }}</small>
+        {% endif %}
+      </div>
+
+      <div class="table-wrap">
+        <table class="glass-table">
+          <thead>
+            {% with current_order=order|default:'asc' %}
+            <tr>
+              <th>
+                <a href="?q={{ q }}&tz={{ request.GET.tz }}&sort=nome&order={% if sort == 'nome' and current_order == 'asc' %}desc{% else %}asc{% endif %}">
+                  Nome
+                  {% if sort == 'nome' %}<span class="sort {% if current_order == 'desc' %}desc{% else %}asc{% endif %}"></span>{% endif %}
+                </a>
+              </th>
+              <th class="num">
+                <a href="?q={{ q }}&tz={{ request.GET.tz }}&sort=lat&order={% if sort == 'lat' and current_order == 'asc' %}desc{% else %}asc{% endif %}">
+                  Latitude
+                  {% if sort == 'lat' %}<span class="sort {% if current_order == 'desc' %}desc{% else %}asc{% endif %}"></span>{% endif %}
+                </a>
+              </th>
+              <th class="num">
+                <a href="?q={{ q }}&tz={{ request.GET.tz }}&sort=lon&order={% if sort == 'lon' and current_order == 'asc' %}desc{% else %}asc{% endif %}">
+                  Longitude
+                  {% if sort == 'lon' %}<span class="sort {% if current_order == 'desc' %}desc{% else %}asc{% endif %}"></span>{% endif %}
+                </a>
+              </th>
+              <th>
+                <a href="?q={{ q }}&tz={{ request.GET.tz }}&sort=tz&order={% if sort == 'tz' and current_order == 'asc' %}desc{% else %}asc{% endif %}">
+                  Fuso horário
+                  {% if sort == 'tz' %}<span class="sort {% if current_order == 'desc' %}desc{% else %}asc{% endif %}"></span>{% endif %}
+                </a>
+              </th>
+              <th class="actions-col">Ações</th>
+            </tr>
+            {% endwith %}
+          </thead>
+
+          <tbody>
+            {% with lista=plantas|default:object_list %}
+            {% for p in lista %}
+              <tr>
+                <td class="truncate">
+                  <a class="pill-link" href="{% url 'plants:detail' p.pk %}">{{ p.nome }}</a>
+                </td>
+                <td class="num">{{ p.latitude }}</td>
+                <td class="num">{{ p.longitude }}</td>
+                <td>{{ p.timezone }}</td>
+                <td class="table-actions">
+                  <a href="{% url 'plants:detail' p.pk %}" class="btn btn-primary">Ver</a>
+                  <a href="{% url 'plants:edit' p.pk %}" class="btn btn-primary">Editar</a>
+                  {% if p.pk %}
+                    <a href="{% url 'plants:cred_save' p.pk %}" class="btn btn-primary">Credenciais</a>
+                  {% endif %}
+                </td>
+              </tr>
+            {% empty %}
+              <tr><td colspan="5" class="text-muted">Nenhuma planta encontrada.</td></tr>
+            {% endfor %}
+            {% endwith %}
+          </tbody>
+        </table>
+      </div>
+
+      {% if is_paginated %}
+        <div class="pagination-ctrl">
+          {% if page_obj.has_previous %}
+            <a class="btn" href="?q={{ q }}&tz={{ request.GET.tz }}&page={{ page_obj.previous_page_number }}&sort={{ sort }}&order={{ order|default:'asc' }}">Anterior</a>
+          {% endif %}
+          <span class="text-muted">Página {{ page_obj.number }} de {{ page_obj.paginator.num_pages }}</span>
+          {% if page_obj.has_next %}
+            <a class="btn" href="?q={{ q }}&tz={{ request.GET.tz }}&page={{ page_obj.next_page_number }}&sort={{ sort }}&order={{ order|default:'asc' }}">Próxima</a>
+          {% endif %}
+        </div>
+      {% endif %}
+    </article>
+
+  </section>
+
+  <style>
+    /* toolbar do card de filtros */
+    .filters-toolbar{
+      display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:10px;
+    }
+    .filters-grid{
+      display:grid; grid-template-columns: repeat(6, minmax(160px, 1fr));
+      gap:12px; align-items:end;
+    }
+    .filters-buttons{ display:flex; gap:8px; }
+
+    /* tabela "glass" com melhor contraste e header colante */
+    .table-wrap{ max-height: 70vh; overflow:auto; border-radius:12px; }
+    .glass-table{
+      width:100%; border-collapse:separate; border-spacing:0; color: rgba(240,248,255,.95);
+      font-variant-numeric: tabular-nums;
+    }
+    .glass-table thead th{
+      position: sticky; top: 0; z-index: 2;
+      background: rgba(15, 40, 80, .45);
+      backdrop-filter: blur(6px) saturate(140%);
+      text-align:left; padding:.65rem .75rem; white-space:nowrap;
+      border-bottom: 1px solid rgba(255,255,255,.12);
+    }
+    .glass-table thead a{
+      color: inherit; text-decoration:none; display:inline-flex; align-items:center; gap:6px;
+    }
+    .glass-table thead a:hover{ text-decoration: underline; text-underline-offset: 2px; }
+    .glass-table tbody td{
+      padding:.6rem .75rem; border-bottom: 1px solid rgba(255,255,255,.06);
+    }
+    .glass-table tbody tr:nth-child(odd){ background: rgba(255,255,255,.02); }
+    .glass-table tbody tr:hover{ background: rgba(255,255,255,.05); }
+    .glass-table .num{ text-align:right; }
+    .truncate{ max-width: 360px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    /* setas de ordenação */
+    .sort{
+      width:0; height:0; border-left:5px solid transparent; border-right:5px solid transparent;
+      border-top:7px solid currentColor; opacity:.7; transform: translateY(1px);
+    }
+    .sort.desc{ border-top:none; border-bottom:7px solid currentColor; transform: translateY(-1px); }
+
+    /* ações como botões visíveis no vidro */
+    .pill-link{
+      display:inline-block; padding:.25rem .5rem; border-radius:999px;
+      background: rgba(255,255,255,.10); color:#e9f6ff; text-decoration:none; font-weight:600;
+    }
+    .pill-link:hover{ background: rgba(255,255,255,.18); }
+
+    .table-actions{ display:flex; gap:.4rem; justify-content:flex-end; }
+    .btn-sm{ padding:.35rem .6rem; border-radius:10px; font-size:.875rem; }
+    .btn-ghost{
+      background: transparent; border:1px solid rgba(255,255,255,.35); color:#fff;
+    }
+    .btn-ghost:hover{ background: rgba(255,255,255,.10); }
+    .actions-col{ text-align:right; }
+    .pagination-ctrl{ display:flex; gap:.5rem; justify-content:flex-end; align-items:center; margin-top:.5rem; }
+
+    /* contraste nos cards */
+    .card.glass.accent-green, .card.glass.accent-cyan{ color: rgba(240,248,255,.95); }
+  </style>
+{% endblock %}

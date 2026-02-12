@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+
+{% block title %}Cadastrar inversor{% endblock %}
+
+{% block content %}
+<header class="page-head">
+  <h1 class="page-title">Cadastrar inversor</h1>
+  <p class="page-sub">Preencha as especificações do inversor.</p>
+</header>
+
+<section class="dash">
+  <article class="card glass hero accent-cyan" style="grid-column: 1 / -1;">
+    <form method="post" novalidate>
+      {% csrf_token %}
+
+      {% if form.non_field_errors %}
+        <div class="alert alert-danger">
+          {{ form.non_field_errors }}
+        </div>
+      {% endif %}
+
+      <div style="display:grid; grid-template-columns: repeat(3, minmax(220px, 1fr)); gap: 1rem;">
+        <div class="ctl">
+          <label>Fabricante</label>
+          {{ form.fabricante }}
+          {{ form.fabricante.errors }}
+        </div>
+
+        <div class="ctl">
+          <label>Modelo</label>
+          {{ form.modelo }}
+          {{ form.modelo.errors }}
+        </div>
+
+        <div class="ctl">
+          <label>Potência AC nominal (W)</label>
+          {{ form.p_ac_nom_w }}
+          {{ form.p_ac_nom_w.errors }}
+        </div>
+
+        <div class="ctl">
+          <label>Tensão AC nominal (V)</label>
+          {{ form.v_ac_nom_v }}
+          {{ form.v_ac_nom_v.errors }}
+        </div>
+
+        <div class="ctl">
+          <label>MPPT min (V)</label>
+          {{ form.vdc_mppt_min_v }}
+          {{ form.vdc_mppt_min_v.errors }}
+        </div>
+
+        <div class="ctl">
+          <label>MPPT max (V)</label>
+          {{ form.vdc_mppt_max_v }}
+          {{ form.vdc_mppt_max_v.errors }}
+        </div>
+
+        <div class="ctl">
+          <label>VDC abs máx (V)</label>
+          {{ form.vdc_abs_max_v }}
+          {{ form.vdc_abs_max_v.errors }}
+        </div>
+
+        <div class="ctl">
+          <label>Qtd MPPT</label>
+          {{ form.mppt_count }}
+          {{ form.mppt_count.errors }}
+        </div>
+
+        <div class="ctl">
+          <label>Strings/MPPT (máx.)</label>
+          {{ form.strings_por_mppt_max }}
+          {{ form.strings_por_mppt_max.errors }}
+        </div>
+
+        <div class="ctl">
+          <label>Eficiência máx. (%)</label>
+          {{ form.eficiencia_max_pct }}
+          {{ form.eficiencia_max_pct.errors }}
+        </div>
+      </div>
+
+      <div style="display:flex; gap:.6rem; margin-top: 1rem;">
+        <button class="btn" type="submit">Salvar</button>
+        <a class="btn" href="{% url 'inverter_list' %}">Voltar</a>
+      </div>
+    </form>
+  </article>
+</section>
+{% endblock %}

@@ -1,0 +1,25 @@
+{# templates/pvmodules/detail.html #}
+{% extends "base.html" %}
+{% block content %}
+<h1>{{ m.fabricante }} — {{ m.nome }}</h1>
+
+<ul>
+  <li><strong>Pmp:</strong> {{ m.pmp_w }} W</li>
+  <li><strong>Vmp / Imp:</strong> {{ m.vmp_v }} V / {{ m.imp_a }} A</li>
+  <li><strong>Voc / Isc:</strong> {{ m.voc_v }} V / {{ m.isc_a }} A</li>
+  <li><strong>Eficiência:</strong> {{ m.eficiencia_pct }} %</li>
+  <li><strong>Power Tolerance:</strong> {{ m.power_tolerance|default:"—" }}</li>
+  <li><strong>Nº de células:</strong> {{ m.num_celulas }}</li>
+  <li><strong>Temp. Coeff (Voc):</strong> {{ m.temp_coeff_voc_pct_c }} %/°C</li>
+  <li><strong>Temp. Coeff (Isc):</strong> {{ m.temp_coeff_isc_pct_c }} %/°C</li>
+  <li><strong>Rs:</strong> {{ m.rs_ohm }} Ω</li>
+  <li><strong>Rp:</strong> {{ m.rp_ohm }} Ω</li>
+  <li><strong>a (fator de idealidade):</strong> {{ m.diode_a }}</li>
+
+</ul>
+
+<p>
+  <a href="{% url 'pvmodules:edit' m.pk %}">Editar</a> •
+  <a href="{% url 'pvmodules:list' %}">Voltar</a>
+</p>
+{% endblock %}

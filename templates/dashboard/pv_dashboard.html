@@ -1,0 +1,1991 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Dashboard FV{% endblock %}
+
+{% block extra_head %}
+  <script src="{% static 'vendor/chartjs/chart.umd.min.js' %}"></script>
+
+  <style>
+    .dash{
+      align-items: start;
+      align-content: start;
+      grid-auto-rows: min-content;
+    }
+    .dash > .card{ align-self: start; }
+
+    /* =========================================
+       TOP ROW: Filtros + HealthMap (50% | 50%)
+       ========================================= */
+    .top-row{
+      grid-column: 1 / -1;
+      display: flex;
+      gap: 12px;
+      align-items: stretch;
+    }
+    .top-row > .card{
+      flex: 1 1 0;
+      min-width: 0;
+      height: auto;
+    }
+    @media (max-width: 980px){
+      .top-row{ flex-direction: column; }
+    }
+
+    /* =========================================
+       KPIs pequenos padronizados
+       ========================================= */
+    .kpi-grid{
+      grid-column: 1 / -1;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 12px;
+      align-items: stretch;
+    }
+    .card.kpi{
+      min-height: 138px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+    .card.kpi h3{ margin-bottom: .25rem; }
+    .card.kpi .mini-sub{ margin-top: .1rem; }
+
+    /* mantém seus controles e padrões */
+    .ctl-row{display:flex; flex-wrap:wrap; gap:.8rem; align-items:flex-end;}
+    .ctl{display:flex; flex-direction:column; gap:.35rem; min-width: 220px;}
+    .ctl label{font-size:.85rem; opacity:.85}
+    .ctl select, .ctl input[type="date"]{
+      padding:.55rem .7rem;
+      border-radius:12px;
+      background: rgba(10,20,40,.35);
+      border:1px solid rgba(255,255,255,.18);
+      color:#e9f6ff;
+      outline:none;
+      backdrop-filter: blur(6px);
+    }
+    .ctl select option{color:#111;}
+    .ctl-actions{display:flex; gap:.9rem; align-items:flex-end; flex-wrap:wrap;}
+    .muted{opacity:.78; font-size:.85rem;}
+    .chart-wrap{width:100%; height:340px;}
+    .chart-wrap.sm{height:260px;}
+    canvas{width:100% !important; height:100% !important;}
+    .msg-inline{margin-top:.6rem; white-space:pre-wrap;}
+
+    .toggle{
+      display:flex; align-items:center; gap:.45rem;
+      padding:.35rem .55rem;
+      border:1px solid rgba(255,255,255,.18);
+      border-radius: 999px;
+      background: rgba(255,255,255,.06);
+      user-select:none;
+    }
+    .toggle input{ transform: translateY(1px); }
+
+    .info-grid{
+      grid-column: 1 / -1;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+      gap: 12px;
+      align-items: start;
+    }
+    .info-grid > .card{ min-width: 0; }
+
+    .mini-kv{
+      display:grid;
+      grid-template-columns: minmax(120px, 48%) minmax(0, 1fr);
+      gap: 6px 12px;
+      margin-top:.35rem;
+    }
+    .mini-kv .k{opacity:.85}
+    .mini-kv .v{
+      font-weight:650;
+      min-width:0;
+      overflow-wrap:anywhere;
+      word-break: break-word;
+    }
+
+    .audit-grid{display:grid; grid-template-columns: repeat(12, 1fr); gap: 12px;}
+    .audit-item{grid-column: span 6; min-width:0;}
+    @media (max-width: 980px){
+      .audit-item{grid-column: 1 / -1;}
+    }
+    .kv{display:grid; grid-template-columns: minmax(140px, 220px) minmax(0, 1fr); gap: 6px 12px; margin-top: .4rem;}
+    .kv .k{opacity:.85}
+    .kv .v{font-weight:600; min-width:0; overflow-wrap:anywhere; word-break:break-word;}
+    .tag{display:inline-block; padding:.15rem .5rem; border-radius:999px; font-size:.78rem; border:1px solid rgba(255,255,255,.20); background: rgba(255,255,255,.06); margin-right:.35rem;}
+    .tag.ok{border-color: rgba(90,255,190,.35);}
+    .tag.warn{border-color: rgba(255,190,90,.35);}
+    .tag.err{border-color: rgba(255,110,140,.35);}
+    .mono{font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;}
+
+    /* --- Gauge + legends + sankey --- */
+    .gauge-grid{
+      display:grid;
+      grid-template-columns: 140px 1fr;
+      gap: 12px;
+      align-items:center;
+      margin-top:.35rem;
+    }
+    .gauge-box{height:120px; width:140px;}
+    .gauge-meta .big{font-size:1.15rem; font-weight:750;}
+    .gauge-meta .sub{opacity:.82; margin-top:.15rem}
+    .legend-wrap{margin-top:.5rem; display:flex; flex-wrap:wrap; gap:.35rem .45rem;}
+    .legend-dot{
+      display:inline-flex; align-items:center; gap:.35rem;
+      border:1px solid rgba(255,255,255,.18);
+      border-radius:999px; padding:.15rem .45rem;
+      background: rgba(255,255,255,.06);
+      font-size:.78rem; opacity:.92;
+    }
+    .dot{width:10px; height:10px; border-radius:999px; display:inline-block;}
+
+    .sankey-wrap{
+      width:100%;
+      height:320px;
+      background: rgba(255,255,255,.03);
+      border: 1px solid rgba(255,255,255,.10);
+      border-radius: 16px;
+      overflow:hidden;
+      padding: 8px;
+    }
+    .sankey-wrap svg{width:100%; height:100%; display:block;}
+    .sankey-node{fill: rgba(255,255,255,.08); stroke: rgba(255,255,255,.22); stroke-width: 1;}
+    .sankey-label{fill: rgba(233,246,255,.90); font-size: 12px;}
+    .sankey-small{fill: rgba(233,246,255,.72); font-size: 11px;}
+    .sankey-link{fill:none; stroke: rgba(90,200,255,.50);}
+
+    /* --- Card ações / métricas --- */
+    .hero-metrics{
+      display:flex;
+      flex-wrap:wrap;
+      gap: 10px 14px;
+      margin-top: .6rem;
+      align-items: stretch;
+    }
+
+    .hero-pill{
+      display:flex;
+      align-items:center;
+      gap:.45rem;
+      padding:.35rem .55rem;
+      border:1px solid rgba(255,255,255,.18);
+      border-radius: 999px;
+      background: rgba(255,255,255,.06);
+      font-size:.80rem;
+      opacity:.95;
+      user-select:none;
+      white-space: nowrap;
+    }
+    .hero-pill .dot{
+      width:10px; height:10px; border-radius:999px;
+      background: rgba(255,255,255,.35);
+      box-shadow: 0 0 0 2px rgba(0,0,0,.10) inset;
+    }
+    .hero-pill.ok .dot{ background: rgba(90,255,190,.95); }
+    .hero-pill.warn .dot{ background: rgba(255,190,90,.95); }
+    .hero-pill.crit .dot{ background: rgba(255,110,140,.95); }
+    .hero-pill.neutral .dot{ background: rgba(110,210,255,.95); }
+
+    .hero-actions{
+      display:grid;
+      grid-template-columns: 1.2fr .8fr;
+      gap: 14px;
+      margin-top: .8rem;
+      align-items: start;
+    }
+    @media (max-width: 980px){
+      .hero-actions{ grid-template-columns: 1fr; }
+    }
+
+    .hero-box{
+      padding: .75rem .85rem;
+      border:1px solid rgba(255,255,255,.12);
+      border-radius: 16px;
+      background: rgba(255,255,255,.04);
+    }
+
+    .hero-kv{
+      display:grid;
+      grid-template-columns: minmax(140px, 220px) minmax(0, 1fr);
+      gap: 6px 10px;
+      margin-top: .35rem;
+      font-size: .92rem;
+    }
+    .hero-kv .k{ opacity:.80; }
+    .hero-kv .v{
+      font-weight:650;
+      overflow-wrap:anywhere;
+      word-break: break-word;
+    }
+
+    .hero-cta{
+      display:flex;
+      flex-direction:column;
+      gap: 10px;
+    }
+
+    /* =========================================================
+       Botões personalizados (base) + variantes
+       ========================================================= */
+    .btn-glow{
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      gap:.55rem;
+
+      padding: .70rem .95rem;
+
+      border-radius: 14px;
+      border: 1px solid rgba(110,210,255,.35);
+      background: linear-gradient(180deg, rgba(110,210,255,.22), rgba(90,200,255,.08));
+      color: rgba(233,246,255,.96);
+      text-decoration:none;
+      font-weight: 750;
+      letter-spacing: .2px;
+
+      box-shadow: 0 10px 24px rgba(0,0,0,.22);
+      transition: transform .12s ease, box-shadow .12s ease, border-color .12s ease, background .12s ease;
+
+      cursor: pointer;
+      appearance: none;
+      -webkit-appearance: none;
+      outline: none;
+    }
+    .btn-glow:hover{
+      transform: translateY(-1px);
+      border-color: rgba(110,210,255,.55);
+      box-shadow: 0 14px 34px rgba(0,0,0,.28);
+      background: linear-gradient(180deg, rgba(110,210,255,.28), rgba(90,200,255,.10));
+    }
+    .btn-glow:active{
+      transform: translateY(0px);
+      box-shadow: 0 8px 18px rgba(0,0,0,.22);
+    }
+    .btn-glow:disabled{
+      opacity: .65;
+      cursor: not-allowed;
+      transform: none;
+      box-shadow: 0 8px 18px rgba(0,0,0,.18);
+    }
+
+    .btn-glow .icon{
+      width: 18px;
+      height: 18px;
+      opacity:.95;
+      flex: 0 0 auto;
+    }
+    .btn-glow .label{
+      display:inline-block;
+      line-height: 1;
+    }
+
+    .btn-heatmap{ width: 90%; }
+    .btn-update{ width: 100%; }
+
+    .hero-help{
+      font-size:.85rem;
+      opacity:.80;
+      line-height:1.35;
+    }
+
+    .mini-steps{
+      display:flex;
+      flex-direction:column;
+      gap: 8px;
+      margin-top: 4px;
+    }
+    .step{ display:flex; gap:.6rem; align-items:flex-start; }
+    .step .step-ico{ width:16px; height:16px; margin-top:2px; opacity:.9; }
+    .step .txt{ font-size:.85rem; opacity:.85; line-height:1.35; }
+    .step .txt b{ opacity:.95; }
+
+    /* --- Filtros no padrão "hero + boxes" --- */
+    .filters-head{
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap: 12px;
+      width:100%;
+    }
+    .filters-title{
+      display:flex;
+      gap:.55rem;
+      align-items:center;
+      margin:0;
+    }
+    .filters-sub{
+      margin:.15rem 0 0;
+      opacity:.85;
+    }
+
+    .filters-pills{
+      display:flex;
+      flex-wrap:wrap;
+      gap: 10px 14px;
+      margin-top: .6rem;
+      align-items: stretch;
+    }
+
+    .filters-grid{
+      display:grid;
+      grid-template-columns: 1.35fr .65fr;
+      gap: 14px;
+      margin-top: .85rem;
+      align-items: start;
+    }
+    @media (max-width: 980px){
+      .filters-grid{ grid-template-columns: 1fr; }
+    }
+
+    .filters-box{
+      padding: .75rem .85rem;
+      border:1px solid rgba(255,255,255,.12);
+      border-radius: 16px;
+      background: rgba(255,255,255,.04);
+    }
+
+    .pill{
+      display:flex;
+      align-items:center;
+      gap:.45rem;
+      padding:.35rem .55rem;
+      border:1px solid rgba(255,255,255,.18);
+      border-radius: 999px;
+      background: rgba(255,255,255,.06);
+      font-size:.80rem;
+      opacity:.95;
+      user-select:none;
+      white-space: nowrap;
+    }
+    .pill .dot{
+      width:10px; height:10px; border-radius:999px;
+      background: rgba(255,255,255,.35);
+      box-shadow: 0 0 0 2px rgba(0,0,0,.10) inset;
+    }
+    .pill.neutral .dot{ background: rgba(110,210,255,.95); }
+    .pill.ok .dot{ background: rgba(90,255,190,.95); }
+    .pill.warn .dot{ background: rgba(255,190,90,.95); }
+
+    .filters-actions{
+      display:flex;
+      flex-direction:column;
+      gap: 10px;
+    }
+
+    .filters-actions .btn-row{
+      display:flex;
+      gap: 10px;
+      flex-wrap:wrap;
+      align-items:center;
+    }
+
+    .filters-meta{
+      font-size:.86rem;
+      opacity:.86;
+      line-height:1.35;
+      border-top: 1px solid rgba(255,255,255,.10);
+      padding-top: .55rem;
+      margin-top: .25rem;
+    }
+
+    .filters-meta .mono{ opacity:.95; }
+
+    .toggle{
+      background: rgba(255,255,255,.06);
+      border:1px solid rgba(255,255,255,.18);
+      border-radius: 999px;
+      padding:.35rem .55rem;
+    }
+    .toggle:hover{ border-color: rgba(255,255,255,.28); }
+
+    .msg-inline{
+      margin-top:.6rem;
+      padding:.55rem .65rem;
+      border-radius: 14px;
+      border:1px solid rgba(255,255,255,.12);
+      background: rgba(255,255,255,.04);
+    }
+  </style>
+{% endblock %}
+
+{% block content %}
+  <header class="page-head">
+    <h1 class="page-title">Dashboard FV</h1>
+    <p class="page-sub">Selecione a planta e o intervalo para visualizar potência, meteorologia e diagnóstico (tempo local da planta).</p>
+  </header>
+
+  <section class="dash">
+
+    <!-- =========================================================
+         TOP: 2 cards lado a lado (Filtros | HealthMap) 50% | 50%
+         ========================================================= -->
+    <div class="top-row">
+
+      <!-- CARD: FILTROS -->
+      <article class="card glass hero accent-cyan">
+        <div style="width:100%;">
+
+          <div class="filters-head">
+            <div>
+              <h3 class="filters-title">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true" style="opacity:.92;">
+                  <path d="M4 6h16M7 12h10M10 18h4" stroke="rgba(233,246,255,.92)" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+                Filtros
+              </h3>
+
+              <p class="filters-sub">
+                Selecione a planta e o intervalo. O dashboard usa <b>tempo local da planta</b> e valida cobertura/sources no backend.
+              </p>
+
+              <div class="filters-pills" aria-label="Resumo rápido dos filtros">
+                <span class="pill neutral"><span class="dot"></span> Planta + TZ</span>
+                <span class="pill ok"><span class="dot"></span> Intervalo (start/end)</span>
+                <span class="pill warn"><span class="dot"></span> Operativo (strings/MPPT)</span>
+              </div>
+            </div>
+
+            <div class="tag ok" style="white-space:nowrap; margin-top:.1rem;">
+              <span class="mono">timeseries</span>
+            </div>
+          </div>
+
+          <div class="filters-grid">
+
+            <!-- BOX ESQUERDA: FORM + BOTÃO ATUALIZAR (abaixo do form) -->
+            <div class="filters-box">
+              <form id="dashForm" class="ctl-row" style="margin-top:0;">
+                <div class="ctl">
+                  <label for="plantSelect">Planta</label>
+
+                  <select id="plantSelect" name="plant_id">
+                    {% for p in plants %}
+                      <option
+                        value="{{ p.id }}"
+                        data-tz="{{ p.timezone|default:'UTC' }}"
+                        data-nome="{{ p.nome }}"
+                      >
+                        {{ p.nome }}
+                      </option>
+                    {% endfor %}
+                  </select>
+                </div>
+
+                <div class="ctl" style="min-width:170px;">
+                  <label for="startDate">Data inicial</label>
+                  <input id="startDate" name="start" type="date" value="{{ default_start }}">
+                </div>
+
+                <div class="ctl" style="min-width:170px;">
+                  <label for="endDate">Data final</label>
+                  <input id="endDate" name="end" type="date" value="{{ default_end }}">
+                </div>
+
+                <div class="ctl" style="min-width:260px;">
+                  <label for="operSourceSelect">Operativo (strings/MPPT)</label>
+                  <select id="operSourceSelect" name="source_oper">
+                    <option value="ALL">Total (todas as fontes)</option>
+                  </select>
+                </div>
+              </form>
+
+              <!-- BOTÃO PERSONALIZADO: abaixo do form -->
+              <div style="margin-top: 10px;">
+                <button id="btnRefresh" type="submit" form="dashForm" class="btn-glow btn-update">
+                  <svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path d="M21 12a9 9 0 1 1-2.64-6.36" stroke="rgba(233,246,255,.92)" stroke-width="2" stroke-linecap="round"/>
+                    <path d="M21 4v6h-6" stroke="rgba(233,246,255,.92)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                  </svg>
+                  <span class="label">Atualizar</span>
+                </button>
+              </div>
+
+              <div id="msgBox" class="mini-sub msg-inline" style="display:none;"></div>
+            </div>
+
+            <!-- BOX DIREITA: TOGGLES + META -->
+            <div class="filters-box">
+              <div class="filters-actions">
+                <div class="btn-row">
+                  <label class="toggle muted" title="Quando marcado, plota P_AC por source_oper (strings/MPPT) no gráfico de potência.">
+                    <input id="chkPerSource" type="checkbox" checked>
+                    Mostrar por string
+                  </label>
+
+                  <label class="toggle muted" title="Quando marcado, aplica histerese temporal no timeline (mantém somente falhas persistentes).">
+                    <input id="chkHyst" type="checkbox" checked>
+                    Aplicar histerese (≥ 60 min)
+                  </label>
+                </div>
+
+                <div class="filters-meta">
+                  <div><b>Contexto</b></div>
+                  <div><span id="plantTzLabel">TZ: —</span></div>
+                  <div><span id="sourceLabel">Oper: — | Meteo: —</span></div>
+                  <div><span id="debugLabel">Pts: —</span></div>
+
+                  <div class="muted" style="margin-top:.45rem;">
+                    Dica: se <span class="mono">Pts</span> ficar “—” ou 0, revise intervalo, credenciais e ingest.
+                  </div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </article>
+
+      <!-- CARD: HEALTH MAP / MÉTRICAS -->
+      <article class="card glass hero accent-cyan">
+        <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:12px; width:100%;">
+          <div>
+            <h3 style="display:flex; gap:.55rem; align-items:center; margin-bottom:.2rem;">
+              <svg class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true" style="opacity:.92;">
+                <path d="M4 19V5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14" stroke="rgba(233,246,255,.92)" stroke-width="2" stroke-linecap="round"/>
+                <path d="M8 17v-6M12 17V7M16 17v-3" stroke="rgba(233,246,255,.92)" stroke-width="2" stroke-linecap="round"/>
+              </svg>
+              Visualizar outras métricas
+            </h3>
+
+            <p class="page-sub" style="margin:.1rem 0 0; opacity:.85;">
+              Acesse o <b>Health Map anual</b> (estilo GitHub) para ver disponibilidade, persistência de falhas e cobertura por dia.
+            </p>
+
+            <div class="hero-metrics" aria-label="Legenda de status do heatmap">
+              <span class="hero-pill ok"><span class="dot"></span> OK</span>
+              <span class="hero-pill warn"><span class="dot"></span> WARN</span>
+              <span class="hero-pill crit"><span class="dot"></span> CRIT/FAIL</span>
+              <span class="hero-pill neutral"><span class="dot"></span> Intensidade por cobertura</span>
+            </div>
+          </div>
+
+          <div class="tag ok" style="white-space:nowrap; margin-top:.1rem;">
+            <span class="mono">/pv/heatmap/</span>
+          </div>
+        </div>
+
+        <div class="hero-actions">
+          <div class="hero-box">
+            <div class="muted" style="display:flex; align-items:center; gap:.5rem;">
+              <svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true" style="opacity:.9;">
+                <path d="M12 21s7-4.35 7-10A7 7 0 1 0 5 11c0 5.65 7 10 7 10Z" stroke="rgba(233,246,255,.88)" stroke-width="2"/>
+                <path d="M12 11.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z" stroke="rgba(233,246,255,.88)" stroke-width="2"/>
+              </svg>
+              <span><b>Contexto selecionado</b> (auto)</span>
+            </div>
+
+            <div class="hero-kv">
+              <div class="k">Planta</div>
+              <div class="v"><span id="hmPlantName">—</span></div>
+
+              <div class="k">Ano</div>
+              <div class="v"><span id="hmYear">—</span></div>
+
+              <div class="k">Timezone</div>
+              <div class="v"><span id="hmTz">—</span></div>
+
+              <div class="k">Intervalo atual</div>
+              <div class="v"><span id="hmRange">—</span></div>
+            </div>
+
+            <div class="mini-steps">
+              <div class="step">
+                <svg class="step-ico" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M20 7 10 17l-5-5" stroke="rgba(90,255,190,.95)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                <div class="txt"><b>Cobertura</b> modula a intensidade (0..1). Útil para detectar lacunas de aquisição.</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="hero-cta">
+            <a id="btnHeatmapCard" class="btn-glow btn-heatmap" href="/pv/heatmap/" title="Abrir Health Map anual">
+              <svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M7 3v3M17 3v3" stroke="rgba(233,246,255,.92)" stroke-width="2" stroke-linecap="round"/>
+                <path d="M4 8h16" stroke="rgba(233,246,255,.92)" stroke-width="2" stroke-linecap="round"/>
+                <path d="M6 5h12a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z" stroke="rgba(233,246,255,.92)" stroke-width="2"/>
+                <path d="M8 12h2v2H8v-2Zm3 0h2v2h-2v-2Zm3 0h2v2h-2v-2ZM8 15h2v2H8v-2Zm3 0h2v2h-2v-2Z"
+                      fill="rgba(110,210,255,.85)"/>
+              </svg>
+              <span class="label">Abrir Health Map</span>
+            </a>
+
+            <div class="hero-help">
+              <div class="muted">
+                Dica: o botão usa a <b>planta selecionada</b> e o <b>ano</b> do filtro (data final) para abrir o heatmap já filtrado.
+              </div>
+              <div class="muted" style="margin-top:.4rem;">
+                Se não houver dados, você verá dias com <b>ERR</b> e cobertura baixa — útil para auditoria de ingestão.
+              </div>
+            </div>
+          </div>
+        </div>
+      </article>
+
+    </div><!-- /top-row -->
+
+
+    <!-- =========================================================
+         KPIs pequenos padronizados (tiles)
+         ========================================================= -->
+    <div class="kpi-grid">
+
+      <article class="card glass mini kpi accent-cyan">
+        <h3>Energia (real)</h3>
+        <div class="mini-val"><span id="kpiEnergy">—</span> <small>kWh</small></div>
+        <div class="mini-sub">no intervalo</div>
+      </article>
+
+      <article class="card glass mini kpi accent-cyan">
+        <h3>Energia (modelo)</h3>
+        <div class="mini-val"><span id="kpiEnergyModel">—</span> <small>kWh</small></div>
+        <div class="mini-sub">no intervalo</div>
+      </article>
+
+      <article class="card glass mini kpi accent-amber">
+        <h3>Pico P<sub>AC</sub></h3>
+        <div class="mini-val"><span id="kpiPacMax">—</span> <small>W</small></div>
+        <div class="mini-sub">no intervalo</div>
+      </article>
+
+      <article class="card glass mini kpi accent-amber">
+        <h3>Pico GHI</h3>
+        <div class="mini-val"><span id="kpiGhiMax">—</span> <small>W/m²</small></div>
+        <div class="mini-sub">no intervalo</div>
+      </article>
+
+      <article class="card glass mini kpi accent-green">
+        <h3>Cobertura inversor</h3>
+        <div class="mini-val"><span id="kpiInvCov">—</span></div>
+        <div class="mini-sub">média (0..1)</div>
+      </article>
+
+      <article class="card glass mini kpi accent-green">
+        <h3>Instabilidade G (60 min)</h3>
+        <div class="mini-val"><span id="kpiGcv">—</span></div>
+        <div class="mini-sub">CV (0..∞), menor é melhor</div>
+      </article>
+
+      <article class="card glass mini kpi accent-rose">
+        <h3>Mismatch médio</h3>
+        <div class="mini-val"><span id="kpiMismatchMean">—</span></div>
+        <div class="mini-sub">(P<sub>real</sub>−P<sub>modelo</sub>)/P<sub>modelo</sub></div>
+      </article>
+
+    </div><!-- /kpi-grid -->
+
+
+    <!-- Gauge maior (mantém fora do padrão dos KPIs pequenos) -->
+    <article class="card glass mini accent-green" style="grid-column: 1 / -1;">
+      <h3>Confiabilidade meteorológica</h3>
+      <div class="gauge-grid">
+        <div class="gauge-box">
+          <canvas id="chartGauge"></canvas>
+        </div>
+        <div class="gauge-meta">
+          <div class="big"><span id="gaugeLabel">—</span></div>
+          <div class="sub">Score: <span id="gaugeScore">—</span> • g<sub>cv</sub> (stat): <span id="gaugeGcv">—</span></div>
+          <div class="sub muted">Regra: g<sub>cv</sub> &lt; 0.1 (alta) • g<sub>cv</sub> &gt; 0.4 (baixa)</div>
+        </div>
+      </div>
+    </article>
+
+    <div class="info-grid">
+      <article class="card glass mini accent-cyan">
+        <h3>Planta (cadastro)</h3>
+        <div class="mini-kv">
+          <div class="k">Módulo</div>
+          <div class="v"><span id="piModuleModel">—</span></div>
+
+          <div class="k">Inversor</div>
+          <div class="v"><span id="piInvModel">—</span></div>
+
+          <div class="k">Strings</div>
+          <div class="v"><span id="piStrings">—</span></div>
+
+          <div class="k">Módulos/string</div>
+          <div class="v"><span id="piMps">—</span></div>
+
+          <div class="k">Módulos (total)</div>
+          <div class="v"><span id="piModulesTotal">—</span></div>
+        </div>
+      </article>
+
+      <article class="card glass mini accent-amber">
+        <h3>Geometria / Modelo</h3>
+        <div class="mini-kv">
+          <div class="k">Tilt (°)</div>
+          <div class="v"><span id="piTilt">—</span></div>
+
+          <div class="k">Azimute (°)</div>
+          <div class="v"><span id="piAz">—</span></div>
+
+          <div class="k">k_sys</div>
+          <div class="v"><span id="piKsys">—</span></div>
+
+          <div class="k">NOCT (°C)</div>
+          <div class="v"><span id="piNoct">—</span></div>
+
+          <div class="k">P_STC módulo (W)</div>
+          <div class="v"><span id="piPstc">—</span></div>
+
+          <div class="k">P_AC nominal inv (W)</div>
+          <div class="v"><span id="piPacNom">—</span></div>
+        </div>
+      </article>
+    </div>
+
+    <article class="card glass trend accent-cyan" style="grid-column: 1 / -1;">
+      <h3>Potência</h3>
+      <div class="trend-legend muted">
+        P<sub>AC</sub> real vs P<sub>AC</sub> modelo e P<sub>DC</sub>.
+        (Opcional: P<sub>AC</sub> por string/MPPT via <span class="mono">series_by_source</span>)
+      </div>
+      <div class="chart-wrap"><canvas id="chartPower"></canvas></div>
+    </article>
+
+    <article class="card glass trend accent-amber" style="grid-column: 1 / -1;">
+      <h3>Meteorologia</h3>
+      <div class="trend-legend muted">GHI/GTI e temperatura (eixo X em tempo local)</div>
+      <div class="chart-wrap"><canvas id="chartMeteo"></canvas></div>
+    </article>
+
+    <article class="card glass trend accent-rose" style="grid-column: 1 / -1;">
+      <h3>Diagnóstico (modelo físico e normalizações)</h3>
+      <div class="trend-legend muted">PR instantâneo, potência normalizada e mismatch.</div>
+      <div class="chart-wrap"><canvas id="chartDiag"></canvas></div>
+    </article>
+
+    <article class="card glass trend accent-cyan" style="grid-column: 1 / -1;">
+      <h3>Resíduo vs Instabilidade</h3>
+      <div class="trend-legend muted">
+        Eixo X: g<sub>cv</sub> (60 min) • Eixo Y: mismatch_rel • Pontos coloridos por <span class="mono">rca_label</span>.
+        <div class="legend-wrap" id="scatterLegend"></div>
+      </div>
+      <div class="chart-wrap sm"><canvas id="chartScatter"></canvas></div>
+    </article>
+
+    <article class="card glass trend accent-amber" style="grid-column: 1 / -1;">
+      <h3>Diagrama de perdas (Sankey)</h3>
+      <div class="trend-legend muted">
+        Decomposição do modelo: P_STC → perdas → η inversor → P_AC_exp.
+      </div>
+      <div class="sankey-wrap">
+        <svg id="sankeySvg" viewBox="0 0 1000 320" preserveAspectRatio="none"></svg>
+      </div>
+      <div class="muted" style="margin-top:.4rem;">
+        <span class="mono">Obs.:</span> o backend envia nós/links em <span class="mono">payload.charts.sankey</span>.
+      </div>
+    </article>
+
+    <article class="card glass trend accent-rose" style="grid-column: 1 / -1;">
+      <h3>Timeline de persistência de falha</h3>
+      <div class="trend-legend muted">
+        Barra colorida por estado. Use o toggle “Aplicar histerese” para remover flickering (≥ 60 min).
+        <div class="legend-wrap" id="timelineLegend"></div>
+      </div>
+      <div class="chart-wrap sm"><canvas id="chartTimeline"></canvas></div>
+    </article>
+
+    <article class="card glass trend accent-cyan" style="grid-column: 1 / -1;">
+      <h3>Tensão e Corrente</h3>
+      <div class="trend-legend muted">Vdc/Idc e Vac/Iac (15 min)</div>
+      <div class="chart-wrap"><canvas id="chartVI"></canvas></div>
+    </article>
+
+    <article class="card glass accent-cyan" style="grid-column: 1 / -1;">
+      <h3>Auditoria (o que foi aplicado neste pipeline)</h3>
+      <div class="muted">Preenchido automaticamente a partir do payload do endpoint.</div>
+
+      <div class="audit-grid" style="margin-top:.6rem;">
+        <div class="audit-item">
+          <div class="tag ok" id="tagHasModel">Modelo: —</div>
+          <div class="tag warn" id="tagHasNorm">Normalização: —</div>
+          <div class="tag warn" id="tagHasStability">Estabilidade G: —</div>
+          <div class="tag err" id="tagModelErr">Erro modelo: —</div>
+
+          <div class="kv">
+            <div class="k">Planta / TZ</div>
+            <div class="v"><span id="audPlant">—</span> <span class="muted">(<span id="audTz">—</span>)</span></div>
+
+            <div class="k">Intervalo (local)</div>
+            <div class="v"><span id="audRangeLocal">—</span></div>
+
+            <div class="k">Intervalo (UTC)</div>
+            <div class="v mono"><span id="audRangeUtc">—</span></div>
+
+            <div class="k">Sources (oper / meteo)</div>
+            <div class="v mono"><span id="audSources">—</span></div>
+
+            <div class="k">Pontos</div>
+            <div class="v"><span id="audPoints">—</span></div>
+          </div>
+        </div>
+
+        <div class="audit-item">
+          <div class="kv">
+            <div class="k">Detalhes da modelagem</div>
+            <div class="v muted">Aparecem quando o backend expõe os campos.</div>
+
+            <div class="k">inv_eff aplicado</div>
+            <div class="v"><span id="audInvEff">—</span></div>
+
+            <div class="k">k_sys</div>
+            <div class="v"><span id="audKsys">—</span></div>
+
+            <div class="k">NOCT (°C)</div>
+            <div class="v"><span id="audNoct">—</span></div>
+
+            <div class="k">G usado</div>
+            <div class="v"><span id="audGsource">—</span></div>
+
+            <div class="k">Observações</div>
+            <div class="v muted">Se “Normalização”/“Estabilidade G” estiver “—”, não há dados suficientes ou o backend não emitiu as séries.</div>
+          </div>
+        </div>
+      </div>
+    </article>
+
+  </section>
+
+  <script>
+    const apiUrl = "{% url 'pv_dashboard_api_timeseries' %}";
+
+    let chartPower   = null;
+    let chartMeteo   = null;
+    let chartDiag    = null;
+    let chartVI      = null;
+
+    let chartGauge   = null;
+    let chartScatter = null;
+    let chartTimeline = null;
+
+    function $(id){ return document.getElementById(id); }
+
+    function showMsg(text){
+      const el = $("msgBox");
+      if(!el) return;
+      if(!text){
+        el.style.display = "none";
+        el.textContent = "";
+        return;
+      }
+      el.style.display = "block";
+      el.textContent = text;
+    }
+
+    function setLoading(isLoading){
+      const btn = $("btnRefresh");
+      if(!btn) return;
+
+      btn.disabled = !!isLoading;
+
+      // Preserva ícone + estrutura do botão
+      const label = btn.querySelector(".label");
+      if (label){
+        label.textContent = isLoading ? "Carregando..." : "Atualizar";
+      } else {
+        btn.textContent = isLoading ? "Carregando..." : "Atualizar";
+      }
+    }
+
+    function fmt(v, digits=3){
+      if (v === null || v === undefined) return "—";
+      const n = Number(v);
+      if (!Number.isFinite(n)) return "—";
+      return (digits != null) ? n.toFixed(digits).replace(/\.?0+$/,'') : String(n);
+    }
+
+    function meanFinite(arr){
+      let s = 0, c = 0;
+      for (const v of (arr || [])){
+        const n = Number(v);
+        if (Number.isFinite(n)){ s += n; c++; }
+      }
+      return c ? (s / c) : null;
+    }
+
+    function setKpis(kpis, series){
+      $("kpiEnergy").textContent = (kpis && kpis.energy_kwh != null) ? kpis.energy_kwh : "—";
+      const elModel = $("kpiEnergyModel");
+      if (elModel) elModel.textContent = (kpis && kpis.energy_model_kwh != null) ? kpis.energy_model_kwh : "—";
+
+      $("kpiPacMax").textContent = (kpis && kpis.p_ac_max_w != null) ? kpis.p_ac_max_w : "—";
+      $("kpiGhiMax").textContent = (kpis && kpis.ghi_max_wm2 != null) ? kpis.ghi_max_wm2 : "—";
+      $("kpiInvCov").textContent = (kpis && kpis.inv_coverage_mean != null) ? kpis.inv_coverage_mean : "—";
+
+      const gcvArr = series?.g_cv_60m;
+      const gcvMean = meanFinite(gcvArr);
+      $("kpiGcv").textContent = (gcvMean == null) ? "—" : fmt(gcvMean, 3);
+
+      const misArr = series?.mismatch_rel;
+      const misMean = meanFinite(misArr);
+      $("kpiMismatchMean").textContent = (misMean == null) ? "—" : fmt(misMean, 3);
+    }
+
+    function destroyCharts(){
+      if(chartPower){ chartPower.destroy(); chartPower = null; }
+      if(chartMeteo){ chartMeteo.destroy(); chartMeteo = null; }
+      if(chartDiag){  chartDiag.destroy();  chartDiag  = null; }
+      if(chartVI){    chartVI.destroy();    chartVI    = null; }
+      if(chartGauge){ chartGauge.destroy(); chartGauge = null; }
+      if(chartScatter){ chartScatter.destroy(); chartScatter = null; }
+      if(chartTimeline){ chartTimeline.destroy(); chartTimeline = null; }
+    }
+
+    function buildLabels(x){
+      return (x || []).map(s => {
+        try{
+          const d = new Date(s);
+          const dd = String(d.getDate()).padStart(2,"0");
+          const mm = String(d.getMonth()+1).padStart(2,"0");
+          const hh = String(d.getHours()).padStart(2,"0");
+          const mi = String(d.getMinutes()).padStart(2,"0");
+          return `${dd}/${mm} ${hh}:${mi}`;
+        }catch(e){
+          return String(s || "");
+        }
+      });
+    }
+
+    const COLORS = {
+      pac:   "rgba(90, 200, 255, 0.98)",
+      pacm:  "rgba(90, 255, 190, 0.98)",
+      pdc:   "rgba(255, 110, 140, 0.98)",
+
+      ghi:   "rgba(110, 210, 255, 0.98)",
+      gti:   "rgba(255, 190, 90, 0.98)",
+      temp:  "rgba(255, 220, 120, 0.98)",
+
+      prR:   "rgba(255, 110, 140, 0.98)",
+      prM:   "rgba(90, 255, 190, 0.98)",
+      puR:   "rgba(90, 200, 255, 0.98)",
+      puM:   "rgba(190, 170, 255, 0.98)",
+      mis:   "rgba(255, 110, 140, 0.98)",
+      gcv:   "rgba(255, 190, 90, 0.98)",
+      csi:   "rgba(110, 210, 255, 0.98)",
+      eta:   "rgba(90, 255, 190, 0.98)",
+
+      vdc:   "rgba(110, 210, 255, 0.98)",
+      idc:   "rgba(255, 190, 90, 0.98)",
+      vac:   "rgba(90, 255, 190, 0.98)",
+      iac:   "rgba(255, 110, 140, 0.98)",
+
+      text:  "rgba(233, 246, 255, 0.92)",
+      grid:  "rgba(233, 246, 255, 0.12)",
+    };
+
+    function colorForIndex(i, alpha=0.95){
+      const h = (i * 47) % 360;
+      return `hsla(${h}, 85%, 62%, ${alpha})`;
+    }
+
+    function hashHue(str){
+      let h = 0;
+      for (let i=0; i<str.length; i++){
+        h = (h * 31 + str.charCodeAt(i)) >>> 0;
+      }
+      return h % 360;
+    }
+
+    function colorForCode(code, alpha=0.92){
+      const s = String(code || "—");
+      const u = s.toUpperCase();
+
+      if (u.includes("NORMAL")) return `rgba(90,255,190,${alpha})`;
+      if (u.includes("CLOUD") || u.includes("NUV")) return `rgba(255,190,90,${alpha})`;
+      if (u.includes("FAULT") || u.includes("FALHA") || u.includes("TRIP")) return `rgba(255,110,140,${alpha})`;
+      if (u.includes("SENSOR") || u.includes("MED")) return `rgba(190,170,255,${alpha})`;
+
+      const hue = hashHue(u);
+      return `hsla(${hue}, 85%, 62%, ${alpha})`;
+    }
+
+    function countValid(arr){
+      let c = 0;
+      for (const v of (arr || [])){
+        const n = Number(v);
+        if (v !== null && v !== undefined && Number.isFinite(n)) c++;
+      }
+      return c;
+    }
+
+    function toNumArray(arr){
+      return (arr || []).map(v => {
+        if (v === null || v === undefined) return null;
+        const n = Number(v);
+        return Number.isFinite(n) ? n : null;
+      });
+    }
+
+    function mkDataset(label, data, color, extra = {}){
+      const arr = toNumArray(data);
+      const valid = countValid(arr);
+      const pt = (valid <= 6) ? 3 : 0;
+
+      return Object.assign({
+        label,
+        data: arr,
+        borderColor: color,
+        backgroundColor: "transparent",
+        spanGaps: true,
+        pointRadius: pt,
+        pointHoverRadius: 4,
+        borderWidth: 2,
+        tension: 0.25,
+      }, extra);
+    }
+
+    function applyChartDefaults(){
+      if (typeof window.Chart === "undefined") return;
+      Chart.defaults.color = COLORS.text;
+      Chart.defaults.borderColor = COLORS.grid;
+      Chart.defaults.font.family = "system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif";
+    }
+
+    function getSelectedPlantDataset(){
+      const sel = $("plantSelect");
+      const opt = sel && sel.selectedOptions && sel.selectedOptions[0];
+      return opt ? (opt.dataset || {}) : {};
+    }
+
+    function setPlantInfo(payload){
+      const ds = getSelectedPlantDataset();
+      const pi = payload?.plant_info || null;
+
+      const moduleStr = (pi?.module?.model)
+        ? ((pi.module.manufacturer ? (pi.module.manufacturer + " • ") : "") + pi.module.model)
+        : "—";
+
+      const inverterStr = (pi?.inverter?.model)
+        ? ((pi.inverter.manufacturer ? (pi.inverter.manufacturer + " • ") : "") + pi.inverter.model)
+        : "—";
+
+      $("piModuleModel").textContent = moduleStr || "—";
+      $("piInvModel").textContent = inverterStr || "—";
+
+      const strings = pi?.electrical?.strings_count ?? null;
+      const mps     = pi?.electrical?.modules_per_string ?? null;
+      const mtotal  = pi?.electrical?.modules_total ?? null;
+
+      $("piStrings").textContent = (strings != null && String(strings).trim() !== "") ? String(strings) : "—";
+      $("piMps").textContent = (mps != null && String(mps).trim() !== "") ? String(mps) : "—";
+      $("piModulesTotal").textContent = (mtotal != null && String(mtotal).trim() !== "") ? String(mtotal) : "—";
+
+      const tilt = pi?.geometry?.tilt_deg ?? null;
+      const az   = pi?.geometry?.azimuth_deg ?? null;
+      const ksys = pi?.geometry?.k_sys ?? null;
+      const noct = pi?.geometry?.noct_c ?? null;
+
+      $("piTilt").textContent = (tilt != null && String(tilt).trim() !== "") ? fmt(tilt, 1) : "—";
+      $("piAz").textContent   = (az != null && String(az).trim() !== "") ? fmt(az, 1) : "—";
+      $("piKsys").textContent = (ksys != null && String(ksys).trim() !== "") ? fmt(ksys, 3) : "—";
+      $("piNoct").textContent = (noct != null && String(noct).trim() !== "") ? fmt(noct, 1) : "—";
+
+      const pstc   = pi?.module?.p_stc_w ?? null;
+      const pacnom = pi?.inverter?.p_ac_rated_w ?? null;
+
+      $("piPstc").textContent   = (pstc != null && String(pstc).trim() !== "") ? fmt(pstc, 0) : "—";
+      $("piPacNom").textContent = (pacnom != null && String(pacnom).trim() !== "") ? fmt(pacnom, 0) : "—";
+
+      const tz = payload?.plant?.tz || ds.tz || "—";
+      $("plantTzLabel").textContent = `TZ: ${tz}`;
+    }
+
+    function setAudit(payload){
+      const plant   = payload?.plant   || {};
+      const range   = payload?.range   || {};
+      const sources = payload?.sources || {};
+      const series  = payload?.series  || {};
+
+      const audit = payload?.audit || {};
+      const meta  = audit?.model_meta || {};
+
+      const modelOk  = !!audit.model_ok;
+      const modelErr = audit.model_error;
+
+      const tModel = $("tagHasModel");
+      if (tModel){
+        tModel.textContent = modelOk ? "Modelo: OK" : "Modelo: —";
+        tModel.className = "tag " + (modelOk ? "ok" : "warn");
+      }
+
+      const hasNorm =
+        (Array.isArray(series?.pr_real_inst) && countValid(series.pr_real_inst) > 0) ||
+        (Array.isArray(series?.p_ac_pu_real) && countValid(series.p_ac_pu_real) > 0) ||
+        (Array.isArray(series?.pac_real_pu_stc) && countValid(series.pac_real_pu_stc) > 0);
+
+      const tNorm = $("tagHasNorm");
+      if (tNorm){
+        tNorm.textContent = hasNorm ? "Normalização: OK" : "Normalização: —";
+        tNorm.className = "tag " + (hasNorm ? "ok" : "warn");
+      }
+
+      const hasStab = Array.isArray(series?.g_cv_60m) && countValid(series.g_cv_60m) > 0;
+      const tStab = $("tagHasStability");
+      if (tStab){
+        tStab.textContent = hasStab ? "Estabilidade G: OK" : "Estabilidade G: —";
+        tStab.className = "tag " + (hasStab ? "ok" : "warn");
+      }
+
+      const tErr = $("tagModelErr");
+      if (tErr){
+        const hasErr = !!modelErr;
+        tErr.textContent = hasErr ? "Erro modelo: SIM" : "Erro modelo: NÃO";
+        tErr.className = "tag " + (hasErr ? "err" : "ok");
+        tErr.title = hasErr ? String(modelErr) : "";
+      }
+
+      $("audPlant").textContent = plant.nome || "—";
+      $("audTz").textContent = plant.tz || "—";
+      $("audRangeLocal").textContent = `${range.start_local || "—"} → ${range.end_local || "—"}`;
+      $("audRangeUtc").textContent = `${range.dt0_utc || "—"} → ${range.dt1_utc || "—"}`;
+
+      const operList = Array.isArray(sources.source_oper_list) ? sources.source_oper_list : [];
+      const operStr = operList.length ? operList.join(", ") : (sources.source_oper || "—");
+      $("audSources").textContent = `${operStr} | ${sources.source_meteo || "—"}`;
+
+      $("audPoints").textContent = String(payload?.kpis?.points ?? "—");
+
+      const invEff = meta.inv_eff_applied ?? meta.inv_eff ?? meta.inv_eff_static ?? meta.inv_eff_max ?? null;
+      const ksys   = meta.k_sys ?? null;
+      const noct   = meta.noct_c ?? null;
+
+      $("audInvEff").textContent = (invEff != null) ? fmt(invEff, 3) : "—";
+      $("audKsys").textContent   = (ksys != null) ? fmt(ksys, 3) : "—";
+      $("audNoct").textContent   = (noct != null) ? fmt(noct, 1) : "—";
+
+      $("audGsource").textContent = audit.g_used || "—";
+    }
+
+    function syncOperSourceOptionsFromPayload(payload){
+      const sel = $("operSourceSelect");
+      if(!sel) return;
+
+      const list = payload?.sources?.source_oper_list;
+      if (!Array.isArray(list) || list.length === 0) return;
+
+      const current = sel.value || "ALL";
+      const existing = new Set(Array.from(sel.options).map(o => o.value));
+
+      if (!existing.has("ALL")){
+        const opt = document.createElement("option");
+        opt.value = "ALL";
+        opt.textContent = "Total (todas as fontes)";
+        sel.insertBefore(opt, sel.firstChild);
+        existing.add("ALL");
+      }
+
+      for (const src of list){
+        if (!src) continue;
+        if (existing.has(src)) continue;
+        const opt = document.createElement("option");
+        opt.value = src;
+        opt.textContent = `Somente: ${src}`;
+        sel.appendChild(opt);
+        existing.add(src);
+      }
+
+      if (existing.has(current)) sel.value = current;
+      else sel.value = "ALL";
+    }
+
+    function setSourcesLabel(data){
+      const sources = data?.sources || {};
+      const operList = Array.isArray(sources.source_oper_list) ? sources.source_oper_list : [];
+      const operTxt = operList.length ? `${operList.length} fonte(s)` : (sources.source_oper || "—");
+      $("sourceLabel").textContent = `Oper: ${operTxt} | Meteo: ${sources.source_meteo || "—"}`;
+    }
+
+    function syncHeatmapContext(){
+      const ds = getSelectedPlantDataset();
+      const plantName = ds.nome || $("plantSelect")?.selectedOptions?.[0]?.textContent?.trim() || "—";
+      const tz = ds.tz || "—";
+      const start = $("startDate")?.value || "—";
+      const end = $("endDate")?.value || "—";
+
+      let year = "—";
+      if (end && /^\d{4}-\d{2}-\d{2}$/.test(end)) year = end.slice(0,4);
+
+      $("hmPlantName").textContent = plantName;
+      $("hmTz").textContent = tz;
+      $("hmYear").textContent = year;
+      $("hmRange").textContent = `${start} → ${end}`;
+
+      // Se você tiver parâmetros no heatmap, pode habilitar aqui:
+      // const plantId = $("plantSelect")?.value;
+      // const a = document.getElementById("btnHeatmapCard");
+      // if (a && plantId && year !== "—"){
+      //   const u = new URL(a.getAttribute("href"), window.location.origin);
+      //   u.searchParams.set("plant_id", plantId);
+      //   u.searchParams.set("year", year);
+      //   a.setAttribute("href", u.pathname + "?" + u.searchParams.toString());
+      // }
+    }
+
+    // ----------------------------
+    // Gauge
+    // ----------------------------
+    function renderGauge(payload){
+      const charts = payload?.charts || {};
+      const g = charts?.gauge || {};
+
+      const score = (g.score == null) ? null : Number(g.score);
+      const gcvStat = (g.gcv_stat == null) ? null : Number(g.gcv_stat);
+      const label = g.label || "Indisponível";
+
+      $("gaugeLabel").textContent = label || "—";
+      $("gaugeScore").textContent = (score == null || !Number.isFinite(score)) ? "—" : fmt(score, 2);
+      $("gaugeGcv").textContent = (gcvStat == null || !Number.isFinite(gcvStat)) ? "—" : fmt(gcvStat, 3);
+
+      const canvas = $("chartGauge");
+      if (!canvas || typeof window.Chart === "undefined") return;
+
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+
+      if (chartGauge){ chartGauge.destroy(); chartGauge = null; }
+
+      const s = (score == null || !Number.isFinite(score)) ? 0 : Math.max(0, Math.min(1, score));
+      const remain = 1 - s;
+
+      chartGauge = new Chart(ctx, {
+        type: "doughnut",
+        data: {
+          labels: ["score", "restante"],
+          datasets: [{
+            data: [s, remain],
+            backgroundColor: [
+              (s >= 0.75) ? "rgba(90,255,190,.95)" : (s >= 0.45 ? "rgba(255,190,90,.95)" : "rgba(255,110,140,.95)"),
+              "rgba(255,255,255,.08)"
+            ],
+            borderWidth: 0,
+            hoverOffset: 0,
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          animation: false,
+          cutout: "70%",
+          rotation: -Math.PI,
+          circumference: Math.PI,
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                label: (ctx) => {
+                  if (ctx.dataIndex === 0) return `Score: ${fmt(s,2)}`;
+                  return "";
+                }
+              }
+            }
+          }
+        }
+      });
+    }
+
+    // ----------------------------
+    // Scatter
+    // ----------------------------
+    function renderScatter(payload){
+      const canvas = $("chartScatter");
+      if (!canvas || typeof window.Chart === "undefined") return;
+
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+
+      if (chartScatter){ chartScatter.destroy(); chartScatter = null; }
+
+      const charts = payload?.charts || {};
+      const sc = charts?.scatter || {};
+
+      const x = Array.isArray(sc.x_gcv) ? sc.x_gcv : (payload?.series?.g_cv_60m || []);
+      const y = Array.isArray(sc.y_mismatch) ? sc.y_mismatch : (payload?.series?.mismatch_rel || []);
+      const code = Array.isArray(sc.code) ? sc.code : (payload?.series?.rca_label || []);
+      const times = Array.isArray(sc.times) ? sc.times : (payload?.x || []);
+      const codeName = Array.isArray(sc.code_name) ? sc.code_name : [];
+
+      const pts = [];
+      const legendMap = new Map();
+
+      const n = Math.min(x.length, y.length, code.length, times.length);
+      for (let i=0; i<n; i++){
+        const xv = Number(x[i]);
+        const yv = Number(y[i]);
+        if (!Number.isFinite(xv) || !Number.isFinite(yv)) continue;
+
+        const c = (code[i] == null) ? "—" : String(code[i]);
+        const cn = (codeName[i] == null) ? c : String(codeName[i]);
+        if (!legendMap.has(c)) legendMap.set(c, cn);
+
+        pts.push({ x: xv, y: yv, _code: c, _time: times[i] });
+      }
+
+      const legendEl = $("scatterLegend");
+      if (legendEl){
+        legendEl.innerHTML = "";
+        const maxItems = 12;
+        let k = 0;
+        for (const [c, cn] of legendMap.entries()){
+          if (k >= maxItems) break;
+          const tag = document.createElement("span");
+          tag.className = "legend-dot";
+          const dot = document.createElement("span");
+          dot.className = "dot";
+          dot.style.backgroundColor = colorForCode(c, 0.92);
+          tag.appendChild(dot);
+          tag.appendChild(document.createTextNode(cn));
+          legendEl.appendChild(tag);
+          k++;
+        }
+      }
+
+      chartScatter = new Chart(ctx, {
+        type: "scatter",
+        data: {
+          datasets: [{
+            label: "Pontos",
+            data: pts,
+            pointRadius: 3,
+            pointHoverRadius: 5,
+            borderWidth: 0,
+            pointBackgroundColor: pts.map(p => colorForCode(p._code, 0.90)),
+          }]
+        },
+        options: {
+          animation: false,
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                label: (c) => {
+                  const p = c.raw || {};
+                  const t = p._time ? buildLabels([p._time])[0] : "—";
+                  const code = p._code || "—";
+                  return `t=${t} | g_cv=${fmt(p.x,3)} | mismatch=${fmt(p.y,3)} | ${code}`;
+                }
+              }
+            }
+          },
+          scales: {
+            x: {
+              title: { display: true, text: "g_cv_60m (instabilidade)" },
+              grid: { color: COLORS.grid },
+              suggestedMin: 0,
+            },
+            y: {
+              title: { display: true, text: "mismatch_rel (resíduo)" },
+              grid: { color: COLORS.grid },
+            }
+          }
+        }
+      });
+    }
+
+    // ----------------------------
+    // Timeline
+    // ----------------------------
+    function renderTimeline(payload){
+      const canvas = $("chartTimeline");
+      if (!canvas || typeof window.Chart === "undefined") return;
+
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+
+      if (chartTimeline){ chartTimeline.destroy(); chartTimeline = null; }
+
+      const charts = payload?.charts || {};
+      const tl = charts?.timeline || {};
+      const useHyst = !!$("chkHyst")?.checked;
+
+      const times = Array.isArray(tl.times) ? tl.times : (payload?.x || []);
+      const codesRaw = Array.isArray(tl.code) ? tl.code : (payload?.series?.rca_label || []);
+      const codesH = Array.isArray(tl.code_hyst) ? tl.code_hyst : null;
+
+      const codes = (useHyst && codesH) ? codesH : codesRaw;
+
+      const labels = (payload?.x_label && payload.x_label.length === times.length)
+        ? payload.x_label
+        : buildLabels(times);
+
+      const n = Math.min(labels.length, codes.length);
+      const data = new Array(n).fill(1);
+
+      const bg = [];
+      const legendMap = new Map();
+      for (let i=0; i<n; i++){
+        const c = (codes[i] == null) ? "—" : String(codes[i]);
+        bg.push(colorForCode(c, 0.92));
+        legendMap.set(c, (legendMap.get(c) || 0) + 1);
+      }
+
+      const legendEl = $("timelineLegend");
+      if (legendEl){
+        legendEl.innerHTML = "";
+        const items = Array.from(legendMap.entries()).sort((a,b)=>b[1]-a[1]).slice(0, 12);
+        for (const [c, cnt] of items){
+          const tag = document.createElement("span");
+          tag.className = "legend-dot";
+          const dot = document.createElement("span");
+          dot.className = "dot";
+          dot.style.backgroundColor = colorForCode(c, 0.92);
+          tag.appendChild(dot);
+          tag.appendChild(document.createTextNode(`${c} (${cnt})`));
+          legendEl.appendChild(tag);
+        }
+      }
+
+      chartTimeline = new Chart(ctx, {
+        type: "bar",
+        data: {
+          labels: labels,
+          datasets: [{
+            label: useHyst ? "Estado (histerese)" : "Estado (raw)",
+            data: data,
+            backgroundColor: bg,
+            borderWidth: 0,
+            barPercentage: 1.0,
+            categoryPercentage: 1.0,
+          }]
+        },
+        options: {
+          animation: false,
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                label: (c) => {
+                  const idx = c.dataIndex;
+                  const code = (codes[idx] == null) ? "—" : String(codes[idx]);
+                  return `${labels[idx]} • ${code}`;
+                }
+              }
+            }
+          },
+          scales: {
+            x: {
+              ticks: { autoSkip: true, maxTicksLimit: 12, maxRotation: 0 },
+              grid: { color: COLORS.grid }
+            },
+            y: {
+              display: false,
+              grid: { display: false },
+              suggestedMin: 0,
+              suggestedMax: 1
+            }
+          }
+        }
+      });
+    }
+
+    // ----------------------------
+    // Sankey (SVG)
+    // ----------------------------
+    function clearSvg(svg){
+      while (svg.firstChild) svg.removeChild(svg.firstChild);
+    }
+
+    function svgEl(tag, attrs={}){
+      const el = document.createElementNS("http://www.w3.org/2000/svg", tag);
+      for (const [k,v] of Object.entries(attrs)){
+        el.setAttribute(k, String(v));
+      }
+      return el;
+    }
+
+    function renderSankey(payload){
+      const svg = $("sankeySvg");
+      if (!svg) return;
+
+      clearSvg(svg);
+
+      const charts = payload?.charts || {};
+      const sk = charts?.sankey || {};
+      const nodes = Array.isArray(sk.nodes) ? sk.nodes : [];
+      const links = Array.isArray(sk.links) ? sk.links : [];
+      const valuesKwh = (sk.values_kwh && typeof sk.values_kwh === "object") ? sk.values_kwh : {};
+
+      if (!nodes.length || !links.length){
+        svg.appendChild(svgEl("text", { x: 20, y: 40, class: "sankey-label" }));
+        svg.lastChild.textContent = "Sankey indisponível (sem nós/links no payload).";
+        return;
+      }
+
+      const W = 1000, H = 320;
+      const margin = { l: 24, r: 24, t: 18, b: 20 };
+      const nodeW = 14;
+      const gapX = (W - margin.l - margin.r - nodeW) / Math.max(1, (nodes.length - 1));
+
+      const idx = new Map(nodes.map((n,i)=>[String(n), i]));
+
+      const values = links.map(l => Number(l.value)).filter(v => Number.isFinite(v) && v > 0);
+      const vmax = values.length ? Math.max(...values) : 1;
+
+      const tMin = 4, tMax = 38;
+      const thick = (v) => {
+        const vv = Number(v);
+        if (!Number.isFinite(vv) || vv <= 0) return tMin;
+        return tMin + (tMax - tMin) * (vv / vmax);
+      };
+
+      const yMid = H * 0.56;
+
+      for (const l of links){
+        const s = idx.get(String(l.source));
+        const t = idx.get(String(l.target));
+        if (s == null || t == null) continue;
+
+        const x0 = margin.l + s * gapX + nodeW;
+        const x1 = margin.l + t * gapX;
+        const y0 = yMid;
+        const y1 = yMid;
+
+        const v = Number(l.value);
+        const w = thick(v);
+
+        const c = `hsla(${(s*53)%360}, 85%, 62%, 0.55)`;
+
+        const path = svgEl("path", {
+          d: `M ${x0} ${y0} C ${x0 + 120} ${y0}, ${x1 - 120} ${y1}, ${x1} ${y1}`,
+          class: "sankey-link",
+          stroke: c,
+          "stroke-width": w,
+          "stroke-linecap": "round",
+          opacity: "0.9",
+        });
+
+        svg.appendChild(path);
+        path.appendChild(svgEl("title"));
+        path.lastChild.textContent = `${l.source} → ${l.target}: ${fmt(v,2)} kWh`;
+      }
+
+      for (let i=0; i<nodes.length; i++){
+        const name = String(nodes[i]);
+        const x = margin.l + i * gapX;
+
+        const rect = svgEl("rect", { x: x, y: yMid - 55, width: nodeW, height: 110, rx: 6, class: "sankey-node" });
+        svg.appendChild(rect);
+
+        const lbl = svgEl("text", { x: x - 6, y: yMid - 62, class: "sankey-label", "text-anchor": "start" });
+        lbl.textContent = name;
+        svg.appendChild(lbl);
+
+        const v = valuesKwh[name];
+        const small = svgEl("text", { x: x - 6, y: yMid - 44, class: "sankey-small", "text-anchor": "start" });
+        small.textContent = (v == null) ? "" : `${fmt(v,2)} kWh`;
+        svg.appendChild(small);
+      }
+    }
+
+    // ----------------------------
+    // Charts principais
+    // ----------------------------
+    function renderMainCharts(payload){
+      if (typeof window.Chart === "undefined") {
+        destroyCharts();
+        showMsg("Chart.js não carregou. Confirme o arquivo em static/vendor/chartjs/chart.umd.min.js e faça um hard refresh (Ctrl+F5).");
+        return;
+      }
+
+      applyChartDefaults();
+
+      const xIso = payload.x || [];
+      const labels =
+        (Array.isArray(payload.x_label) && payload.x_label.length === xIso.length)
+          ? payload.x_label
+          : buildLabels(xIso);
+
+      const canvasPower = $("chartPower");
+      const canvasMeteo = $("chartMeteo");
+      const canvasDiag  = $("chartDiag");
+      const canvasVI    = $("chartVI");
+
+      if(!canvasPower || !canvasMeteo || !canvasDiag || !canvasVI){
+        showMsg("Canvas não encontrado: chartPower/chartMeteo/chartDiag/chartVI.");
+        return;
+      }
+
+      const ctxPower = canvasPower.getContext("2d");
+      const ctxMeteo = canvasMeteo.getContext("2d");
+      const ctxDiag  = canvasDiag.getContext("2d");
+      const ctxVI    = canvasVI.getContext("2d");
+
+      if(!ctxPower || !ctxMeteo || !ctxDiag || !ctxVI){
+        showMsg("Falha ao obter contexto 2D do canvas (getContext).");
+        return;
+      }
+
+      const s = payload.series || {};
+      const by = payload.series_by_source || {};
+      const showPerSource = !!$("chkPerSource")?.checked;
+
+      const p_ac  = s.p_ac_w || [];
+      const p_acm = s.p_ac_model_w || null;
+      const p_dc  = s.p_dc_w || [];
+
+      const ghi   = s.ghi || [];
+      const gti   = s.gti || [];
+      const temp  = s.temp_air || [];
+
+      const vdc = s.v_dc_v || s.vdc_v || s.vdc || [];
+      const idc = s.i_dc_a || s.idc_a || s.idc || [];
+      const vac = s.v_ac_v || s.vac_v || s.vac || [];
+      const iac = s.i_ac_a || s.iac_a || s.iac || [];
+
+      const hasModel = Array.isArray(p_acm) && countValid(p_acm) > 0;
+
+      const byKeys = Object.keys(by || {}).sort();
+      const byCount = byKeys.length;
+
+      const dbg = `Pts: ${labels.length}`
+        + ` | P_AC(total): ${countValid(p_ac)}`
+        + ` | Modelo: ${hasModel ? countValid(p_acm) : "—"}`
+        + ` | GHI: ${countValid(ghi)}`
+        + ` | Oper(src): ${byCount}`
+        + ` | Vdc: ${countValid(vdc)} Idc: ${countValid(idc)} Vac: ${countValid(vac)} Iac: ${countValid(iac)}`;
+      $("debugLabel").textContent = dbg;
+
+      if(chartPower){ chartPower.destroy(); chartPower = null; }
+      if(chartMeteo){ chartMeteo.destroy(); chartMeteo = null; }
+      if(chartDiag){  chartDiag.destroy();  chartDiag  = null; }
+      if(chartVI){    chartVI.destroy();    chartVI    = null; }
+
+      // Potência
+      try{
+        const powerDatasets = [
+          mkDataset("P_AC total (W)", p_ac, COLORS.pac, { borderWidth: 2 }),
+        ];
+
+        if (showPerSource && byCount > 1){
+          let idx = 0;
+          for (const key of byKeys){
+            const pacS = by?.[key]?.p_ac_w || [];
+            powerDatasets.push(
+              mkDataset(`P_AC ${key} (W)`, pacS, colorForIndex(idx, 0.85), {
+                borderWidth: 1,
+                tension: 0.2,
+                pointRadius: 0,
+              })
+            );
+            idx++;
+          }
+        }
+
+        if (hasModel){
+          powerDatasets.push(
+            mkDataset("P_AC modelo (W)", p_acm, COLORS.pacm, { borderDash: [6, 4], borderWidth: 2 })
+          );
+        }
+
+        powerDatasets.push(mkDataset("P_DC total (W)", p_dc, COLORS.pdc, { borderWidth: 2 }));
+
+        chartPower = new Chart(ctxPower, {
+          type: "line",
+          data: { labels, datasets: powerDatasets },
+          options: {
+            animation: false,
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: "index", intersect: false },
+            plugins: { legend: { labels: { color: COLORS.text } }, tooltip: { enabled: true } },
+            scales: {
+              x: { ticks: { autoSkip: true, maxTicksLimit: 10, maxRotation: 0 }, grid: { color: COLORS.grid } },
+              y: { beginAtZero: true, grid: { color: COLORS.grid } }
+            }
+          }
+        });
+      } catch (e){
+        showMsg("Erro ao renderizar gráfico de Potência:\n" + (e?.message || String(e)));
+        return;
+      }
+
+      // Meteo
+      try{
+        chartMeteo = new Chart(ctxMeteo, {
+          type: "line",
+          data: {
+            labels,
+            datasets: [
+              mkDataset("GHI (W/m²)", ghi,  COLORS.ghi,  { yAxisID: "y"  }),
+              mkDataset("GTI (W/m²)", gti,  COLORS.gti,  { yAxisID: "y"  }),
+              mkDataset("Temp (°C)",  temp, COLORS.temp, { yAxisID: "y1" }),
+            ]
+          },
+          options: {
+            animation: false,
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: "index", intersect: false },
+            plugins: { legend: { labels: { color: COLORS.text } }, tooltip: { enabled: true } },
+            scales: {
+              x: { ticks: { autoSkip: true, maxTicksLimit: 10, maxRotation: 0 }, grid: { color: COLORS.grid } },
+              y:  { position: "left",  beginAtZero: true, grid: { color: COLORS.grid } },
+              y1: { position: "right", beginAtZero: false, grid: { drawOnChartArea: false } }
+            }
+          }
+        });
+      } catch (e){
+        showMsg("Erro ao renderizar gráfico de Meteorologia:\n" + (e?.message || String(e)));
+        return;
+      }
+
+      // Diagnóstico
+      try{
+        const prR = s.pr_real_inst  || null;
+        const prM = s.pr_model_inst || null;
+
+        const puR = s.p_ac_pu_real  || s.pac_real_pu_stc  || null;
+        const puM = s.p_ac_pu_model || s.pac_model_pu_stc || null;
+
+        const mis = s.mismatch_rel || null;
+        const gcv = s.g_cv_60m || null;
+
+        const csi = s.csi || s.k_cs || null;
+        const eta = s.eta_inv || null;
+
+        const diagDatasets = [];
+
+        const hasPrR = Array.isArray(prR) && countValid(prR) > 0;
+        const hasPrM = Array.isArray(prM) && countValid(prM) > 0;
+        const hasPuR = Array.isArray(puR) && countValid(puR) > 0;
+        const hasPuM = Array.isArray(puM) && countValid(puM) > 0;
+        const hasMis = Array.isArray(mis) && countValid(mis) > 0;
+        const hasGcv = Array.isArray(gcv) && countValid(gcv) > 0;
+        const hasCsi = Array.isArray(csi) && countValid(csi) > 0;
+        const hasEta = Array.isArray(eta) && countValid(eta) > 0;
+
+        if (hasPrR) diagDatasets.push(mkDataset("PR real (inst)", prR, COLORS.prR, { yAxisID: "y" }));
+        if (hasPrM) diagDatasets.push(mkDataset("PR modelo (inst)", prM, COLORS.prM, { yAxisID: "y", borderDash:[6,4] }));
+
+        if (hasPuR) diagDatasets.push(mkDataset("P_AC real / P_STC (pu)", puR, COLORS.puR, { yAxisID: "y2" }));
+        if (hasPuM) diagDatasets.push(mkDataset("P_AC modelo / P_STC (pu)", puM, COLORS.puM, { yAxisID: "y2", borderDash:[6,4] }));
+
+        if (hasMis) diagDatasets.push(mkDataset("Mismatch rel", mis, COLORS.mis, { yAxisID: "y3" }));
+
+        if (hasGcv) diagDatasets.push(mkDataset("G CV 60min", gcv, COLORS.gcv, { yAxisID: "y4", hidden: true }));
+        if (hasCsi) diagDatasets.push(mkDataset("CSI", csi, COLORS.csi, { yAxisID: "y4", borderDash:[2,4], hidden: true }));
+        if (hasEta) diagDatasets.push(mkDataset("η inv", eta, COLORS.eta, { yAxisID: "y4", borderDash:[8,3], hidden: true }));
+
+        if (diagDatasets.length === 0){
+          diagDatasets.push(mkDataset("Sem séries diagnósticas (backend não enviou)", labels.map(()=>null), COLORS.grid, { pointRadius: 0, borderWidth: 1 }));
+        }
+
+        chartDiag = new Chart(ctxDiag, {
+          type: "line",
+          data: { labels, datasets: diagDatasets },
+          options: {
+            animation: false,
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: "index", intersect: false },
+            plugins: { legend: { labels: { color: COLORS.text } }, tooltip: { enabled: true } },
+            scales: {
+              x: { ticks: { autoSkip: true, maxTicksLimit: 10, maxRotation: 0 }, grid: { color: COLORS.grid } },
+              y:  { position: "left",  beginAtZero: true, suggestedMax: 1.2, grid: { color: COLORS.grid }, title: { display: true, text: "PR" } },
+              y2: { position: "right", beginAtZero: true, suggestedMax: 1.2, grid: { drawOnChartArea: false }, title: { display: true, text: "pu" } },
+              y3: { position: "right", beginAtZero: false, grid: { drawOnChartArea: false }, title: { display: true, text: "mismatch" } },
+              y4: { position: "right", beginAtZero: true, grid: { drawOnChartArea: false }, title: { display: true, text: "aux" }, display: false },
+            }
+          }
+        });
+      } catch (e){
+        showMsg("Erro ao renderizar gráfico de Diagnóstico:\n" + (e?.message || String(e)));
+        return;
+      }
+
+      // VI
+      try{
+        const viDatasets = [];
+        const hasVdc = Array.isArray(vdc) && countValid(vdc) > 0;
+        const hasIdc = Array.isArray(idc) && countValid(idc) > 0;
+        const hasVac = Array.isArray(vac) && countValid(vac) > 0;
+        const hasIac = Array.isArray(iac) && countValid(iac) > 0;
+
+        if (hasVdc) viDatasets.push(mkDataset("Vdc (V)", vdc, COLORS.vdc, { yAxisID: "yV" }));
+        if (hasVac) viDatasets.push(mkDataset("Vac (V)", vac, COLORS.vac, { yAxisID: "yV", borderDash:[6,4] }));
+
+        if (hasIdc) viDatasets.push(mkDataset("Idc (A)", idc, COLORS.idc, { yAxisID: "yI" }));
+        if (hasIac) viDatasets.push(mkDataset("Iac (A)", iac, COLORS.iac, { yAxisID: "yI", borderDash:[6,4] }));
+
+        if (viDatasets.length === 0){
+          viDatasets.push(mkDataset("Sem V/I (backend não enviou v_dc_v/i_dc_a/v_ac_v/i_ac_a)", labels.map(()=>null), COLORS.grid, { pointRadius: 0, borderWidth: 1 }));
+        }
+
+        chartVI = new Chart(ctxVI, {
+          type: "line",
+          data: { labels, datasets: viDatasets },
+          options: {
+            animation: false,
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: "index", intersect: false },
+            plugins: { legend: { labels: { color: COLORS.text } }, tooltip: { enabled: true } },
+            scales: {
+              x: { ticks: { autoSkip: true, maxTicksLimit: 10, maxRotation: 0 }, grid: { color: COLORS.grid } },
+              yV: { position: "left",  beginAtZero: false, grid: { color: COLORS.grid }, title: { display: true, text: "V" } },
+              yI: { position: "right", beginAtZero: true,  grid: { drawOnChartArea: false }, title: { display: true, text: "A" } },
+            }
+          }
+        });
+      } catch (e){
+        showMsg("Erro ao renderizar gráfico de Tensão e Corrente:\n" + (e?.message || String(e)));
+        return;
+      }
+    }
+
+    function renderAll(payload){
+      renderMainCharts(payload);
+      renderGauge(payload);
+      renderScatter(payload);
+      renderSankey(payload);
+      renderTimeline(payload);
+    }
+
+    async function fetchJsonStrict(urlStr){
+      const res = await fetch(urlStr, {
+        headers: {
+          "X-Requested-With": "XMLHttpRequest",
+          "Accept": "application/json",
+        },
+        credentials: "same-origin",
+      });
+
+      const ct = (res.headers.get("content-type") || "").toLowerCase();
+      const text = await res.text();
+
+      let data = null;
+      try{
+        data = JSON.parse(text);
+      }catch(e){
+        const head = text.slice(0, 600);
+        const msg =
+          `Falha ao parsear JSON. HTTP ${res.status}.\n` +
+          `Content-Type: ${ct || "—"}\n` +
+          `URL final: ${res.url}\n\n` +
+          `Início da resposta (até 600 chars):\n${head}`;
+        return { ok: false, http_ok: res.ok, status: res.status, data: null, error: msg };
+      }
+
+      return { ok: true, http_ok: res.ok, status: res.status, data };
+    }
+
+    async function refresh(){
+      showMsg("");
+      setLoading(true);
+
+      try{
+        const plantId = $("plantSelect")?.value;
+        const start   = $("startDate")?.value;
+        const end     = $("endDate")?.value;
+        const operSel = $("operSourceSelect")?.value || "ALL";
+
+        syncHeatmapContext();
+
+        if(!plantId || !start || !end){
+          showMsg("Selecione a planta e o intervalo de datas.");
+          setKpis(null, null);
+          destroyCharts();
+          $("debugLabel").textContent = "Pts: —";
+          return;
+        }
+
+        const url = new URL(apiUrl, window.location.origin);
+        url.searchParams.set("plant_id", plantId);
+        url.searchParams.set("start", start);
+        url.searchParams.set("end", end);
+
+        if (operSel && operSel !== "ALL"){
+          url.searchParams.set("source_oper", operSel);
+        } else {
+          url.searchParams.set("source_oper", "ALL");
+        }
+
+        const r = await fetchJsonStrict(url.toString());
+        if(!r.ok){
+          showMsg(r.error || "Falha ao obter resposta JSON do servidor.");
+          setKpis(null, null);
+          destroyCharts();
+          $("debugLabel").textContent = "Pts: —";
+          return;
+        }
+
+        const data = r.data;
+
+        if(!r.http_ok || !data?.ok){
+          showMsg((data && data.error) ? data.error : `Falha ao carregar (HTTP ${r.status}).`);
+          setKpis(null, null);
+          destroyCharts();
+          return;
+        }
+
+        window.__lastDashboardPayload = data;
+
+        syncOperSourceOptionsFromPayload(data);
+
+        $("plantTzLabel").textContent = `TZ: ${data.plant?.tz || getSelectedPlantDataset().tz || "—"}`;
+        setSourcesLabel(data);
+
+        setPlantInfo(data);
+        syncHeatmapContext();
+
+        if(data.empty){
+          showMsg(data.message || "Sem dados no intervalo selecionado.");
+          setKpis(null, null);
+          destroyCharts();
+          $("debugLabel").textContent = "Pts: 0";
+          setAudit(data);
+          renderGauge(data);
+          renderSankey(data);
+          return;
+        }
+
+        setKpis(data.kpis, data.series);
+        setAudit(data);
+        renderAll(data);
+
+        if (data?.audit?.model_error){
+          showMsg("Aviso (modelo físico): " + String(data.audit.model_error));
+        }
+
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    document.addEventListener("DOMContentLoaded", () => {
+      setPlantInfo(null);
+      syncHeatmapContext();
+
+      const form = $("dashForm");
+      if(form){
+        form.addEventListener("submit", (e) => { e.preventDefault(); refresh(); });
+      }
+
+      $("plantSelect")?.addEventListener("change", () => { setPlantInfo(null); syncHeatmapContext(); refresh(); });
+      $("startDate")?.addEventListener("change", () => { syncHeatmapContext(); refresh(); });
+      $("endDate")?.addEventListener("change", () => { syncHeatmapContext(); refresh(); });
+
+      $("operSourceSelect")?.addEventListener("change", refresh);
+
+      $("chkPerSource")?.addEventListener("change", () => {
+        const data = window.__lastDashboardPayload;
+        if (data && data.ok && !data.empty) renderAll(data);
+      });
+
+      $("chkHyst")?.addEventListener("change", () => {
+        const data = window.__lastDashboardPayload;
+        if (data && data.ok && !data.empty) {
+          renderTimeline(data);
+        }
+      });
+
+      refresh();
+    });
+  </script>
+{% endblock %}
