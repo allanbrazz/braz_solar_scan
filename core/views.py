@@ -29,21 +29,20 @@ from core.models import ShineDevice, InverterOperationalData, MeteoRecord, Meteo
 from django.core.paginator import Paginator
 from datetime import datetime, timedelta, timezone
 from django.utils.dateparse import parse_date
-from .services.nsrdb import fetch_nsrdb_goes_full_disc_csv, ingest_nsrdb_range 
-from core.services.renovigi_gateway import discover_plants, discover_devices, fetch_range_table
-from core.services.renovigi_ingest import sync_operational_data_for_device
+from .services.dados_satelite.nsrdb import fetch_nsrdb_goes_full_disc_csv, ingest_nsrdb_range 
+from core.services.dados_inversor.renovigi_gateway import discover_plants, discover_devices, fetch_range_table
+from core.services.dados_inversor.renovigi_ingest import sync_operational_data_for_device
 from django.utils.timezone import make_aware
 from core.services.coverage import compute_time_coverage
-from core.services.openmeteo import ingest_openmeteo_range
+from core.services.dados_satelite.openmeteo import ingest_openmeteo_range
 from core.forms import MergeRunForm, PVInverterForm, PVStringConfigFormSet, MeteoRequestForm, PVStringGroupFormSet
-from core.services.build_merged_dataset import build_plant_merged_dataset
+from core.services.series_juntar.build_merged_dataset import build_plant_merged_dataset
 from typing import Any, Dict, List, Optional, Tuple
 from django.apps import apps
 import inspect
 from django.db import transaction, IntegrityError
-from core.services.health_heatmap import get_daily_health_summary_from_db
 from collections import OrderedDict, defaultdict
-from core.services.power_model import (
+from core.services.power_model.power_model import (
     module_from_pvmodule,
     plant_from_details,
     expected_and_mismatch,
@@ -79,7 +78,7 @@ def _nsrdb_env() -> dict:
 
 
 #GROWATT
-from .services.growatt_client import (
+from .services.dados_inversor.growatt_client import (
     fetch_growatt_plant_data,
     GrowattAuthError,
     GrowattReadError,
@@ -412,7 +411,7 @@ def nsrdb_view(request: HttpRequest) -> HttpResponse:
         "rows": list(df_show.itertuples(index=False, name=None)) if df_show is not None else [],
         "meta": meta,
     }
-    return render(request, "radiation_view.html", ctx)
+    return render(request, "meteo/radiation_view.html", ctx)
 
 # -------------------------
 # Views básicas (auth / home)
@@ -1246,7 +1245,7 @@ class PlantGrowattDailyJsonView(LoginRequiredMixin, View):
 #---------------------------
 
 class RenovigiConsoleView(LoginRequiredMixin, View):
-    template_name = "renovigi_console.html"
+    template_name = "inverters/renovigi_console.html"
 
     def get_cred(self, plant: PVPlant) -> PlantMonitoringCredential | None:
         return PlantMonitoringCredential.objects.filter(
@@ -2717,7 +2716,7 @@ def pv_dashboard_timeseries_api(request: HttpRequest) -> JsonResponse:
         import numpy as _np
         from dataclasses import asdict
 
-        from core.services.power_model import (
+        from core.services.power_model.power_model import (
             expected_and_mismatch,
             module_from_pvmodule,
             plant_from_details,
@@ -3023,7 +3022,8 @@ def pv_dashboard_heatmap_api(request: HttpRequest) -> JsonResponse:
 
     Contrato:
       days[]: {date,status,coverage,ratios,critical_run_min,diag{dominant,fractions,n}}
-        Suporta:
+    (e também retorna "gru" como alias)
+    Suporta:
       - year=YYYY  (default: ano atual)
       - OU start=YYYY-MM-DD&end=YYYY-MM-DD (range local inclusivo)
     """
@@ -3320,6 +3320,7 @@ def pv_dashboard_heatmap_api(request: HttpRequest) -> JsonResponse:
                     "ratios": {"normal": 0.0, "meteo": 0.0, "mismatch_warn": 0.0},
                     "critical_run_min": 0,
                     "diag": {"dominant": None, "fractions": {k: 0.0 for k in DIAG_BUCKETS}, "n": 0},
+                    "gru": {"dominant": None, "fractions": {k: 0.0 for k in DIAG_BUCKETS}, "n": 0},
                 }
             )
 
@@ -3430,6 +3431,7 @@ def pv_dashboard_heatmap_api(request: HttpRequest) -> JsonResponse:
                 "critical_run_min": 0,
                 "diag": {"dominant": None, "fractions": {k: 0.0 for k in DIAG_BUCKETS}, "n": 0},
             }
+            day_obj["gru"] = day_obj["diag"]
             days_out.append(day_obj)
             continue
 
@@ -3497,6 +3499,7 @@ def pv_dashboard_heatmap_api(request: HttpRequest) -> JsonResponse:
             "critical_run_min": int(critical_run),
             "diag": {"dominant": dominant, "fractions": diag_fractions, "n": n_lbl},
         }
+        day_obj["gru"] = day_obj["diag"]
         days_out.append(day_obj)
 
     total_points = len(rows)

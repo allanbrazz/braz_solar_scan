@@ -788,6 +788,13 @@ class PVPlantMergedRecord15m(models.Model):
         return f"{plant_label} merged15m {self.ts_utc.isoformat()}"
 
 
+
+
+# ---------------------------
+# F A L H A S
+# ---------------------------
+
+
 class PlantDiagnostic15m(models.Model):
     """
     Um registro por timestamp (ex: cada 15 min), por planta.

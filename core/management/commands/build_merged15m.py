@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date
 from django.core.management.base import BaseCommand
-from core.services.merged15m_ingest import build_and_persist_merged15m_by_day
+from core.services.series_juntar.merged15m_ingest import build_and_persist_merged15m_by_day
 
 class Command(BaseCommand):
     help = "Build + persist merged 15min (pipeline 3b) day-by-day"

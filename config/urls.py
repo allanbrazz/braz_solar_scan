@@ -14,7 +14,7 @@ from core.views import (
     PlantGrowattDailyJsonView, RenovigiConsoleView, 
     PlantOperationalDataListView, merge_run_view,
     pv_dashboard_view, pv_dashboard_timeseries_api,inverter_list_view,
-    inverter_create_view, inverter_edit_view, pv_dashboard_heatmap_api, pv_heatmap_view,
+    inverter_create_view, inverter_edit_view,
 )
 
 # ---------- pvmodules agrupado e namespaced ----------
@@ -72,9 +72,9 @@ urlpatterns = [
     #DASHBOARD
     path("dashboard/pv/", pv_dashboard_view, name="pv_dashboard"),
     path("dashboard/pv/api/timeseries/", pv_dashboard_timeseries_api, name="pv_dashboard_api_timeseries"),
-    path("pv/heatmap/", pv_heatmap_view, name="pv_heatmap"),
-    # (mantém a sua API existente)
-    path("pv/api/heatmap/", pv_dashboard_heatmap_api, name="pv_heatmap_api"),
+
+
+
     #INVERSOR
     path("inverters/", inverter_list_view, name="inverter_list"),
     path("inverters/new/", inverter_create_view, name="inverter_create"),
