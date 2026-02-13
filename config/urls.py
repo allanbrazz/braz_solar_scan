@@ -14,7 +14,7 @@ from core.views import (
     PlantGrowattDailyJsonView, RenovigiConsoleView, 
     PlantOperationalDataListView, merge_run_view,
     pv_dashboard_view, pv_dashboard_timeseries_api,inverter_list_view,
-    inverter_create_view, inverter_edit_view,
+    inverter_create_view, inverter_edit_view, mismatch_fdd_api, mismatch_fdd_view,
 )
 
 # ---------- pvmodules agrupado e namespaced ----------
@@ -73,6 +73,9 @@ urlpatterns = [
     path("dashboard/pv/", pv_dashboard_view, name="pv_dashboard"),
     path("dashboard/pv/api/timeseries/", pv_dashboard_timeseries_api, name="pv_dashboard_api_timeseries"),
 
+    # FDD (Mismatch)
+    path("dashboard/fdd/mismatch/", mismatch_fdd_view, name="mismatch_fdd"),
+    path("dashboard/fdd/mismatch/api/", mismatch_fdd_api, name="mismatch_fdd_api"),
 
 
     #INVERSOR

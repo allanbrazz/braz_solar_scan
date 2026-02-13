@@ -184,3 +184,13 @@ SHINEMONITOR_HTTP_TIMEOUT = RENOVIGI_HTTP_TIMEOUT
 RENOVIGI_PAGE_SIZE = 200      # ajuste conforme API/DevTools
 RENOVIGI_SLEEP_SEC = 0.3      # reduz chance de ERR_OVER_LIMITED
 RENOVIGI_MAX_RETRIES = 5
+
+#---------------------------------
+#-------------------IV FDD (Hopwood-style synthetic IV + 1D-CNN)
+#---------------------------------
+# Diretórios graváveis para datasets e modelos (importante quando frozen via PyInstaller).
+IV_FDD_DIR = _user_data_dir() / "iv_fdd"
+IV_FDD_DATASETS_DIR = IV_FDD_DIR / "datasets"
+IV_FDD_MODELS_DIR = IV_FDD_DIR / "models"
+for _p in (IV_FDD_DIR, IV_FDD_DATASETS_DIR, IV_FDD_MODELS_DIR):
+    _p.mkdir(parents=True, exist_ok=True)

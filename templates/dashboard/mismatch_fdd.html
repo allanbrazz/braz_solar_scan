@@ -1,0 +1,1239 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}FDD por Mismatch (P_model vs P_real){% endblock %}
+
+{% block extra_head %}
+  <!-- Chart.js (se você já carrega globalmente no base.html, pode remover esta linha) -->
+  <script src="{% static 'vendor/chartjs/chart.umd.min.js' %}"></script>
+
+  <style>
+    .dash{
+      display:grid;
+      grid-template-columns: repeat(auto-fit, minmax(330px, 1fr));
+      gap: 1rem;
+      align-items:start;
+      align-content:start;
+      grid-auto-rows: min-content;
+    }
+    .dash > .card{ min-width:0; }
+
+    .ctl-row{display:flex; flex-wrap:wrap; gap:.8rem; align-items:flex-end;}
+    .ctl{display:flex; flex-direction:column; gap:.35rem; min-width: 220px;}
+    .ctl label{font-size:.90rem; opacity:.90}
+    .ctl select, .ctl input[type="date"], .ctl input[type="number"]{
+      padding:.60rem .75rem;
+      border-radius:14px;
+      background: rgba(10,20,40,.35);
+      border:1px solid rgba(255,255,255,.18);
+      color:#e9f6ff;
+      outline:none;
+      backdrop-filter: blur(6px);
+      font-size: 1rem;
+    }
+    .ctl select option{ color:#111; }
+
+    .btn{
+      padding:.70rem 1.0rem;
+      border-radius:14px;
+      border:1px solid rgba(255,255,255,.18);
+      background: rgba(70,140,255,.35);
+      color:#e9f6ff;
+      cursor:pointer;
+      font-weight:800;
+      letter-spacing:.2px;
+      font-size: 1rem;
+    }
+    .btn:disabled{opacity:.6; cursor:not-allowed;}
+    .btn.secondary{background: rgba(255,255,255,.06);}
+
+    .kpis{display:grid; grid-template-columns: repeat(3, 1fr); gap:.8rem;}
+    .kpi{
+      border:1px solid rgba(255,255,255,.14);
+      background: rgba(255,255,255,.06);
+      border-radius: 16px;
+      padding:.85rem .9rem;
+    }
+    .kpi .k{font-size:.9rem; opacity:.85}
+    .kpi .v{font-size:1.55rem; font-weight:900; margin-top:.25rem}
+
+    .mono{font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;}
+    .muted{opacity:.85}
+
+    .chart-wrap{width:100%; height:360px;}
+    .chart-wrap.sm{height:280px;}
+    canvas{width:100% !important; height:100% !important;}
+
+    .err{border:1px solid rgba(255,120,120,.5); background: rgba(255,120,120,.12); padding:.7rem .9rem; border-radius:14px;}
+    .ok{border:1px solid rgba(80,255,160,.45); background: rgba(80,255,160,.10); padding:.7rem .9rem; border-radius:14px;}
+
+    /* =========================
+       EVENT HEATMAP (robusto, 3 níveis + vazio)
+       - empty: branco (sem dado / invalid / abaixo do gate / valid=false)
+       - normal: verde
+       - anom: amarelo
+       - crit: vermelho
+       ========================= */
+    :root{
+      --hm-border: rgba(255,255,255,.12);
+      --hm-text: rgba(233,246,255,.92);
+      --hm-text2: rgba(233,246,255,.78);
+
+      --hm-empty: rgba(255,255,255,.00); /* branco (transparente no tema escuro) */
+      --hm-normal: rgba(80,255,160,.92);  /* verde */
+      --hm-anom: rgba(255,190,90,.92);    /* amarelo */
+      --hm-crit: rgba(255,110,140,.92);   /* vermelho */
+
+      --hm-cell-stroke: rgba(0,0,0,.12);
+    }
+
+    .ev-head{
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap: 12px;
+      width:100%;
+    }
+    .ev-title{
+      margin:0;
+      display:flex;
+      align-items:center;
+      gap:.55rem;
+    }
+    .ev-sub{ margin:.2rem 0 0; color: var(--hm-text2); line-height:1.35; }
+
+    .ev-legend{
+      display:flex;
+      flex-wrap:wrap;
+      gap: 12px 16px;
+      margin-top: .75rem;
+      align-items:center;
+      user-select:none;
+    }
+    .ev-pill{
+      display:flex;
+      align-items:center;
+      gap:.55rem;
+      padding:.38rem .62rem;
+      border:1px solid rgba(255,255,255,.18);
+      border-radius: 999px;
+      background: rgba(255,255,255,.06);
+      font-size:.95rem;
+      color: var(--hm-text);
+      white-space: nowrap;
+    }
+    .ev-sq{
+      width:16px; height:16px;
+      border-radius: 4px;
+      background: rgba(255,255,255,.10);
+      box-shadow: 0 0 0 1px rgba(0,0,0,.18) inset;
+    }
+    .ev-sq.empty{ background: var(--hm-empty); box-shadow: 0 0 0 1px rgba(255,255,255,.10) inset; }
+    .ev-sq.normal{ background: var(--hm-normal); }
+    .ev-sq.anom{ background: var(--hm-anom); }
+    .ev-sq.crit{ background: var(--hm-crit); }
+
+    .ev-wrap{
+      width:100%;
+      overflow:auto;
+      background: rgba(255,255,255,.03);
+      border: 1px solid var(--hm-border);
+      border-radius: 16px;
+      padding: 12px;
+      position: relative;
+      margin-top:.8rem;
+    }
+    .ev-wrap::before{
+      content:"";
+      position:absolute; inset:0;
+      background:
+        radial-gradient(circle at 15% 0%, rgba(110,210,255,.10), transparent 40%),
+        radial-gradient(circle at 85% 10%, rgba(255,190,90,.08), transparent 38%),
+        radial-gradient(circle at 55% 100%, rgba(90,255,190,.08), transparent 42%);
+      pointer-events:none;
+      mix-blend-mode: screen;
+      opacity:.85;
+    }
+    #eventCanvas{ display:block; position: relative; z-index: 1; cursor: pointer; }
+    .ev-tip{ margin-top:.55rem; min-height: 1.2em; color: var(--hm-text2); font-size:.95rem; }
+
+    /* Drawer */
+    .ev-drawer{
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      display: none;
+    }
+    .ev-drawer.open{ display:block; }
+    .ev-backdrop{
+      position:absolute; inset:0;
+      background: rgba(0,0,0,.55);
+      backdrop-filter: blur(6px);
+    }
+    .ev-panel{
+      position:absolute;
+      top: 0; right: 0;
+      height: 100%;
+      width: min(560px, 92vw);
+      background: linear-gradient(180deg, rgba(18,32,55,.98), rgba(10,20,40,.98));
+      border-left: 1px solid rgba(255,255,255,.14);
+      box-shadow: -18px 0 60px rgba(0,0,0,.45);
+      display:flex;
+      flex-direction:column;
+    }
+    .ev-panel-head{
+      padding: 14px 14px 10px;
+      border-bottom: 1px solid rgba(255,255,255,.10);
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap: 12px;
+    }
+    .ev-panel-title{
+      font-weight: 900;
+      letter-spacing: .2px;
+      color: var(--hm-text);
+      display:flex;
+      align-items:center;
+      gap: 10px;
+      flex-wrap:wrap;
+    }
+    .ev-panel-sub{
+      margin-top: 6px;
+      opacity: .88;
+      font-size: .95rem;
+      line-height: 1.35;
+      color: var(--hm-text2);
+    }
+    .btn-x{
+      border:1px solid rgba(255,255,255,.16);
+      background: rgba(255,255,255,.06);
+      color: rgba(233,246,255,.96);
+      border-radius: 12px;
+      padding: .50rem .65rem;
+      cursor:pointer;
+      transition: .12s ease;
+      font-weight: 900;
+      line-height: 1;
+    }
+    .btn-x:hover{ background: rgba(255,255,255,.10); border-color: rgba(255,255,255,.26); }
+
+    .ev-panel-body{
+      padding: 12px 14px 16px;
+      overflow:auto;
+    }
+    .card-lite{
+      border:1px solid rgba(255,255,255,.10);
+      background: rgba(255,255,255,.04);
+      border-radius: 16px;
+      padding: .85rem .9rem;
+      margin-bottom: 12px;
+    }
+    .card-lite h4{
+      margin: 0 0 .65rem 0;
+      color: rgba(233,246,255,.95);
+      font-weight: 900;
+      letter-spacing: .2px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap: 10px;
+    }
+    .kv-grid{ display:grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .kv{
+      border:1px solid rgba(255,255,255,.10);
+      background: rgba(0,0,0,.10);
+      border-radius: 14px;
+      padding: .65rem .75rem;
+    }
+    .kv .k{ font-size:.85rem; opacity:.80; margin-bottom: .20rem; color: var(--hm-text2); }
+    .kv .v{ font-size: 1.05rem; font-weight: 900; letter-spacing: .2px; color: var(--hm-text); }
+
+    .badge{
+      display:inline-flex;
+      align-items:center;
+      gap:.55rem;
+      padding:.28rem .65rem;
+      border-radius: 999px;
+      border:1px solid rgba(255,255,255,.16);
+      background: rgba(255,255,255,.06);
+      font-size:.90rem;
+      color: var(--hm-text);
+      white-space: nowrap;
+    }
+    .badge .dot{
+      width:11px; height:11px; border-radius:99px;
+      background: rgba(255,255,255,.35);
+      box-shadow: 0 0 0 1px rgba(0,0,0,.18) inset;
+    }
+    .badge.empty .dot{ background: rgba(255,255,255,.20); }
+    .badge.normal .dot{ background: var(--hm-normal); }
+    .badge.anom .dot{ background: var(--hm-anom); }
+    .badge.crit .dot{ background: var(--hm-crit); }
+
+    table.src{
+      width:100%;
+      border-collapse: separate;
+      border-spacing: 0 8px;
+      font-size: .92rem;
+    }
+    table.src td{
+      padding: .45rem .55rem;
+      border-top:1px solid rgba(255,255,255,.10);
+      border-bottom:1px solid rgba(255,255,255,.10);
+      background: rgba(0,0,0,.10);
+    }
+    table.src td:first-child{
+      border-left:1px solid rgba(255,255,255,.10);
+      border-radius: 12px 0 0 12px;
+      font-weight: 900;
+      white-space: nowrap;
+    }
+    table.src td:last-child{
+      border-right:1px solid rgba(255,255,255,.10);
+      border-radius: 0 12px 12px 0;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      opacity:.95;
+    }
+  </style>
+{% endblock %}
+
+{% block content %}
+  <div class="dash">
+
+    <div class="card glass">
+      <h2 style="margin-top:0">Classificação por mismatch (P_model vs P_real)</h2>
+      <p class="muted" style="margin-top:.25rem">
+        Heatmap robusto (sem inconsistência): <b>tier</b> (normal/anom/crit) é calculado de forma determinística.
+        Prioridade: <b>label</b> do backend → fallback por <b>mismatch</b>. Sem dado/invalid/abaixo do gate = branco.
+      </p>
+
+      <div class="ctl-row" style="margin-top:.9rem">
+        <div class="ctl">
+          <label>Planta</label>
+          <select id="plant_id">
+            {% for p in plants %}
+              <option value="{{ p.id }}">{{ p.nome }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="ctl">
+          <label>Início</label>
+          <input id="start" type="date" value="{{ default_start }}">
+        </div>
+
+        <div class="ctl">
+          <label>Fim</label>
+          <input id="end" type="date" value="{{ default_end }}">
+        </div>
+
+        <div class="ctl">
+          <label>GPOA gate (W/m²)</label>
+          <input id="gpoa_gate" type="number" step="10" value="200">
+        </div>
+
+        <div class="ctl">
+          <label>|mismatch| normal &lt;</label>
+          <input id="warn_abs" type="number" step="0.05" value="0.35">
+        </div>
+
+        <div class="ctl">
+          <label>Falha severa (mismatch ≤ -)</label>
+          <input id="fault_abs" type="number" step="0.05" value="0.80">
+        </div>
+
+        <div class="ctl">
+          <label>Meteo/sensor (mismatch ≥ +)</label>
+          <input id="meteo_pos_abs" type="number" step="0.05" value="0.25">
+        </div>
+
+        <div class="ctl">
+          <label>Std p/ shading_like</label>
+          <input id="shading_std_abs" type="number" step="0.01" value="0.22">
+        </div>
+
+        <div class="ctl">
+          <label>Janela shading (pontos)</label>
+          <input id="shading_window_points" type="number" step="1" value="6">
+        </div>
+
+        <div class="ctl" style="min-width:190px">
+          <label>&nbsp;</label>
+          <button id="btnRun" class="btn" type="button">Executar</button>
+        </div>
+
+        <div class="ctl" style="min-width:230px">
+          <label>Persistir eventos (15min)</label>
+          <button id="btnPersist" class="btn secondary" type="button">Executar + Salvar</button>
+        </div>
+      </div>
+
+      <div id="msg" style="margin-top:1rem"></div>
+    </div>
+
+    <div class="card glass">
+      <h3 style="margin-top:0">KPIs</h3>
+      <div class="kpis" style="margin-top:.7rem">
+        <div class="kpi">
+          <div class="k">Pontos</div>
+          <div class="v mono" id="k_n">—</div>
+        </div>
+        <div class="kpi">
+          <div class="k">|mismatch| médio (válidos)</div>
+          <div class="v mono" id="k_mabs">—</div>
+        </div>
+        <div class="kpi">
+          <div class="k">Eventos (não-normal)</div>
+          <div class="v mono" id="k_ev">—</div>
+        </div>
+      </div>
+
+      <div style="margin-top:1rem">
+        <div class="muted">Contagem por classe</div>
+        <pre class="mono" id="k_counts" style="white-space:pre-wrap; margin: .5rem 0 0 0;">—</pre>
+      </div>
+    </div>
+
+    <div class="card glass" style="grid-column: 1 / -1;">
+      <h3 style="margin-top:0">Mismatch ao longo do tempo</h3>
+      <div class="chart-wrap"><canvas id="chartMismatch"></canvas></div>
+    </div>
+
+    <div class="card glass" style="grid-column: 1 / -1;">
+      <h3 style="margin-top:0">Potência (Real vs Modelo)</h3>
+      <div class="chart-wrap sm"><canvas id="chartPower"></canvas></div>
+    </div>
+
+    <!-- Heatmap -->
+    <div class="card glass" style="grid-column: 1 / -1;">
+      <div class="ev-head">
+        <div style="min-width:0;">
+          <h3 class="ev-title" style="margin-top:0;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true" style="opacity:.92;">
+              <path d="M4 19V5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14" stroke="rgba(233,246,255,.92)" stroke-width="2" stroke-linecap="round"/>
+              <path d="M8 17v-6M12 17V7M16 17v-3" stroke="rgba(233,246,255,.92)" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+            Eventos detectados (heatmap estilo GitHub)
+          </h3>
+          <div class="ev-sub">
+            Linhas = dias • Colunas = bins de 15 min • Cor = <b>tier</b> (normal/anom/crit). Branco = sem dado/invalid/abaixo do gate.
+          </div>
+
+          <div class="ev-legend" aria-label="Legenda do heatmap de eventos">
+            <span class="ev-pill"><span class="ev-sq empty"></span> Sem dado</span>
+            <span class="ev-pill"><span class="ev-sq normal"></span> Normal</span>
+            <span class="ev-pill"><span class="ev-sq anom"></span> Anômalo</span>
+            <span class="ev-pill"><span class="ev-sq crit"></span> Crítico</span>
+          </div>
+        </div>
+
+        <div class="badge empty" id="evBadge" style="margin-top:.2rem;">
+          <span class="dot"></span><span class="mono" id="evBadgeTxt">—</span>
+        </div>
+      </div>
+
+      <div class="ev-wrap">
+        <canvas id="eventCanvas"></canvas>
+      </div>
+      <div id="eventTip" class="ev-tip"></div>
+    </div>
+
+  </div>
+
+  <!-- Drawer -->
+  <div id="evDrawer" class="ev-drawer" aria-hidden="true">
+    <div id="evBackdrop" class="ev-backdrop"></div>
+    <div class="ev-panel" role="dialog" aria-modal="true" aria-label="Detalhes do evento selecionado">
+      <div class="ev-panel-head">
+        <div style="min-width:0;">
+          <div class="ev-panel-title">
+            <span id="evDTitle">Momento</span>
+            <span id="evDBadge" class="badge empty"><span class="dot"></span><span>—</span></span>
+          </div>
+          <div id="evDSub" class="ev-panel-sub">—</div>
+        </div>
+        <button id="evClose" class="btn-x" title="Fechar">✕</button>
+      </div>
+      <div id="evBody" class="ev-panel-body"></div>
+    </div>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+
+    function csrfToken(){
+      const m = document.cookie.match(/csrftoken=([^;]+)/);
+      return m ? decodeURIComponent(m[1]) : "";
+    }
+
+    function escapeHtml(s){
+      const x = String(s ?? "");
+      return x
+        .replace(/&/g,"&amp;")
+        .replace(/</g,"&lt;")
+        .replace(/>/g,"&gt;")
+        .replace(/"/g,"&quot;")
+        .replace(/'/g,"&#039;");
+    }
+
+    function setMsg(html, kind="ok"){
+      $("msg").innerHTML = `<div class="${kind}">${html}</div>`;
+    }
+
+    function fmtN(x, nd=2){
+      const n = Number(x);
+      if (!Number.isFinite(n)) return "—";
+      return n.toFixed(nd).replace(/\.?0+$/,'');
+    }
+    function fmtUnit(x, unit, nd=2){
+      const n = Number(x);
+      if (!Number.isFinite(n)) return "—";
+      return `${fmtN(n, nd)} ${unit}`;
+    }
+    function fmtPct(x, nd=1){
+      const n = Number(x);
+      if (!Number.isFinite(n)) return "—";
+      return (n*100).toFixed(nd) + "%";
+    }
+
+    // -----------------------------
+    // Chart.js
+    // -----------------------------
+    function chartCommonOptions(){
+      return {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: "index", intersect: false },
+        plugins: {
+          legend: {
+            display: true,
+            labels: {
+              color: "rgba(233,246,255,.95)",
+              font: { size: 14, weight: "700" },
+              boxWidth: 14,
+              boxHeight: 14,
+              padding: 18
+            }
+          },
+          tooltip: {
+            titleColor: "rgba(233,246,255,.98)",
+            bodyColor: "rgba(233,246,255,.95)"
+          }
+        },
+        scales: {
+          x: {
+            ticks: { color: "rgba(233,246,255,.85)", maxTicksLimit: 10, font: { size: 12 } },
+            grid: { color: "rgba(255,255,255,.06)" }
+          },
+          y: {
+            ticks: { color: "rgba(233,246,255,.85)", font: { size: 12 } },
+            grid: { color: "rgba(255,255,255,.06)" }
+          }
+        }
+      };
+    }
+
+    let chartMismatch = null;
+    let chartPower = null;
+
+    function destroyCharts(){
+      if(chartMismatch){ chartMismatch.destroy(); chartMismatch = null; }
+      if(chartPower){ chartPower.destroy(); chartPower = null; }
+    }
+
+    function buildCharts(payload){
+      destroyCharts();
+
+      // usa t_local OU x_local
+      const t = payload?.series?.t_local || payload?.series?.x_local || payload?.x_local || [];
+      const mm = payload?.series?.mismatch_rel || [];
+
+      const pr = payload?.series?.p_ac_real_w || payload?.series?.p_ac_w || payload?.series?.pac_real_w || [];
+      const pm = payload?.series?.p_ac_model_w || payload?.series?.pac_model_w || [];
+
+      chartMismatch = new Chart($("chartMismatch"), {
+        type: "line",
+        data: {
+          labels: t,
+          datasets: [
+            { label: "mismatch_rel", data: mm, borderWidth: 2, pointRadius: 0, tension: 0.15 },
+          ]
+        },
+        options: {
+          ...chartCommonOptions(),
+          scales: {
+            ...chartCommonOptions().scales,
+            y: {
+              ...chartCommonOptions().scales.y,
+              title: { display: true, text: "mismatch_rel", color: "rgba(233,246,255,.95)", font: { size: 13, weight: "800" } }
+            }
+          }
+        }
+      });
+
+      chartPower = new Chart($("chartPower"), {
+        type: "line",
+        data: {
+          labels: t,
+          datasets: [
+            { label: "P_real (W)",  data: pr, borderWidth: 2, pointRadius: 0, tension: 0.15 },
+            { label: "P_model (W)", data: pm, borderWidth: 2, pointRadius: 0, tension: 0.15 },
+          ]
+        },
+        options: chartCommonOptions()
+      });
+    }
+
+    function fillKPIs(payload){
+      const s = payload.summary || {};
+      $("k_n").textContent = s.n_points ?? "—";
+      $("k_mabs").textContent = (s.mean_abs_mismatch_valid == null) ? "—" : fmtN(s.mean_abs_mismatch_valid, 3);
+      const events = s.events || [];
+      $("k_ev").textContent = events.length;
+
+      const counts = s.counts || {};
+      $("k_counts").textContent = JSON.stringify(counts, null, 2);
+    }
+
+    // =========================
+    // EVENT HEATMAP (robusto)
+    // =========================
+    const evState = {
+      payload: null,
+      map: null,
+      days: [],
+      times: [],
+      keyToIdx: null,
+      dtm: 15,
+      cell: 14, gap: 4,
+      mL: 78, mT: 26, mR: 12, mB: 22,
+    };
+
+    function parseDateSafe(s){
+      if (s instanceof Date) return s;
+      let x = String(s ?? "").trim();
+      if (!x) return new Date(NaN);
+      if (x.includes(" ") && !x.includes("T")) x = x.replace(" ", "T");
+      return new Date(x);
+    }
+
+    function ymd(dt){
+      const y = dt.getFullYear();
+      const m = String(dt.getMonth()+1).padStart(2,"0");
+      const d = String(dt.getDate()).padStart(2,"0");
+      return `${y}-${m}-${d}`;
+    }
+
+    function ymdList(aYmd, bYmd){
+      const out = [];
+      const a = new Date(aYmd + "T00:00:00");
+      const b = new Date(bYmd + "T00:00:00");
+      if (isNaN(a.getTime()) || isNaN(b.getTime())) return out;
+
+      let cur = new Date(a.getTime());
+      while (cur.getTime() <= b.getTime()){
+        out.push(ymd(cur));
+        cur.setDate(cur.getDate() + 1);
+      }
+      return out;
+    }
+
+    // label -> tier (3 níveis + empty)
+    function labelToTier(lbl){
+      const s = String(lbl ?? "").trim().toLowerCase();
+      if (!s || s === "invalid") return "empty";
+      if (s === "normal") return "normal";
+
+      // crítico
+      if (s.includes("string_disconnected")) return "crit";
+      if (s.includes("short_bypass")) return "crit";
+      if (s.includes("disconnected")) return "crit";
+      if (s.includes("fault")) return "crit";
+
+      // qualquer outra anomalia vira "anom"
+      return "anom";
+    }
+
+    // mismatch -> tier (fallback quando label não existe)
+    function mismatchToTier(mm){
+      const m = Number(mm);
+      if (!Number.isFinite(m)) return "empty";
+
+      const warnAbs     = Number($("warn_abs")?.value ?? 0.35);
+      const faultAbs    = Number($("fault_abs")?.value ?? 0.80);
+      const meteoPosAbs = Number($("meteo_pos_abs")?.value ?? 0.25);
+
+      if (m <= -faultAbs) return "crit";
+      if (Math.abs(m) >= warnAbs || m >= meteoPosAbs) return "anom";
+      return "normal";
+    }
+
+    function tierColor(tier){
+      const cs = getComputedStyle(document.documentElement);
+      if (tier === "normal") return cs.getPropertyValue("--hm-normal").trim();
+      if (tier === "anom") return cs.getPropertyValue("--hm-anom").trim();
+      if (tier === "crit") return cs.getPropertyValue("--hm-crit").trim();
+      return cs.getPropertyValue("--hm-empty").trim();
+    }
+
+    function buildEventMap(payload){
+      const t = payload?.series?.t_local || payload?.series?.x_local || payload?.x_local || [];
+      const labels = payload?.series?.labels || payload?.series?.rca_label || payload?.series?.label_t || [];
+      const valid = payload?.series?.valid || payload?.series?.valid_model || [];
+      const mismatch = payload?.series?.mismatch_rel || [];
+
+      // gate opcional (recomendado para não pintar noite)
+      const gpoaArr =
+        payload?.series?.g_poa ||
+        payload?.series?.g_poa_used ||
+        payload?.series?.gpoa ||
+        payload?.series?.g_poa_wm2 ||
+        [];
+      const gpoaGate = Number($("gpoa_gate")?.value ?? 200);
+
+      const start = $("start").value;
+      const end = $("end").value;
+
+      const days = ymdList(start, end);
+      const dayToIdx = new Map(days.map((d,i)=>[d,i]));
+
+      const dtm = evState.dtm;
+      const nBins = Math.floor(1440 / dtm);
+      const times = [];
+      for (let k=0;k<nBins;k++){
+        const mmn = k*dtm;
+        const hh = String(Math.floor(mmn/60)).padStart(2,"0");
+        const mi = String(mmn%60).padStart(2,"0");
+        times.push(`${hh}:${mi}`);
+      }
+
+      const map = new Map();
+      const keyToIdx = new Map();
+
+      for (let i=0; i<t.length; i++){
+        const dt = parseDateSafe(t[i]);
+        if (isNaN(dt.getTime())) continue;
+
+        const ds = ymd(dt);
+        const di = dayToIdx.get(ds);
+        if (di == null) continue;
+
+        const minutes = dt.getHours()*60 + dt.getMinutes();
+        const ti = Math.floor(minutes / dtm);
+        if (ti < 0 || ti >= nBins) continue;
+
+        const vOK = (i < valid.length) ? !!valid[i] : true;
+        const lbl = (i < labels.length) ? labels[i] : null;
+        const mm  = (i < mismatch.length) ? mismatch[i] : null;
+        const gpoa = (i < gpoaArr.length) ? gpoaArr[i] : null;
+
+        // branco: invalid/sem dado/valid=false/abaixo do gate
+        if (!vOK || (Number.isFinite(Number(gpoa)) && Number(gpoa) < gpoaGate)){
+          map.set(`${di}|${ti}`, { tier:"empty", lbl, vOK, mm, gpoa });
+          continue; // não mapeia idx (não abre drawer)
+        }
+
+        const hasLabel =
+          (lbl != null) &&
+          (String(lbl).trim() !== "") &&
+          (String(lbl).trim().toLowerCase() !== "invalid");
+
+        const tier = hasLabel ? labelToTier(lbl) : mismatchToTier(mm);
+
+        map.set(`${di}|${ti}`, { tier, lbl, vOK, mm, gpoa });
+        keyToIdx.set(`${di}|${ti}`, i);
+      }
+
+      return { days, times, map, keyToIdx };
+    }
+
+    function roundRect(ctx, x, y, w, h, r){
+      const rr = Math.min(r, w/2, h/2);
+      ctx.beginPath();
+      ctx.moveTo(x+rr, y);
+      ctx.arcTo(x+w, y, x+w, y+h, rr);
+      ctx.arcTo(x+w, y+h, x, y+h, rr);
+      ctx.arcTo(x, y+h, x, y, rr);
+      ctx.arcTo(x, y, x+w, y, rr);
+      ctx.closePath();
+    }
+
+    function renderEventHeatmap(payload){
+      evState.payload = payload;
+
+      const canvas = $("eventCanvas");
+      const tipEl = $("eventTip");
+      if (!canvas) return;
+
+      const built = buildEventMap(payload);
+      evState.days = built.days;
+      evState.times = built.times;
+      evState.map = built.map;
+      evState.keyToIdx = built.keyToIdx;
+
+      const days = evState.days;
+      const times = evState.times;
+      const map = evState.map;
+
+      // stats
+      let nEmpty = 0, nNormal = 0, nAnom = 0, nCrit = 0;
+      for (const obj of map.values()){
+        if (!obj || !obj.tier) continue;
+        if (obj.tier === "empty") nEmpty++;
+        else if (obj.tier === "normal") nNormal++;
+        else if (obj.tier === "anom") nAnom++;
+        else if (obj.tier === "crit") nCrit++;
+      }
+      const badge = $("evBadge");
+      const badgeTxt = $("evBadgeTxt");
+      if (badge && badgeTxt){
+        badge.className = "badge empty";
+        badgeTxt.textContent = `normal=${nNormal} | anom=${nAnom} | crit=${nCrit} | empty=${nEmpty} | range: ${$("start").value} → ${$("end").value}`;
+      }
+
+      if (!days.length || !times.length){
+        if (tipEl) tipEl.textContent = "Sem dados suficientes para heatmap.";
+        const ctx0 = canvas.getContext("2d");
+        if (ctx0) ctx0.clearRect(0,0,canvas.width,canvas.height);
+        return;
+      }
+
+      const dpr = window.devicePixelRatio || 1;
+      const cell = evState.cell, gap = evState.gap;
+      const mL = evState.mL, mT = evState.mT, mR = evState.mR, mB = evState.mB;
+
+      const W = mL + times.length * (cell + gap) + mR;
+      const H = mT + days.length * (cell + gap) + mB;
+
+      canvas.style.width = `${W}px`;
+      canvas.style.height = `${H}px`;
+      canvas.width = Math.round(W * dpr);
+      canvas.height = Math.round(H * dpr);
+
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+      ctx.clearRect(0,0,W,H);
+      ctx.fillStyle = "rgba(255,255,255,.02)";
+      ctx.fillRect(0,0,W,H);
+
+      ctx.fillStyle = "rgba(233,246,255,.92)";
+      ctx.font = "13px system-ui";
+
+      for (let ti = 0; ti < times.length; ti += 8){
+        const x = mL + ti * (cell + gap);
+        ctx.fillText(times[ti], x, 16);
+      }
+
+      for (let di = 0; di < days.length; di++){
+        const ds = days[di];
+        const ddmm = ds.length >= 10 ? `${ds.slice(8,10)}/${ds.slice(5,7)}` : ds;
+        const y = mT + di * (cell + gap) + cell - 2;
+        ctx.fillText(ddmm, 8, y);
+      }
+
+      for (let di=0; di<days.length; di++){
+        for (let ti=0; ti<times.length; ti++){
+          const key = `${di}|${ti}`;
+          const obj = map.get(key);
+
+          const x = mL + ti * (cell + gap);
+          const y = mT + di * (cell + gap);
+
+          const tier = obj?.tier || "empty";
+          const fill = tierColor(tier);
+
+          // empty = branco (transparente). desenha borda leve pra enxergar a grade.
+          if (tier === "empty"){
+            ctx.fillStyle = "rgba(255,255,255,.00)";
+            roundRect(ctx, x, y, cell, cell, 4);
+            ctx.fill();
+
+            ctx.strokeStyle = "rgba(255,255,255,.08)";
+            ctx.lineWidth = 1;
+            roundRect(ctx, x, y, cell, cell, 4);
+            ctx.stroke();
+            continue;
+          }
+
+          ctx.fillStyle = fill;
+          roundRect(ctx, x, y, cell, cell, 4);
+          ctx.fill();
+
+          ctx.strokeStyle = "var(--hm-cell-stroke)";
+          ctx.lineWidth = 1;
+          roundRect(ctx, x, y, cell, cell, 4);
+          ctx.stroke();
+        }
+      }
+
+      if (!canvas.__evBound){
+        canvas.__evBound = true;
+
+        canvas.addEventListener("mousemove", (ev) => {
+          const rect = canvas.getBoundingClientRect();
+          const mx = (ev.clientX - rect.left);
+          const my = (ev.clientY - rect.top);
+
+          const ti = Math.floor((mx - mL) / (cell + gap));
+          const di = Math.floor((my - mT) / (cell + gap));
+
+          if (ti < 0 || di < 0 || ti >= times.length || di >= days.length){
+            if (tipEl) tipEl.textContent = "";
+            return;
+          }
+
+          const key = `${di}|${ti}`;
+          const obj = map.get(key);
+          const ds = days[di];
+          const ts = times[ti];
+
+          if (!obj){
+            if (tipEl) tipEl.textContent = `${ds} ${ts} • empty`;
+            return;
+          }
+
+          const lbl = (obj.lbl == null || String(obj.lbl).trim()==="") ? "—" : String(obj.lbl);
+          const mm = obj.mm;
+          const mmTxt = (mm == null) ? "—" : `${fmtN(mm,3)} (${fmtPct(mm,1)})`;
+
+          const tier = obj.tier || "empty";
+          const vOK = String(!!obj.vOK);
+          const gpoa = obj.gpoa;
+          const gpoaTxt = (gpoa == null) ? "—" : fmtUnit(gpoa, "W/m²", 0);
+
+          if (tipEl) tipEl.textContent = `${ds} ${ts} • tier=${tier} • label=${lbl} • mismatch=${mmTxt} • gpoa=${gpoaTxt} • valid=${vOK}`;
+        });
+
+        canvas.addEventListener("mouseleave", () => {
+          if (tipEl) tipEl.textContent = "";
+        });
+
+        canvas.addEventListener("click", (ev) => {
+          if (!evState.payload) return;
+
+          const rect = canvas.getBoundingClientRect();
+          const mx = (ev.clientX - rect.left);
+          const my = (ev.clientY - rect.top);
+
+          const ti = Math.floor((mx - mL) / (cell + gap));
+          const di = Math.floor((my - mT) / (cell + gap));
+
+          if (ti < 0 || di < 0 || ti >= times.length || di >= days.length) return;
+
+          const key = `${di}|${ti}`;
+          const idx = evState.keyToIdx.get(key);
+
+          // se não mapeou idx (empty), não abre drawer
+          if (idx === undefined){
+            setMsg(`<b>Aviso:</b> bin vazio (sem dado/invalid/abaixo do gate).`, "err");
+            return;
+          }
+          openEventDrawer(idx);
+        });
+      }
+    }
+
+    function openDrawer(){
+      const d = $("evDrawer");
+      if (!d) return;
+      d.classList.add("open");
+      d.setAttribute("aria-hidden","false");
+      document.body.style.overflow = "hidden";
+    }
+    function closeDrawer(){
+      const d = $("evDrawer");
+      if (!d) return;
+      d.classList.remove("open");
+      d.setAttribute("aria-hidden","true");
+      document.body.style.overflow = "";
+    }
+
+    // =========================
+    // LEITURA ROBUSTA DAS SÉRIES
+    // =========================
+    function seriesAt(payload, key, idx){
+      const s = payload?.series || {};
+
+      const ALIASES = {
+        p_ac_real_w: ["pac_real_w","p_ac_w","pac_w","pac"],
+        p_ac_model_w:["pac_model_w","p_model_w","p_ac_model","pac_model"],
+        p_dc_w:      ["pdc_w","p_dc","pdc"],
+        v_dc_v:      ["vdc_v","v_dc","vdc"],
+        i_dc_a:      ["idc_a","i_dc","idc"],
+        v_ac_v:      ["vac_v","v_ac","vac"],
+        i_ac_a:      ["iac_a","i_ac","iac"],
+
+        mismatch_rel:["mismatch","mm_rel"],
+        valid:       ["valid_model","valid_ok"],
+
+        labels:      ["rca_label","label_t","label"],
+        codes:       ["rca_code"],
+
+        g_poa:       ["g_poa_used","g_poa_wm2","poa","poa_wm2","gpoa","gti","ghi"],
+
+        ghi:         ["GHI"],
+        gti:         ["GTI","poa_global"],
+        dni:         ["DNI"],
+        dhi:         ["DHI"],
+        temp_air:    ["tamb_c","t_air_c","ta_c","temp_amb_c"],
+        wind_speed:  ["ws_ms","vento_ms"],
+        rh:          ["RH","umid_rel"],
+
+        tcell_c:     ["t_cell_c","tcell","t_cell"],
+      };
+
+      const keys = [key, ...(ALIASES[key] || [])];
+      for (const k of keys){
+        const arr = s?.[k];
+        if (Array.isArray(arr) && idx >= 0 && idx < arr.length) return arr[idx];
+      }
+      return null;
+    }
+
+    function tierBadgeClass(tier){
+      if (tier === "normal") return "normal";
+      if (tier === "anom") return "anom";
+      if (tier === "crit") return "crit";
+      return "empty";
+    }
+
+    function openEventDrawer(idx){
+      const p = evState.payload;
+
+      const tLocal = p?.series?.t_local?.[idx] ?? p?.series?.x_local?.[idx] ?? null;
+
+      const lbl = seriesAt(p, "labels", idx);
+      const vOK = seriesAt(p, "valid", idx);
+      const mismatch = seriesAt(p, "mismatch_rel", idx);
+      const gpoa = seriesAt(p, "g_poa", idx);
+
+      const gpoaGate = Number($("gpoa_gate")?.value ?? 200);
+
+      // tier calculado (mesma regra do mapa)
+      let tier = "empty";
+      if (!!vOK && !(Number.isFinite(Number(gpoa)) && Number(gpoa) < gpoaGate)){
+        const hasLabel =
+          (lbl != null) &&
+          (String(lbl).trim() !== "") &&
+          (String(lbl).trim().toLowerCase() !== "invalid");
+        tier = hasLabel ? labelToTier(lbl) : mismatchToTier(mismatch);
+      }
+
+      const pacR     = seriesAt(p, "p_ac_real_w", idx);
+      const pacM     = seriesAt(p, "p_ac_model_w", idx);
+
+      const pdc      = seriesAt(p, "p_dc_w", idx);
+      const vdc      = seriesAt(p, "v_dc_v", idx);
+      const idc      = seriesAt(p, "i_dc_a", idx);
+      const vac      = seriesAt(p, "v_ac_v", idx);
+      const iac      = seriesAt(p, "i_ac_a", idx);
+
+      const ghi      = seriesAt(p, "ghi", idx);
+      const gti      = seriesAt(p, "gti", idx);
+      const dni      = seriesAt(p, "dni", idx);
+      const dhi      = seriesAt(p, "dhi", idx);
+      const ta       = seriesAt(p, "temp_air", idx);
+      const ws       = seriesAt(p, "wind_speed", idx);
+      const rh       = seriesAt(p, "rh", idx);
+
+      const tcell    = seriesAt(p, "tcell_c", idx);
+
+      $("evDTitle").textContent = "Momento selecionado";
+      $("evDSub").textContent = tLocal ? `t_local: ${tLocal}` : "—";
+
+      const badge = $("evDBadge");
+      if (badge){
+        const name = (lbl != null && String(lbl).trim() !== "") ? String(lbl) : "—";
+        badge.className = `badge ${tierBadgeClass(tier)}`;
+        badge.innerHTML = `<span class="dot"></span><span>tier=${escapeHtml(tier)} | label=${escapeHtml(name)}</span>`;
+      }
+
+      const bySrc = p?.series_by_source || {};
+      const srcNames = Object.keys(bySrc).sort();
+
+      let srcRows = "";
+      if (srcNames.length){
+        for (const sname of srcNames){
+          const row = bySrc[sname] || {};
+
+          const spac = Array.isArray(row.p_ac_real_w) ? row.p_ac_real_w[idx] :
+                       Array.isArray(row.p_ac_w) ? row.p_ac_w[idx] :
+                       Array.isArray(row.pac_real_w) ? row.pac_real_w[idx] : null;
+
+          const spdc = Array.isArray(row.p_dc_w) ? row.p_dc_w[idx] :
+                       Array.isArray(row.pdc_w) ? row.pdc_w[idx] : null;
+
+          const svdc = Array.isArray(row.v_dc_v) ? row.v_dc_v[idx] :
+                       Array.isArray(row.vdc_v) ? row.vdc_v[idx] : null;
+
+          const sidc = Array.isArray(row.i_dc_a) ? row.i_dc_a[idx] :
+                       Array.isArray(row.idc_a) ? row.idc_a[idx] : null;
+
+          srcRows += `
+            <tr>
+              <td>${escapeHtml(sname)}</td>
+              <td>
+                Pac=${escapeHtml(fmtN(spac,0))}W |
+                Pdc=${escapeHtml(fmtN(spdc,0))}W |
+                Vdc=${escapeHtml(fmtN(svdc,1))}V |
+                Idc=${escapeHtml(fmtN(sidc,2))}A
+              </td>
+            </tr>
+          `;
+        }
+      } else {
+        srcRows = `<tr><td>—</td><td class="muted">Sem series_by_source no payload.</td></tr>`;
+      }
+
+      function missTag(val, name){
+        const ok = Number.isFinite(Number(val));
+        return ok ? "" : `<span class="badge empty" style="margin-right:8px;"><span class="dot"></span><span>${name} n/a</span></span>`;
+      }
+      const missing =
+        missTag(vdc,"Vdc") + missTag(idc,"Idc") + missTag(vac,"Vac") + missTag(iac,"Iac") + missTag(pdc,"Pdc");
+
+      const body = $("evBody");
+      if (body){
+        body.innerHTML = `
+          <div class="card-lite">
+            <h4>
+              <span>Resumo</span>
+              <span class="muted mono">idx=${escapeHtml(String(idx))}</span>
+            </h4>
+            <div class="kv-grid">
+              <div class="kv"><div class="k">tier</div><div class="v mono">${escapeHtml(tier)}</div></div>
+              <div class="kv"><div class="k">valid</div><div class="v mono">${escapeHtml(String(!!vOK))}</div></div>
+
+              <div class="kv"><div class="k">mismatch_rel</div><div class="v mono">${escapeHtml(fmtN(mismatch,3))} <span class="muted">(${escapeHtml(fmtPct(mismatch,1))})</span></div></div>
+              <div class="kv"><div class="k">G_POA</div><div class="v mono">${escapeHtml(fmtUnit(gpoa,"W/m²",0))}</div></div>
+
+              <div class="kv"><div class="k">Label (backend)</div><div class="v mono">${escapeHtml(lbl == null ? "—" : String(lbl))}</div></div>
+              <div class="kv"><div class="k">Gate (W/m²)</div><div class="v mono">${escapeHtml(fmtN($("gpoa_gate")?.value,0))}</div></div>
+
+              <div class="kv"><div class="k">P_real</div><div class="v mono">${escapeHtml(fmtUnit(pacR,"W",0))}</div></div>
+              <div class="kv"><div class="k">P_model</div><div class="v mono">${escapeHtml(fmtUnit(pacM,"W",0))}</div></div>
+            </div>
+
+            ${missing ? `<div style="margin-top:.75rem;">${missing}</div>` : ``}
+          </div>
+
+          <div class="card-lite">
+            <h4><span>Operativo (inversor)</span><span class="muted">15 min</span></h4>
+            <div class="kv-grid">
+              <div class="kv"><div class="k">Pdc</div><div class="v mono">${escapeHtml(fmtUnit(pdc,"W",0))}</div></div>
+              <div class="kv"><div class="k">Vdc</div><div class="v mono">${escapeHtml(fmtUnit(vdc,"V",1))}</div></div>
+              <div class="kv"><div class="k">Idc</div><div class="v mono">${escapeHtml(fmtUnit(idc,"A",2))}</div></div>
+              <div class="kv"><div class="k">Vac</div><div class="v mono">${escapeHtml(fmtUnit(vac,"V",1))}</div></div>
+              <div class="kv"><div class="k">Iac</div><div class="v mono">${escapeHtml(fmtUnit(iac,"A",2))}</div></div>
+              <div class="kv"><div class="k">Pac</div><div class="v mono">${escapeHtml(fmtUnit(pacR,"W",0))}</div></div>
+            </div>
+          </div>
+
+          <div class="card-lite">
+            <h4><span>Meteo</span><span class="muted">W/m² • °C</span></h4>
+            <div class="kv-grid">
+              <div class="kv"><div class="k">GHI</div><div class="v mono">${escapeHtml(fmtUnit(ghi,"W/m²",0))}</div></div>
+              <div class="kv"><div class="k">GTI</div><div class="v mono">${escapeHtml(fmtUnit(gti,"W/m²",0))}</div></div>
+              <div class="kv"><div class="k">DNI</div><div class="v mono">${escapeHtml(fmtUnit(dni,"W/m²",0))}</div></div>
+              <div class="kv"><div class="k">DHI</div><div class="v mono">${escapeHtml(fmtUnit(dhi,"W/m²",0))}</div></div>
+              <div class="kv"><div class="k">Tamb</div><div class="v mono">${escapeHtml(fmtUnit(ta,"°C",1))}</div></div>
+              <div class="kv"><div class="k">Vento</div><div class="v mono">${escapeHtml(fmtUnit(ws,"m/s",1))}</div></div>
+              <div class="kv"><div class="k">RH</div><div class="v mono">${escapeHtml(fmtUnit(rh,"%",0))}</div></div>
+              <div class="kv"><div class="k">G_POA</div><div class="v mono">${escapeHtml(fmtUnit(gpoa,"W/m²",0))}</div></div>
+            </div>
+          </div>
+
+          <div class="card-lite">
+            <h4><span>Modelo</span><span class="muted">estimativas</span></h4>
+            <div class="kv-grid">
+              <div class="kv"><div class="k">Tcell</div><div class="v mono">${escapeHtml(fmtUnit(tcell,"°C",1))}</div></div>
+              <div class="kv"><div class="k">Pac_model</div><div class="v mono">${escapeHtml(fmtUnit(pacM,"W",0))}</div></div>
+            </div>
+          </div>
+
+          <div class="card-lite">
+            <h4><span>Por MPPT/string</span><span class="muted">series_by_source</span></h4>
+            <table class="src"><tbody>${srcRows}</tbody></table>
+          </div>
+        `;
+      }
+
+      openDrawer();
+    }
+
+    // -----------------------------
+    // Run / Persist
+    // -----------------------------
+    async function run(persist=false){
+      const url = "{% url 'mismatch_fdd_api' %}";
+      const payload = {
+        plant_id: $("plant_id").value,
+        start: $("start").value,
+        end: $("end").value,
+        gpoa_gate: $("gpoa_gate").value,
+        warn_abs: $("warn_abs").value,
+        fault_abs: $("fault_abs").value,
+        meteo_pos_abs: $("meteo_pos_abs").value,
+        shading_std_abs: $("shading_std_abs").value,
+        shading_window_points: $("shading_window_points").value,
+        persist: persist ? "1" : ""
+      };
+
+      $("btnRun").disabled = true;
+      $("btnPersist").disabled = true;
+
+      try{
+        const resp = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type":"application/x-www-form-urlencoded;charset=UTF-8",
+            "X-CSRFToken": csrfToken(),
+          },
+          body: new URLSearchParams(payload).toString()
+        });
+        const data = await resp.json();
+
+        if(!data.ok){
+          setMsg(`<b>Erro:</b> ${escapeHtml(data.error || "falha")}`, "err");
+          return;
+        }
+
+        const plant = data.plant || {};
+        const range = data.range || {};
+        const saved = data.persist
+          ? ` | <span class="mono">saved:</span> created=${data.persist.created}, updated=${data.persist.updated}`
+          : "";
+
+        setMsg(
+          `<b>OK</b> — ${escapeHtml(plant.nome || "")} | ${escapeHtml(range.start || "")} → ${escapeHtml(range.end || "")}${saved}`,
+          "ok"
+        );
+
+        buildCharts(data);
+        fillKPIs(data);
+        renderEventHeatmap(data);
+
+      }catch(e){
+        setMsg(`<b>Erro:</b> ${escapeHtml(String(e))}`, "err");
+      }finally{
+        $("btnRun").disabled = false;
+        $("btnPersist").disabled = false;
+      }
+    }
+
+    $("btnRun").addEventListener("click", () => run(false));
+    $("btnPersist").addEventListener("click", () => run(true));
+
+    $("evBackdrop")?.addEventListener("click", closeDrawer);
+    $("evClose")?.addEventListener("click", closeDrawer);
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeDrawer(); });
+
+    // auto-run inicial
+    if($("plant_id") && $("plant_id").options.length){
+      run(false);
+    }
+  </script>
+{% endblock %}
