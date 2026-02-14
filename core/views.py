@@ -3008,7 +3008,7 @@ def pv_dashboard_timeseries_api(request: HttpRequest) -> JsonResponse:
 
 
 # ----------------------------
-# ----------- S A N I D A D E  D O  S I S T E M A
+# ----------- S A N I D A D E  D O  S I S T E M A  (Mismatch FDD)
 # ----------------------------
 import inspect
 import logging
@@ -3023,6 +3023,7 @@ from django.db.models import Count
 from django.http import HttpRequest, JsonResponse
 from django.shortcuts import render
 from django.urls import reverse
+from django.utils import timezone
 from django.views.decorators.http import require_GET, require_http_methods
 
 from core.models import PVPlant, PVPlantMergedRecord15m, PlantDiagnostic15m
@@ -3035,11 +3036,31 @@ from core.services.fdd_mismatch import (
 logger = logging.getLogger(__name__)
 
 
+# ----------------------------
+# JSON strict/robusto
+# ----------------------------
 def _json_response_strict(payload: Any, *, status: int = 200) -> JsonResponse:
-    """JsonResponse com serializer robusto (datetime, numpy, etc.)."""
+    """JsonResponse com serializer robusto (datetime, date, numpy, etc.)."""
+
     def _default(o: Any):
         if isinstance(o, (datetime, date)):
             return o.isoformat()
+
+        # numpy (opcional)
+        try:
+            import numpy as np  # type: ignore
+
+            if isinstance(o, np.generic):
+                return o.item()
+            if isinstance(o, np.ndarray):
+                return o.tolist()
+        except Exception:
+            pass
+
+        # dataclasses
+        if is_dataclass(o):
+            return asdict(o)
+
         return str(o)
 
     safe = isinstance(payload, dict)
@@ -3130,13 +3151,28 @@ def _upsert_diag15m(
     pac_model_w: List[Optional[float]],
     mismatch_rel: List[Optional[float]],
 ) -> Dict[str, Any]:
-    """Upsert em PlantDiagnostic15m para o range. Usa bulk_create/bulk_update."""
-    assert len(times_utc) == len(codes) == len(labels) == len(valid) == len(g_poa) == len(tcell_c) == len(pac_real_w) == len(pac_model_w) == len(mismatch_rel)
+    """
+    Upsert em PlantDiagnostic15m para o range.
+    FIX importante:
+      - bulk_create/bulk_update NÃO disparam auto_now/auto_now_add.
+      - Portanto, setamos updated_at (e created_at se existir) manualmente.
+    """
+    assert (
+        len(times_utc)
+        == len(codes)
+        == len(labels)
+        == len(valid)
+        == len(g_poa)
+        == len(tcell_c)
+        == len(pac_real_w)
+        == len(pac_model_w)
+        == len(mismatch_rel)
+    )
 
     existing: Dict[datetime, PlantDiagnostic15m] = {}
     chunk = 1000
     for i in range(0, len(times_utc), chunk):
-        ts_chunk = times_utc[i:i + chunk]
+        ts_chunk = times_utc[i : i + chunk]
         qs = PlantDiagnostic15m.objects.filter(plant=plant, ts_utc__in=ts_chunk)
         for obj in qs:
             existing[obj.ts_utc] = obj
@@ -3144,9 +3180,12 @@ def _upsert_diag15m(
     to_create: List[PlantDiagnostic15m] = []
     to_update: List[PlantDiagnostic15m] = []
 
+    now = timezone.now()
+
     for i, ts in enumerate(times_utc):
         obj = existing.get(ts)
-        if obj is None:
+        is_new = obj is None
+        if is_new:
             obj = PlantDiagnostic15m(plant=plant, ts_utc=ts)
             to_create.append(obj)
         else:
@@ -3162,38 +3201,52 @@ def _upsert_diag15m(
         obj.pac_model_w = pac_model_w[i]
         obj.mismatch_rel = mismatch_rel[i]
 
+        # timestamps (bulk_* não chama save())
+        if hasattr(obj, "updated_at"):
+            setattr(obj, "updated_at", now)
+        if is_new and hasattr(obj, "created_at") and getattr(obj, "created_at", None) is None:
+            setattr(obj, "created_at", now)
+
     with transaction.atomic():
         if to_create:
             PlantDiagnostic15m.objects.bulk_create(to_create, ignore_conflicts=True)
         if to_update:
-            PlantDiagnostic15m.objects.bulk_update(
-                to_update,
-                fields=[
-                    "rca_code",
-                    "rca_label",
-                    "valid",
-                    "g_poa",
-                    "tcell_c",
-                    "pac_real_w",
-                    "pac_model_w",
-                    "mismatch_rel",
-                    "updated_at",
-                ],
-            )
+            fields = [
+                "rca_code",
+                "rca_label",
+                "valid",
+                "g_poa",
+                "tcell_c",
+                "pac_real_w",
+                "pac_model_w",
+                "mismatch_rel",
+            ]
+            if hasattr(PlantDiagnostic15m, "updated_at"):
+                fields.append("updated_at")
+
+            PlantDiagnostic15m.objects.bulk_update(to_update, fields=fields)
 
     return {"created": len(to_create), "updated": len(to_update)}
 
 
+# ----------------------------
+# View (página)
+# ----------------------------
 @require_GET
 @login_required
 def mismatch_fdd_view(request: HttpRequest):
     """Página: Heatmap de mismatch + detalhes ao clicar."""
-    qs = PVPlant.objects.all().order_by("nome") if request.user.is_superuser else PVPlant.objects.filter(owner=request.user).order_by("nome")
+    qs = (
+        PVPlant.objects.all().order_by("nome")
+        if request.user.is_superuser
+        else PVPlant.objects.filter(owner=request.user).order_by("nome")
+    )
     plants = list(qs)
 
     d_end = date.today()
     d_start = d_end - timedelta(days=7)
 
+    # FIX: adiciona "today" para templates antigos que usam default:today
     return render(
         request,
         "dashboard/mismatch_fdd.html",
@@ -3201,11 +3254,15 @@ def mismatch_fdd_view(request: HttpRequest):
             "plants": plants,
             "default_start": d_start.isoformat(),
             "default_end": d_end.isoformat(),
+            "today": d_end.isoformat(),
             "api_url": reverse("mismatch_fdd_api"),
         },
     )
 
 
+# ----------------------------
+# API (GET/POST)
+# ----------------------------
 @require_http_methods(["GET", "POST"])
 @login_required
 def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
@@ -3216,7 +3273,11 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
     except Exception:
         return _json_response_strict({"ok": False, "error": "plant_id inválido"}, status=400)
 
-    plant = PVPlant.objects.filter(id=plant_id).select_related("details", "details__module", "details__inverter").first()
+    plant = (
+        PVPlant.objects.filter(id=plant_id)
+        .select_related("details", "details__module", "details__inverter")
+        .first()
+    )
     if not plant:
         return _json_response_strict({"ok": False, "error": "Planta não encontrada"}, status=404)
 
@@ -3237,6 +3298,7 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
     if d1 < d0:
         return _json_response_strict({"ok": False, "error": "end < start"}, status=400)
 
+    # range local -> UTC (fim exclusivo)
     dt0_local = datetime.combine(d0, time.min, tzinfo=tz)
     dt1_local = datetime.combine(d1 + timedelta(days=1), time.min, tzinfo=tz)
     dt0_utc = dt0_local.astimezone(dt_tz.utc)
@@ -3265,14 +3327,20 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
     )
     source_oper_list = [r["source_oper"] for r in src_oper_rows if r.get("source_oper")]
     if not source_oper_list:
-        return _json_response_strict({"ok": False, "error": "Sem source_oper para a fonte meteo selecionada no range."}, status=404)
+        return _json_response_strict(
+            {"ok": False, "error": "Sem source_oper para a fonte meteo selecionada no range."},
+            status=404,
+        )
 
     want_all = (not src_oper_raw) or (src_oper_raw.upper() == "ALL")
     if want_all:
         selected_sources = list(source_oper_list)
     else:
         if src_oper_raw not in source_oper_list:
-            return _json_response_strict({"ok": False, "error": f"source_oper '{src_oper_raw}' não existe no range."}, status=404)
+            return _json_response_strict(
+                {"ok": False, "error": f"source_oper '{src_oper_raw}' não existe no range."},
+                status=404,
+            )
         selected_sources = [src_oper_raw]
 
     qs = (
@@ -3310,11 +3378,16 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
     if not rows:
         return _json_response_strict({"ok": False, "error": "Sem registros no range para as fontes selecionadas."}, status=404)
 
-    per_ts: Dict[datetime, Dict[str, Dict[str, Any]]] = {}
-    for r in rows:
-        ts = r["ts_utc"]
+    # FIX: normaliza ts_utc (aware UTC, sem segundos/micros) para evitar drift
+    def _norm_ts_utc(ts: datetime) -> datetime:
         if ts.tzinfo is None:
             ts = ts.replace(tzinfo=dt_tz.utc)
+        ts = ts.astimezone(dt_tz.utc)
+        return ts.replace(second=0, microsecond=0, tzinfo=dt_tz.utc)
+
+    per_ts: Dict[datetime, Dict[str, Dict[str, Any]]] = {}
+    for r in rows:
+        ts = _norm_ts_utc(r["ts_utc"])
         src = r.get("source_oper") or ""
         if not src:
             continue
@@ -3426,7 +3499,12 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
             rh[i] = _as_float(first_row.get("rh"))
             flag_meteo_missing[i] = bool(first_row.get("flag_meteo_missing") or False)
 
-    x_local = [t.astimezone(tz).isoformat() for t in times_utc]
+    # FIX p/ alinhamento de heatmap no front:
+    # - t_local: ISO com offset (bom p/ exibição)
+    # - t_local_wall: ISO sem offset (bom p/ binning wall-clock no JS, sem Date timezone conversion)
+    x_local_dt = [t.astimezone(tz) for t in times_utc]
+    x_local = [d.isoformat() for d in x_local_dt]
+    x_local_wall = [d.replace(tzinfo=None).isoformat(timespec="minutes") for d in x_local_dt]
     x_utc = [t.isoformat() for t in times_utc]
 
     g_poa_used = [gti_i if gti_i is not None else ghi_i for gti_i, ghi_i in zip(gti, ghi)]
@@ -3474,6 +3552,9 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
             status=400,
         )
 
+    # ----------------------------
+    # Power model
+    # ----------------------------
     try:
         import numpy as np
         from core.services.power_model.power_model import (
@@ -3486,6 +3567,7 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
         inv = getattr(details, "inverter", None)
         pl = plant_from_details(details, inverter=inv, use_inverter_eff=True)
 
+        # FIX: reconstrução robusta do dataclass/class filtrando kwargs pelo __init__
         pld = asdict(pl) if is_dataclass(pl) else dict(getattr(pl, "__dict__", {}))
         if pld.get("lat_deg") is None:
             pld["lat_deg"] = _as_float(getattr(plant, "latitude", None))
@@ -3495,6 +3577,10 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
             pld["tilt_deg"] = _as_float(getattr(details, "tilt_deg", None))
         if pld.get("azimuth_deg") is None:
             pld["azimuth_deg"] = _as_float(getattr(details, "azimuth_deg", None))
+
+        sig_pl = inspect.signature(pl.__class__)
+        allowed = set(sig_pl.parameters.keys())
+        pld = {k: v for k, v in pld.items() if k in allowed}
         pl = pl.__class__(**pld)
 
         def list_to_np_nan(xs):
@@ -3537,7 +3623,15 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
         if pac_expected is None:
             return _json_response_strict({"ok": False, "error": "power_model não retornou pac_expected_w."}, status=500)
 
-        pac_model_w = [None if (not np.isfinite(v)) else float(v) for v in np.asarray(pac_expected, dtype=float).tolist()]
+        pac_expected_list = np.asarray(pac_expected, dtype=float).tolist()
+        if len(pac_expected_list) != n:
+            return _json_response_strict(
+                {"ok": False, "error": f"power_model retornou pac_expected_w com len={len(pac_expected_list)} != n={n}"},
+                status=500,
+            )
+
+        pac_model_w = [None if (not np.isfinite(v)) else float(v) for v in pac_expected_list]
+
         if mismatch is None:
             eps = 50.0
             mm: List[Optional[float]] = []
@@ -3549,22 +3643,43 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
                 mm.append((float(pr) - float(pm)) / float(den))
             mismatch_rel = mm
         else:
-            mismatch_rel = [None if (not np.isfinite(v)) else float(v) for v in np.asarray(mismatch, dtype=float).tolist()]
+            mismatch_list = np.asarray(mismatch, dtype=float).tolist()
+            if len(mismatch_list) != n:
+                return _json_response_strict(
+                    {"ok": False, "error": f"power_model retornou mismatch_rel com len={len(mismatch_list)} != n={n}"},
+                    status=500,
+                )
+            mismatch_rel = [None if (not np.isfinite(v)) else float(v) for v in mismatch_list]
 
         if valid_model_np is None:
             valid_model = [False if (m is None) else True for m in mismatch_rel]
         else:
-            valid_model = [bool(v) for v in list(np.asarray(valid_model_np, dtype=bool).tolist())]
+            valid_list = list(np.asarray(valid_model_np, dtype=bool).tolist())
+            if len(valid_list) != n:
+                return _json_response_strict(
+                    {"ok": False, "error": f"power_model retornou valid com len={len(valid_list)} != n={n}"},
+                    status=500,
+                )
+            valid_model = [bool(v) for v in valid_list]
 
         if tcell_np is None:
             tcell_c = [None] * n
         else:
-            tcell_c = [None if (not np.isfinite(v)) else float(v) for v in np.asarray(tcell_np, dtype=float).tolist()]
+            tcell_list = np.asarray(tcell_np, dtype=float).tolist()
+            if len(tcell_list) != n:
+                return _json_response_strict(
+                    {"ok": False, "error": f"power_model retornou tcell_c com len={len(tcell_list)} != n={n}"},
+                    status=500,
+                )
+            tcell_c = [None if (not np.isfinite(v)) else float(v) for v in tcell_list]
 
     except Exception as e:
         logger.exception("Falha no power_model (mismatch_fdd_api) plant_id=%s", plant_id)
         return _json_response_strict({"ok": False, "error": f"{type(e).__name__}: {e}"}, status=500)
 
+    # ----------------------------
+    # Classificação mismatch
+    # ----------------------------
     out_cls = classify_mismatch_series(
         times_utc=times_utc,
         mismatch_rel=mismatch_rel,
@@ -3618,16 +3733,19 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
             "selected_sources": selected_sources,
         },
         "x_local": x_local,
+        "x_local_wall": x_local_wall,  # ✅ útil para heatmap no front (wall-clock sem offset)
         "x_utc": x_utc,
         "series": {
-            # ✅ FIX: aliases esperados pelo front
-            "t_local": x_local,
+            # ✅ aliases esperados pelo front
+            "t_local": x_local,               # ISO com offset (exibição)
+            "t_local_wall": x_local_wall,     # ISO sem offset (binnig estável no JS)
             "t_utc": x_utc,
+
             "g_poa": g_poa_used,
             "labels": labels,
             "codes": codes,
 
-            # mantém os nomes atuais também
+            # mantém nomes atuais também
             "x_local": x_local,
             "x_utc": x_utc,
 

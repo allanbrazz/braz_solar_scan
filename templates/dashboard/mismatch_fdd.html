@@ -68,23 +68,24 @@
     .ok{border:1px solid rgba(80,255,160,.45); background: rgba(80,255,160,.10); padding:.7rem .9rem; border-radius:14px;}
 
     /* =========================
-       EVENT HEATMAP (robusto, 3 níveis + vazio)
-       - empty: branco (sem dado / invalid / abaixo do gate / valid=false)
-       - normal: verde
-       - anom: amarelo
-       - crit: vermelho
+       HEATMAP (robusto)
+       - cor = rca_code (fonte única)
+       - sem dado/invalid = branco
+       - normal = verde
+       - anômalo = amarelo
+       - crítico = vermelho
        ========================= */
     :root{
+      --hm-bg: rgba(255,255,255,.06);
+
+      --hm-none: rgba(255,255,255,.88);     /* branco (sem dado / invalid) */
+      --hm-ok:   rgba(70,230,140,.95);      /* verde (normal) */
+      --hm-anom: rgba(255,210, 90,.95);     /* amarelo (anômalo) */
+      --hm-crit: rgba(255, 90,110,.95);     /* vermelho (crítico) */
+
       --hm-border: rgba(255,255,255,.12);
       --hm-text: rgba(233,246,255,.92);
       --hm-text2: rgba(233,246,255,.78);
-
-      --hm-empty: rgba(255,255,255,.00); /* branco (transparente no tema escuro) */
-      --hm-normal: rgba(80,255,160,.92);  /* verde */
-      --hm-anom: rgba(255,190,90,.92);    /* amarelo */
-      --hm-crit: rgba(255,110,140,.92);   /* vermelho */
-
-      --hm-cell-stroke: rgba(0,0,0,.12);
     }
 
     .ev-head{
@@ -125,11 +126,11 @@
     .ev-sq{
       width:16px; height:16px;
       border-radius: 4px;
-      background: rgba(255,255,255,.10);
+      background: var(--hm-none);
       box-shadow: 0 0 0 1px rgba(0,0,0,.18) inset;
     }
-    .ev-sq.empty{ background: var(--hm-empty); box-shadow: 0 0 0 1px rgba(255,255,255,.10) inset; }
-    .ev-sq.normal{ background: var(--hm-normal); }
+    .ev-sq.none{ background: var(--hm-none); }
+    .ev-sq.ok{ background: var(--hm-ok); }
     .ev-sq.anom{ background: var(--hm-anom); }
     .ev-sq.crit{ background: var(--hm-crit); }
 
@@ -157,7 +158,6 @@
     #eventCanvas{ display:block; position: relative; z-index: 1; cursor: pointer; }
     .ev-tip{ margin-top:.55rem; min-height: 1.2em; color: var(--hm-text2); font-size:.95rem; }
 
-    /* Drawer */
     .ev-drawer{
       position: fixed;
       inset: 0;
@@ -266,8 +266,8 @@
       background: rgba(255,255,255,.35);
       box-shadow: 0 0 0 1px rgba(0,0,0,.18) inset;
     }
-    .badge.empty .dot{ background: rgba(255,255,255,.20); }
-    .badge.normal .dot{ background: var(--hm-normal); }
+    .badge.none .dot{ background: var(--hm-none); }
+    .badge.ok .dot{ background: var(--hm-ok); }
     .badge.anom .dot{ background: var(--hm-anom); }
     .badge.crit .dot{ background: var(--hm-crit); }
 
@@ -304,8 +304,7 @@
     <div class="card glass">
       <h2 style="margin-top:0">Classificação por mismatch (P_model vs P_real)</h2>
       <p class="muted" style="margin-top:.25rem">
-        Heatmap robusto (sem inconsistência): <b>tier</b> (normal/anom/crit) é calculado de forma determinística.
-        Prioridade: <b>label</b> do backend → fallback por <b>mismatch</b>. Sem dado/invalid/abaixo do gate = branco.
+        Heatmap por bins de 15 min. Cor é <b>sempre</b> derivada do <b>rca_code</b> retornado pela API (sem divergência visual).
       </p>
 
       <div class="ctl-row" style="margin-top:.9rem">
@@ -313,19 +312,24 @@
           <label>Planta</label>
           <select id="plant_id">
             {% for p in plants %}
-              <option value="{{ p.id }}">{{ p.nome }}</option>
+              <option value="{{ p.id }}"
+                {% if plant_id and plant_id|stringformat:"s" == p.id|stringformat:"s" %}selected{% endif %}>
+                {% firstof p.nome p.name %}
+              </option>
             {% endfor %}
           </select>
         </div>
 
         <div class="ctl">
           <label>Início</label>
-          <input id="start" type="date" value="{{ default_start }}">
+          <!-- FIX: sem today; fallback seguro -->
+          <input id="start" type="date" value="{{ start_date|default:default_start }}">
         </div>
 
         <div class="ctl">
           <label>Fim</label>
-          <input id="end" type="date" value="{{ default_end }}">
+          <!-- FIX: sem today; fallback seguro -->
+          <input id="end" type="date" value="{{ end_date|default:default_end }}">
         </div>
 
         <div class="ctl">
@@ -339,7 +343,7 @@
         </div>
 
         <div class="ctl">
-          <label>Falha severa (mismatch ≤ -)</label>
+          <label>Crítico (mismatch ≤ -)</label>
           <input id="fault_abs" type="number" step="0.05" value="0.80">
         </div>
 
@@ -405,7 +409,6 @@
       <div class="chart-wrap sm"><canvas id="chartPower"></canvas></div>
     </div>
 
-    <!-- Heatmap -->
     <div class="card glass" style="grid-column: 1 / -1;">
       <div class="ev-head">
         <div style="min-width:0;">
@@ -414,21 +417,21 @@
               <path d="M4 19V5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14" stroke="rgba(233,246,255,.92)" stroke-width="2" stroke-linecap="round"/>
               <path d="M8 17v-6M12 17V7M16 17v-3" stroke="rgba(233,246,255,.92)" stroke-width="2" stroke-linecap="round"/>
             </svg>
-            Eventos detectados (heatmap estilo GitHub)
+            Heatmap de eventos (15 min)
           </h3>
           <div class="ev-sub">
-            Linhas = dias • Colunas = bins de 15 min • Cor = <b>tier</b> (normal/anom/crit). Branco = sem dado/invalid/abaixo do gate.
+            Linhas = dias • Colunas = bins de 15 min • Células coloridas indicam a severidade do <b>rca_code</b>.
           </div>
 
-          <div class="ev-legend" aria-label="Legenda do heatmap de eventos">
-            <span class="ev-pill"><span class="ev-sq empty"></span> Sem dado</span>
-            <span class="ev-pill"><span class="ev-sq normal"></span> Normal</span>
+          <div class="ev-legend" aria-label="Legenda do heatmap">
+            <span class="ev-pill"><span class="ev-sq none"></span> Sem dado / invalid</span>
+            <span class="ev-pill"><span class="ev-sq ok"></span> Normal</span>
             <span class="ev-pill"><span class="ev-sq anom"></span> Anômalo</span>
             <span class="ev-pill"><span class="ev-sq crit"></span> Crítico</span>
           </div>
         </div>
 
-        <div class="badge empty" id="evBadge" style="margin-top:.2rem;">
+        <div class="badge none" id="evBadge" style="margin-top:.2rem;">
           <span class="dot"></span><span class="mono" id="evBadgeTxt">—</span>
         </div>
       </div>
@@ -441,7 +444,6 @@
 
   </div>
 
-  <!-- Drawer -->
   <div id="evDrawer" class="ev-drawer" aria-hidden="true">
     <div id="evBackdrop" class="ev-backdrop"></div>
     <div class="ev-panel" role="dialog" aria-modal="true" aria-label="Detalhes do evento selecionado">
@@ -449,7 +451,7 @@
         <div style="min-width:0;">
           <div class="ev-panel-title">
             <span id="evDTitle">Momento</span>
-            <span id="evDBadge" class="badge empty"><span class="dot"></span><span>—</span></span>
+            <span id="evDBadge" class="badge none"><span class="dot"></span><span>—</span></span>
           </div>
           <div id="evDSub" class="ev-panel-sub">—</div>
         </div>
@@ -497,9 +499,6 @@
       return (n*100).toFixed(nd) + "%";
     }
 
-    // -----------------------------
-    // Chart.js
-    // -----------------------------
     function chartCommonOptions(){
       return {
         responsive: true,
@@ -545,7 +544,11 @@
     function buildCharts(payload){
       destroyCharts();
 
-      // usa t_local OU x_local
+      if (!window.Chart){
+        setMsg(`<b>Erro:</b> Chart.js não carregou. Verifique o static vendor/chartjs.`, "err");
+        return;
+      }
+
       const t = payload?.series?.t_local || payload?.series?.x_local || payload?.x_local || [];
       const mm = payload?.series?.mismatch_rel || [];
 
@@ -639,59 +642,98 @@
       return out;
     }
 
-    // label -> tier (3 níveis + empty)
-    function labelToTier(lbl){
+    function sevFromCode(code){
+      const c = Number(code);
+      if (!Number.isFinite(c) || c === 0) return "none"; // invalid/sem dado
+      if (c === 1) return "ok";                          // normal
+      if (c === 3) return "crit";                        // fault severa
+      return "anom";                                     // resto = anômalo
+    }
+
+    function sevFromLabel(lbl){
       const s = String(lbl ?? "").trim().toLowerCase();
-      if (!s || s === "invalid") return "empty";
-      if (s === "normal") return "normal";
-
-      // crítico
-      if (s.includes("string_disconnected")) return "crit";
-      if (s.includes("short_bypass")) return "crit";
-      if (s.includes("disconnected")) return "crit";
-      if (s.includes("fault")) return "crit";
-
-      // qualquer outra anomalia vira "anom"
+      if (!s || s === "invalid") return "none";
+      if (s === "normal") return "ok";
+      if (s.includes("string_disconnected") || s.includes("disconnected")) return "crit";
       return "anom";
     }
 
-    // mismatch -> tier (fallback quando label não existe)
-    function mismatchToTier(mm){
-      const m = Number(mm);
-      if (!Number.isFinite(m)) return "empty";
-
-      const warnAbs     = Number($("warn_abs")?.value ?? 0.35);
-      const faultAbs    = Number($("fault_abs")?.value ?? 0.80);
-      const meteoPosAbs = Number($("meteo_pos_abs")?.value ?? 0.25);
-
-      if (m <= -faultAbs) return "crit";
-      if (Math.abs(m) >= warnAbs || m >= meteoPosAbs) return "anom";
-      return "normal";
+    function getNum(id, fallback=NaN){
+      const el = $(id);
+      const v = el ? Number(el.value) : NaN;
+      return Number.isFinite(v) ? v : fallback;
     }
 
-    function tierColor(tier){
+    function sevFromMismatch(mm){
+      const m = Number(mm);
+      if (!Number.isFinite(m)) return "none";
+      const warnAbs  = Math.max(0, getNum("warn_abs", 0.35));
+      const faultAbs = Math.max(0, getNum("fault_abs", 0.80));
+      if (m <= -faultAbs) return "crit";
+      if (Math.abs(m) >= warnAbs) return "anom";
+      return "ok";
+    }
+
+    function sevColor(sev){
       const cs = getComputedStyle(document.documentElement);
-      if (tier === "normal") return cs.getPropertyValue("--hm-normal").trim();
-      if (tier === "anom") return cs.getPropertyValue("--hm-anom").trim();
-      if (tier === "crit") return cs.getPropertyValue("--hm-crit").trim();
-      return cs.getPropertyValue("--hm-empty").trim();
+      if (sev === "ok") return cs.getPropertyValue("--hm-ok").trim();
+      if (sev === "anom") return cs.getPropertyValue("--hm-anom").trim();
+      if (sev === "crit") return cs.getPropertyValue("--hm-crit").trim();
+      return cs.getPropertyValue("--hm-none").trim();
+    }
+
+    function seriesAt(payload, key, idx){
+      const s = payload?.series || {};
+      const ALIASES = {
+        p_ac_real_w: ["pac_real_w","p_ac_w","pac_w","pac"],
+        p_ac_model_w:["pac_model_w","p_model_w","p_ac_model","pac_model"],
+        p_dc_w:      ["pdc_w","p_dc","pdc"],
+        v_dc_v:      ["vdc_v","v_dc","vdc"],
+        i_dc_a:      ["idc_a","i_dc","idc"],
+        v_ac_v:      ["vac_v","v_ac","vac"],
+        i_ac_a:      ["iac_a","i_ac","iac"],
+
+        mismatch_rel:["mismatch","mm_rel"],
+        valid:       ["valid_model","valid_ok"],
+
+        label:       ["rca_label","label_t","labels"],
+        code:        ["rca_code","codes"],
+
+        g_poa:       ["g_poa_used","g_poa_wm2","poa","poa_wm2","gpoa","gti","GTI"],
+        ghi:         ["GHI","ghi"],
+        gti:         ["GTI","gti","poa_global"],
+        dni:         ["DNI","dni"],
+        dhi:         ["DHI","dhi"],
+        temp_air:    ["tamb_c","t_air_c","ta_c","temp_amb_c","temp_air"],
+        wind_speed:  ["ws_ms","vento_ms","wind_speed"],
+        rh:          ["RH","umid_rel","rh"],
+        tcell_c:     ["t_cell_c","tcell","t_cell","tcell_c"],
+      };
+
+      const keys = [key, ...((ALIASES[key] || []))];
+      for (const k of keys){
+        const arr = s?.[k];
+        if (Array.isArray(arr) && idx >= 0 && idx < arr.length) return arr[idx];
+      }
+      return null;
+    }
+
+    function pointSeverity(payload, idx){
+      const vOK = seriesAt(payload, "valid", idx);
+      if (vOK === false) return { sev: "none", reason: "valid=false" };
+
+      const code = seriesAt(payload, "code", idx);
+      if (code != null && code !== "") return { sev: sevFromCode(code), reason: "rca_code", code };
+
+      const lbl = seriesAt(payload, "label", idx);
+      if (lbl != null && String(lbl).trim() !== "") return { sev: sevFromLabel(lbl), reason: "label", lbl };
+
+      const mm = seriesAt(payload, "mismatch_rel", idx);
+      return { sev: sevFromMismatch(mm), reason: "mismatch", mm };
     }
 
     function buildEventMap(payload){
       const t = payload?.series?.t_local || payload?.series?.x_local || payload?.x_local || [];
-      const labels = payload?.series?.labels || payload?.series?.rca_label || payload?.series?.label_t || [];
-      const valid = payload?.series?.valid || payload?.series?.valid_model || [];
-      const mismatch = payload?.series?.mismatch_rel || [];
-
-      // gate opcional (recomendado para não pintar noite)
-      const gpoaArr =
-        payload?.series?.g_poa ||
-        payload?.series?.g_poa_used ||
-        payload?.series?.gpoa ||
-        payload?.series?.g_poa_wm2 ||
-        [];
-      const gpoaGate = Number($("gpoa_gate")?.value ?? 200);
-
       const start = $("start").value;
       const end = $("end").value;
 
@@ -702,9 +744,9 @@
       const nBins = Math.floor(1440 / dtm);
       const times = [];
       for (let k=0;k<nBins;k++){
-        const mmn = k*dtm;
-        const hh = String(Math.floor(mmn/60)).padStart(2,"0");
-        const mi = String(mmn%60).padStart(2,"0");
+        const mm = k*dtm;
+        const hh = String(Math.floor(mm/60)).padStart(2,"0");
+        const mi = String(mm%60).padStart(2,"0");
         times.push(`${hh}:${mi}`);
       }
 
@@ -723,25 +765,20 @@
         const ti = Math.floor(minutes / dtm);
         if (ti < 0 || ti >= nBins) continue;
 
-        const vOK = (i < valid.length) ? !!valid[i] : true;
-        const lbl = (i < labels.length) ? labels[i] : null;
-        const mm  = (i < mismatch.length) ? mismatch[i] : null;
-        const gpoa = (i < gpoaArr.length) ? gpoaArr[i] : null;
+        const mm  = seriesAt(payload, "mismatch_rel", i);
+        const lbl = seriesAt(payload, "label", i);
+        const code = seriesAt(payload, "code", i);
+        const vOK = seriesAt(payload, "valid", i);
 
-        // branco: invalid/sem dado/valid=false/abaixo do gate
-        if (!vOK || (Number.isFinite(Number(gpoa)) && Number(gpoa) < gpoaGate)){
-          map.set(`${di}|${ti}`, { tier:"empty", lbl, vOK, mm, gpoa });
-          continue; // não mapeia idx (não abre drawer)
-        }
+        const sevObj = pointSeverity(payload, i);
 
-        const hasLabel =
-          (lbl != null) &&
-          (String(lbl).trim() !== "") &&
-          (String(lbl).trim().toLowerCase() !== "invalid");
-
-        const tier = hasLabel ? labelToTier(lbl) : mismatchToTier(mm);
-
-        map.set(`${di}|${ti}`, { tier, lbl, vOK, mm, gpoa });
+        map.set(`${di}|${ti}`, {
+          sev: sevObj.sev,
+          lbl: (lbl == null ? null : String(lbl)),
+          code: (code == null ? null : Number(code)),
+          vOK: (vOK === false ? false : true),
+          mm: (mm == null ? null : Number(mm)),
+        });
         keyToIdx.set(`${di}|${ti}`, i);
       }
 
@@ -776,20 +813,19 @@
       const times = evState.times;
       const map = evState.map;
 
-      // stats
-      let nEmpty = 0, nNormal = 0, nAnom = 0, nCrit = 0;
+      let anom = 0, crit = 0, none = 0;
       for (const obj of map.values()){
-        if (!obj || !obj.tier) continue;
-        if (obj.tier === "empty") nEmpty++;
-        else if (obj.tier === "normal") nNormal++;
-        else if (obj.tier === "anom") nAnom++;
-        else if (obj.tier === "crit") nCrit++;
+        if (obj.sev === "crit") crit++;
+        else if (obj.sev === "anom") anom++;
+        else if (obj.sev === "none") none++;
       }
+
       const badge = $("evBadge");
       const badgeTxt = $("evBadgeTxt");
       if (badge && badgeTxt){
-        badge.className = "badge empty";
-        badgeTxt.textContent = `normal=${nNormal} | anom=${nAnom} | crit=${nCrit} | empty=${nEmpty} | range: ${$("start").value} → ${$("end").value}`;
+        badge.className = "badge none";
+        badgeTxt.textContent =
+          `anom=${anom} | crit=${crit} | (pontos com dado=${map.size}) | range: ${$("start").value} → ${$("end").value}`;
       }
 
       if (!days.length || !times.length){
@@ -842,27 +878,14 @@
           const x = mL + ti * (cell + gap);
           const y = mT + di * (cell + gap);
 
-          const tier = obj?.tier || "empty";
-          const fill = tierColor(tier);
-
-          // empty = branco (transparente). desenha borda leve pra enxergar a grade.
-          if (tier === "empty"){
-            ctx.fillStyle = "rgba(255,255,255,.00)";
-            roundRect(ctx, x, y, cell, cell, 4);
-            ctx.fill();
-
-            ctx.strokeStyle = "rgba(255,255,255,.08)";
-            ctx.lineWidth = 1;
-            roundRect(ctx, x, y, cell, cell, 4);
-            ctx.stroke();
-            continue;
-          }
+          const sev = obj ? (obj.sev || "none") : "none";
+          const fill = sevColor(sev);
 
           ctx.fillStyle = fill;
           roundRect(ctx, x, y, cell, cell, 4);
           ctx.fill();
 
-          ctx.strokeStyle = "var(--hm-cell-stroke)";
+          ctx.strokeStyle = (sev === "none") ? "rgba(0,0,0,.25)" : "rgba(0,0,0,.10)";
           ctx.lineWidth = 1;
           roundRect(ctx, x, y, cell, cell, 4);
           ctx.stroke();
@@ -891,20 +914,17 @@
           const ts = times[ti];
 
           if (!obj){
-            if (tipEl) tipEl.textContent = `${ds} ${ts} • empty`;
+            if (tipEl) tipEl.textContent = `${ds} ${ts} • sem dado`;
             return;
           }
 
-          const lbl = (obj.lbl == null || String(obj.lbl).trim()==="") ? "—" : String(obj.lbl);
-          const mm = obj.mm;
-          const mmTxt = (mm == null) ? "—" : `${fmtN(mm,3)} (${fmtPct(mm,1)})`;
+          const mmTxt = (obj.mm == null) ? "—" : `${fmtN(obj.mm,3)} (${fmtPct(obj.mm,1)})`;
+          const lbl = obj.lbl ?? "—";
+          const code = (obj.code == null ? "—" : String(obj.code));
+          const sev = obj.sev ?? "none";
 
-          const tier = obj.tier || "empty";
-          const vOK = String(!!obj.vOK);
-          const gpoa = obj.gpoa;
-          const gpoaTxt = (gpoa == null) ? "—" : fmtUnit(gpoa, "W/m²", 0);
-
-          if (tipEl) tipEl.textContent = `${ds} ${ts} • tier=${tier} • label=${lbl} • mismatch=${mmTxt} • gpoa=${gpoaTxt} • valid=${vOK}`;
+          if (tipEl) tipEl.textContent =
+            `${ds} ${ts} • sev=${sev} • code=${code} • label=${lbl} • mismatch=${mmTxt} • valid=${String(!!obj.vOK)}`;
         });
 
         canvas.addEventListener("mouseleave", () => {
@@ -920,15 +940,12 @@
 
           const ti = Math.floor((mx - mL) / (cell + gap));
           const di = Math.floor((my - mT) / (cell + gap));
-
           if (ti < 0 || di < 0 || ti >= times.length || di >= days.length) return;
 
           const key = `${di}|${ti}`;
           const idx = evState.keyToIdx.get(key);
-
-          // se não mapeou idx (empty), não abre drawer
           if (idx === undefined){
-            setMsg(`<b>Aviso:</b> bin vazio (sem dado/invalid/abaixo do gate).`, "err");
+            setMsg(`<b>Aviso:</b> sem dado para este bin (15 min).`, "err");
             return;
           }
           openEventDrawer(idx);
@@ -951,76 +968,20 @@
       document.body.style.overflow = "";
     }
 
-    // =========================
-    // LEITURA ROBUSTA DAS SÉRIES
-    // =========================
-    function seriesAt(payload, key, idx){
-      const s = payload?.series || {};
-
-      const ALIASES = {
-        p_ac_real_w: ["pac_real_w","p_ac_w","pac_w","pac"],
-        p_ac_model_w:["pac_model_w","p_model_w","p_ac_model","pac_model"],
-        p_dc_w:      ["pdc_w","p_dc","pdc"],
-        v_dc_v:      ["vdc_v","v_dc","vdc"],
-        i_dc_a:      ["idc_a","i_dc","idc"],
-        v_ac_v:      ["vac_v","v_ac","vac"],
-        i_ac_a:      ["iac_a","i_ac","iac"],
-
-        mismatch_rel:["mismatch","mm_rel"],
-        valid:       ["valid_model","valid_ok"],
-
-        labels:      ["rca_label","label_t","label"],
-        codes:       ["rca_code"],
-
-        g_poa:       ["g_poa_used","g_poa_wm2","poa","poa_wm2","gpoa","gti","ghi"],
-
-        ghi:         ["GHI"],
-        gti:         ["GTI","poa_global"],
-        dni:         ["DNI"],
-        dhi:         ["DHI"],
-        temp_air:    ["tamb_c","t_air_c","ta_c","temp_amb_c"],
-        wind_speed:  ["ws_ms","vento_ms"],
-        rh:          ["RH","umid_rel"],
-
-        tcell_c:     ["t_cell_c","tcell","t_cell"],
-      };
-
-      const keys = [key, ...(ALIASES[key] || [])];
-      for (const k of keys){
-        const arr = s?.[k];
-        if (Array.isArray(arr) && idx >= 0 && idx < arr.length) return arr[idx];
-      }
-      return null;
-    }
-
-    function tierBadgeClass(tier){
-      if (tier === "normal") return "normal";
-      if (tier === "anom") return "anom";
-      if (tier === "crit") return "crit";
-      return "empty";
-    }
-
     function openEventDrawer(idx){
       const p = evState.payload;
 
       const tLocal = p?.series?.t_local?.[idx] ?? p?.series?.x_local?.[idx] ?? null;
 
-      const lbl = seriesAt(p, "labels", idx);
+      const lbl = seriesAt(p, "label", idx);
+      const code = seriesAt(p, "code", idx);
       const vOK = seriesAt(p, "valid", idx);
+
+      const sevObj = pointSeverity(p, idx);
+      const sev = sevObj.sev;
+
       const mismatch = seriesAt(p, "mismatch_rel", idx);
-      const gpoa = seriesAt(p, "g_poa", idx);
-
-      const gpoaGate = Number($("gpoa_gate")?.value ?? 200);
-
-      // tier calculado (mesma regra do mapa)
-      let tier = "empty";
-      if (!!vOK && !(Number.isFinite(Number(gpoa)) && Number(gpoa) < gpoaGate)){
-        const hasLabel =
-          (lbl != null) &&
-          (String(lbl).trim() !== "") &&
-          (String(lbl).trim().toLowerCase() !== "invalid");
-        tier = hasLabel ? labelToTier(lbl) : mismatchToTier(mismatch);
-      }
+      const gpoa     = seriesAt(p, "g_poa", idx);
 
       const pacR     = seriesAt(p, "p_ac_real_w", idx);
       const pacM     = seriesAt(p, "p_ac_model_w", idx);
@@ -1046,9 +1007,14 @@
 
       const badge = $("evDBadge");
       if (badge){
-        const name = (lbl != null && String(lbl).trim() !== "") ? String(lbl) : "—";
-        badge.className = `badge ${tierBadgeClass(tier)}`;
-        badge.innerHTML = `<span class="dot"></span><span>tier=${escapeHtml(tier)} | label=${escapeHtml(name)}</span>`;
+        const labelTxt = (lbl != null && String(lbl).trim() !== "") ? String(lbl) : "—";
+        const codeTxt  = (code == null || code === "") ? "—" : String(code);
+
+        badge.className = `badge ${sev}`;
+        badge.innerHTML =
+          `<span class="dot"></span><span>${escapeHtml(sev.toUpperCase())}</span>` +
+          `<span class="muted mono" style="margin-left:6px;">code=${escapeHtml(codeTxt)}</span>` +
+          `<span class="muted" style="margin-left:6px;">label=${escapeHtml(labelTxt)}</span>`;
       }
 
       const bySrc = p?.series_by_source || {};
@@ -1090,7 +1056,7 @@
 
       function missTag(val, name){
         const ok = Number.isFinite(Number(val));
-        return ok ? "" : `<span class="badge empty" style="margin-right:8px;"><span class="dot"></span><span>${name} n/a</span></span>`;
+        return ok ? "" : `<span class="badge none" style="margin-right:8px;"><span class="dot"></span><span>${name} n/a</span></span>`;
       }
       const missing =
         missTag(vdc,"Vdc") + missTag(idc,"Idc") + missTag(vac,"Vac") + missTag(iac,"Iac") + missTag(pdc,"Pdc");
@@ -1104,15 +1070,12 @@
               <span class="muted mono">idx=${escapeHtml(String(idx))}</span>
             </h4>
             <div class="kv-grid">
-              <div class="kv"><div class="k">tier</div><div class="v mono">${escapeHtml(tier)}</div></div>
-              <div class="kv"><div class="k">valid</div><div class="v mono">${escapeHtml(String(!!vOK))}</div></div>
-
+              <div class="kv"><div class="k">sev</div><div class="v mono">${escapeHtml(sev)}</div></div>
+              <div class="kv"><div class="k">valid</div><div class="v mono">${escapeHtml(String(vOK !== false))}</div></div>
+              <div class="kv"><div class="k">rca_code</div><div class="v mono">${escapeHtml(code == null ? "—" : String(code))}</div></div>
+              <div class="kv"><div class="k">rca_label</div><div class="v mono">${escapeHtml(lbl == null ? "—" : String(lbl))}</div></div>
               <div class="kv"><div class="k">mismatch_rel</div><div class="v mono">${escapeHtml(fmtN(mismatch,3))} <span class="muted">(${escapeHtml(fmtPct(mismatch,1))})</span></div></div>
               <div class="kv"><div class="k">G_POA</div><div class="v mono">${escapeHtml(fmtUnit(gpoa,"W/m²",0))}</div></div>
-
-              <div class="kv"><div class="k">Label (backend)</div><div class="v mono">${escapeHtml(lbl == null ? "—" : String(lbl))}</div></div>
-              <div class="kv"><div class="k">Gate (W/m²)</div><div class="v mono">${escapeHtml(fmtN($("gpoa_gate")?.value,0))}</div></div>
-
               <div class="kv"><div class="k">P_real</div><div class="v mono">${escapeHtml(fmtUnit(pacR,"W",0))}</div></div>
               <div class="kv"><div class="k">P_model</div><div class="v mono">${escapeHtml(fmtUnit(pacM,"W",0))}</div></div>
             </div>
@@ -1142,7 +1105,7 @@
               <div class="kv"><div class="k">Tamb</div><div class="v mono">${escapeHtml(fmtUnit(ta,"°C",1))}</div></div>
               <div class="kv"><div class="k">Vento</div><div class="v mono">${escapeHtml(fmtUnit(ws,"m/s",1))}</div></div>
               <div class="kv"><div class="k">RH</div><div class="v mono">${escapeHtml(fmtUnit(rh,"%",0))}</div></div>
-              <div class="kv"><div class="k">G_POA</div><div class="v mono">${escapeHtml(fmtUnit(gpoa,"W/m²",0))}</div></div>
+              <div class="kv"><div class="k">G_POA (usado)</div><div class="v mono">${escapeHtml(fmtUnit(gpoa,"W/m²",0))}</div></div>
             </div>
           </div>
 
@@ -1164,9 +1127,6 @@
       openDrawer();
     }
 
-    // -----------------------------
-    // Run / Persist
-    // -----------------------------
     async function run(persist=false){
       const url = "{% url 'mismatch_fdd_api' %}";
       const payload = {
@@ -1207,8 +1167,9 @@
           ? ` | <span class="mono">saved:</span> created=${data.persist.created}, updated=${data.persist.updated}`
           : "";
 
+        // FIX: suporta plant.nome OU plant.name
         setMsg(
-          `<b>OK</b> — ${escapeHtml(plant.nome || "")} | ${escapeHtml(range.start || "")} → ${escapeHtml(range.end || "")}${saved}`,
+          `<b>OK</b> — ${escapeHtml(plant.nome || plant.name || "")} | ${escapeHtml(range.start || "")} → ${escapeHtml(range.end || "")}${saved}`,
           "ok"
         );
 
@@ -1231,7 +1192,6 @@
     $("evClose")?.addEventListener("click", closeDrawer);
     document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeDrawer(); });
 
-    // auto-run inicial
     if($("plant_id") && $("plant_id").options.length){
       run(false);
     }
