@@ -1,20 +1,54 @@
 # config/urls.py
 from django.contrib import admin
 from django.urls import path, include
-from core.views import (
-    # Home/Auth/Met
-    home, signup, nsrdb_view, nsrdb_api_json,
+from core.views.basicas import (
+    home,
+    signup,
+)
+from core.views.meteo import (
+    open_meteo_view,
+    open_meteo_view_api_json,
+)
+from core.views.modulos import (
     # Módulos
-    ModuleListView, ModuleCreateView, CSVUploadView,
-    ModuleDetailView, ModuleUpdateView,
-    # Plantas
-    PlantListView, PlantCreateView, PlantDetailView,
-    PlantUpdateView, PlantCredSaveView,
-    PlantDetailsEditView, PlantCablesEditView, PlantGrowattDebugView, 
-    PlantGrowattDailyJsonView, RenovigiConsoleView, 
-    PlantOperationalDataListView, merge_run_view,
-    pv_dashboard_view, pv_dashboard_timeseries_api,inverter_list_view,
-    inverter_create_view, inverter_edit_view, mismatch_fdd_api, mismatch_fdd_view,
+    ModuleListView,
+    ModuleCreateView,
+    CSVUploadView,
+    ModuleDetailView,
+    ModuleUpdateView,
+)
+from core.views.plantas import (
+    PlantListView, 
+    PlantCreateView, 
+    PlantDetailView,
+    PlantUpdateView, 
+    PlantCredSaveView,
+    PlantDetailsEditView, 
+    PlantCablesEditView
+)
+from core.views.growatt import (
+    PlantGrowattDebugView, 
+    PlantGrowattDailyJsonView,
+ )
+from core.views.renovigi import (
+    RenovigiConsoleView, 
+    PlantOperationalDataListView, 
+)
+from core.views.juntar import (
+    merge_run_view,
+)
+from core.views.dashboard import (
+    pv_dashboard_view, 
+    pv_dashboard_timeseries_api,
+)
+from core.views.inversor import (
+    inverter_list_view,
+    inverter_create_view, 
+    inverter_edit_view, 
+)
+from core.views.fdd import (
+    mismatch_fdd_api, 
+    mismatch_fdd_view,
 )
 
 # ---------- pvmodules agrupado e namespaced ----------
@@ -54,8 +88,8 @@ urlpatterns = [
     path("accounts/signup/", signup, name="signup"),
 
     # Meteo
-    path("nsrdb", nsrdb_view, name="nsrdb_view"),
-    path("nsrdb/api", nsrdb_api_json, name="nsrdb_api_json"),
+    path("openmeteo", open_meteo_view, name="open_meteo_view"),
+    path("openmeteo/api", open_meteo_view_api_json, name="open_meteo_view_api_json"),
 
     # Namespaces
     path("pvmodules/", include((pvmodules_patterns, "pvmodules"), namespace="pvmodules")),

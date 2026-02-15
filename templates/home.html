@@ -502,7 +502,7 @@
         <div class="sub wrap-anywhere" style="margin-top:.6rem;">Última sincronização: <b>{{ meteo_last_sync|default:"—" }}</b></div>
 
         <div style="margin-top:.85rem;">
-          <a class="btn-glow btn-update" href="{% url 'nsrdb_view' %}">
+          <a class="btn-glow btn-update" href="{% url 'open_meteo_view' %}">
             <svg class="icon" viewBox="0 0 64 64" aria-hidden="true">
               <circle cx="46" cy="18" r="6" fill="#ffd95e"/>
               <path d="M46 6v6M46 24v6M34 18h6M52 18h6" stroke="#ffd95e" stroke-width="2" stroke-linecap="round" opacity=".9"/>
@@ -566,7 +566,7 @@
 
       <div class="card glass step-card">
         <div class="step-top"><span class="step-title">2) Meteo</span><span class="dot warn"></span></div>
-        <div class="step-meta">NSRDB / irradiação</div>
+        <div class="step-meta">Open-Meteo / irradiação</div>
         <div class="sub wrap-anywhere" style="margin-top:.6rem;">Última sincronização: <b>{{ meteo_last_sync|default:"—" }}</b></div>
       </div>
 
@@ -592,7 +592,7 @@
         <span class="label">Mapa de ocorrências</span>
       </a>
 
-      <a class="btn-glow btn-update" href="{% url 'nsrdb_view' %}">
+      <a class="btn-glow btn-update" href="{% url 'open_meteo_view' %}">
         <svg class="icon" viewBox="0 0 64 64" aria-hidden="true">
           <circle cx="46" cy="18" r="6" fill="#ffd95e"/>
           <path d="M46 6v6M46 24v6M34 18h6M52 18h6" stroke="#ffd95e" stroke-width="2" stroke-linecap="round" opacity=".9"/>

@@ -162,11 +162,11 @@
       <span>Plantas</span>
     </a>
 
-    {# --- METEOROLOGIA (NSRDB) --- #}
-    <a href="{% url 'nsrdb_view' %}"
-       class="nav-item {% if rm and rm.url_name == 'nsrdb_view' %}active{% endif %}"
-       {% if rm and rm.url_name == 'nsrdb_view' %}aria-current="page"{% endif %}
-       aria-label="Registros meteorológicos (NSRDB)">
+    {# --- METEOROLOGIA (Open-Meteo) --- #}
+    <a href="{% url 'open_meteo_view' %}"
+       class="nav-item {% if rm and rm.url_name == 'open_meteo_view' %}active{% endif %}"
+       {% if rm and rm.url_name == 'open_meteo_view' %}aria-current="page"{% endif %}
+       aria-label="Registros meteorológicos (Open-Meteo)">
       <!-- ícone: nuvem + sol -->
       <svg class="icon" viewBox="0 0 64 64" aria-hidden="true">
         <!-- sol -->

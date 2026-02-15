@@ -140,12 +140,12 @@
 
         {% if form.plant.value and form.start_date.value and form.end_date.value and form.interval_min.value %}
           <a class="linkish"
-             href="{% url 'nsrdb_view' %}?plant={{ form.plant.value }}&start_date={{ form.start_date.value }}&end_date={{ form.end_date.value }}&interval_min={{ form.interval_min.value }}">
+             href="{% url 'open_meteo_view' %}?plant={{ form.plant.value }}&start_date={{ form.start_date.value }}&end_date={{ form.end_date.value }}&interval_min={{ form.interval_min.value }}">
             Ver cobertura
           </a>
 
           <a class="linkish"
-             href="{% url 'nsrdb_api_json' %}?plant={{ form.plant.value }}&start_date={{ form.start_date.value }}&end_date={{ form.end_date.value }}&interval_min={{ form.interval_min.value }}">
+             href="{% url 'open_meteo_view_api_json' %}?plant={{ form.plant.value }}&start_date={{ form.start_date.value }}&end_date={{ form.end_date.value }}&interval_min={{ form.interval_min.value }}">
             API (JSON)
           </a>
         {% endif %}
