@@ -1,12 +1,23 @@
-#core/views/fdd
+# core/views/fdd.py
 from __future__ import annotations
-from core.views._imports import *
+
+from core.views._imports import *  # mantém o teu padrão
 from datetime import date, datetime, time, timedelta, timezone as dt_tz
 from dataclasses import asdict, is_dataclass
 from typing import Any, Dict, List, Optional, Tuple
-from django.db.models import Count
-from zoneinfo import ZoneInfo
+
+import logging
 import inspect
+
+from zoneinfo import ZoneInfo
+from django.db.models import Count
+from django.db import transaction
+from django.utils import timezone
+from django.http import HttpRequest, JsonResponse
+from django.shortcuts import render
+from django.urls import reverse
+from django.views.decorators.http import require_GET, require_http_methods
+from django.contrib.auth.decorators import login_required
 
 from core.services.fdd_mismatch import (
     MismatchThresholds,
@@ -14,21 +25,13 @@ from core.services.fdd_mismatch import (
     CODE_INVALID,
 )
 
-
-# Models
 from core.models import (
     PVPlant,
     PVPlantMergedRecord15m,
     PlantDiagnostic15m,
 )
-# ----------------------------
-# ----------- S A N I D A D E  D O  S I S T E M A  (Mismatch FDD)
-# ----------------------------
-
-
 
 logger = logging.getLogger(__name__)
-
 
 # ----------------------------
 # JSON strict/robusto
@@ -40,10 +43,8 @@ def _json_response_strict(payload: Any, *, status: int = 200) -> JsonResponse:
         if isinstance(o, (datetime, date)):
             return o.isoformat()
 
-        # numpy (opcional)
         try:
             import numpy as np  # type: ignore
-
             if isinstance(o, np.generic):
                 return o.item()
             if isinstance(o, np.ndarray):
@@ -51,7 +52,6 @@ def _json_response_strict(payload: Any, *, status: int = 200) -> JsonResponse:
         except Exception:
             pass
 
-        # dataclasses
         if is_dataclass(o):
             return asdict(o)
 
@@ -110,11 +110,7 @@ def _mean_none(xs: List[Optional[float]]) -> Optional[float]:
     return (acc / n) if n else None
 
 
-def _pick_best_sources(
-    plant_id: int,
-    dt0_utc: datetime,
-    dt1_utc: datetime,
-) -> Tuple[Optional[str], Optional[str]]:
+def _pick_best_sources(plant_id: int, dt0_utc: datetime, dt1_utc: datetime) -> Tuple[Optional[str], Optional[str]]:
     """Escolhe (source_oper, source_meteo) com maior n no range."""
     row = (
         PVPlantMergedRecord15m.objects.filter(
@@ -195,7 +191,6 @@ def _upsert_diag15m(
         obj.pac_model_w = pac_model_w[i]
         obj.mismatch_rel = mismatch_rel[i]
 
-        # timestamps (bulk_* não chama save())
         if hasattr(obj, "updated_at"):
             setattr(obj, "updated_at", now)
         if is_new and hasattr(obj, "created_at") and getattr(obj, "created_at", None) is None:
@@ -217,19 +212,15 @@ def _upsert_diag15m(
             ]
             if hasattr(PlantDiagnostic15m, "updated_at"):
                 fields.append("updated_at")
-
             PlantDiagnostic15m.objects.bulk_update(to_update, fields=fields)
 
     return {"created": len(to_create), "updated": len(to_update)}
 
 
-# ----------------------------
-# View (página)
-# ----------------------------
 @require_GET
 @login_required
 def mismatch_fdd_view(request: HttpRequest):
-    """Página: Heatmap de mismatch + detalhes ao clicar."""
+    """Página: Heatmap tipo GitHub (dia x 15min) + drawer com dump ao clicar."""
     qs = (
         PVPlant.objects.all().order_by("nome")
         if request.user.is_superuser
@@ -240,7 +231,6 @@ def mismatch_fdd_view(request: HttpRequest):
     d_end = date.today()
     d_start = d_end - timedelta(days=7)
 
-    # FIX: adiciona "today" para templates antigos que usam default:today
     return render(
         request,
         "dashboard/mismatch_fdd.html",
@@ -254,9 +244,6 @@ def mismatch_fdd_view(request: HttpRequest):
     )
 
 
-# ----------------------------
-# API (GET/POST)
-# ----------------------------
 @require_http_methods(["GET", "POST"])
 @login_required
 def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
@@ -365,6 +352,9 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
     if not rows:
         return _json_response_strict({"ok": False, "error": "Sem registros no range para as fontes selecionadas."}, status=404)
 
+    # ----------------------------
+    # Agrupa por timestamp e source (DUMP)
+    # ----------------------------
     per_ts: Dict[datetime, Dict[str, Dict[str, Any]]] = {}
     for r in rows:
         ts = r["ts_utc"]
@@ -378,6 +368,7 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
     times_utc = sorted(per_ts.keys())
     n = len(times_utc)
 
+    # agregados (somatório/mean)
     p_ac_w: List[Optional[float]] = [None] * n
     p_dc_w: List[Optional[float]] = [None] * n
     e_ac_wh_15: List[Optional[float]] = [None] * n
@@ -388,6 +379,7 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
     inv_cov: List[Optional[float]] = [None] * n
     flag_inv_missing: List[bool] = [False] * n
 
+    # meteo (pega de um row por ts)
     gti: List[Optional[float]] = [None] * n
     ghi: List[Optional[float]] = [None] * n
     dni: List[Optional[float]] = [None] * n
@@ -397,6 +389,7 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
     rh: List[Optional[float]] = [None] * n
     flag_meteo_missing: List[bool] = [False] * n
 
+    # por source (para tabela/strings)
     series_by_source: Dict[str, Dict[str, List[Optional[float]]]] = {
         src: {
             "p_ac_w": [None] * n,
@@ -486,10 +479,10 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
     x_local = [t.isoformat() for t in x_local_dt]
     x_utc = [t.astimezone(dt_tz.utc).isoformat() for t in times_utc]
 
-    # extras p/ heatmap sem depender de Date() no browser
     hm_day_local = [t.date().isoformat() for t in x_local_dt]
     hm_minute_local = [t.hour * 60 + t.minute for t in x_local_dt]
 
+    # GPOA usado: GTI se existir, senão GHI
     g_poa_used = [gti_i if gti_i is not None else ghi_i for gti_i, ghi_i in zip(gti, ghi)]
 
     def _gf(key: str, default: float) -> float:
@@ -663,6 +656,71 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
             buf.append(abs(float(mi)))
         return (sum(buf) / len(buf)) if buf else None
 
+    # ----------------------------
+    # DUMP por "tkey" (YYYY-MM-DDTHH:MM local)
+    # -> usado no front ao clicar no quadrado
+    # ----------------------------
+    dump_fields = [
+        "p_ac_w", "p_dc_w", "e_ac_wh_15", "v_dc_v", "i_dc_a", "v_ac_v", "i_ac_a",
+        "inv_coverage", "flag_inv_missing",
+        "gti", "ghi", "dni", "dhi", "temp_air", "wind_speed", "rh", "flag_meteo_missing",
+    ]
+
+    dump_by_tkey: Dict[str, Any] = {}
+    for ts_utc in times_utc:
+        tloc = ts_utc.astimezone(tz)
+        tkey = tloc.strftime("%Y-%m-%dT%H:%M")  # SEM offset (compatível com seu JS normTimeKey)
+
+        by_src = per_ts.get(ts_utc, {})
+        src_dump: Dict[str, Any] = {}
+        meteo_dump: Dict[str, Any] = {}
+
+        # meteos (pega do primeiro row disponível do ts)
+        any_row = None
+        for sname in selected_sources:
+            rr = by_src.get(sname)
+            if rr is not None:
+                any_row = rr
+                break
+
+        if any_row is not None:
+            for k in ["gti","ghi","dni","dhi","temp_air","wind_speed","rh","flag_meteo_missing"]:
+                meteo_dump[k] = any_row.get(k)
+
+        for sname in selected_sources:
+            rr = by_src.get(sname)
+            if rr is None:
+                continue
+            src_dump[sname] = {
+                "p_ac_w": rr.get("p_ac_w"),
+                "p_dc_w": rr.get("p_dc_w"),
+                "e_ac_wh_15": rr.get("e_ac_wh_15"),
+                "v_dc_v": rr.get("v_dc_v"),
+                "i_dc_a": rr.get("i_dc_a"),
+                "v_ac_v": rr.get("v_ac_v"),
+                "i_ac_a": rr.get("i_ac_a"),
+                "inv_coverage": rr.get("inv_coverage"),
+                "flag_inv_missing": rr.get("flag_inv_missing"),
+            }
+
+        dump_by_tkey[tkey] = {
+            "ts_local": tloc.isoformat(),
+            "ts_utc": ts_utc.astimezone(dt_tz.utc).isoformat(),
+            "source_meteo": src_meteo,
+            "sources": src_dump,
+            "meteo": meteo_dump,
+        }
+
+    # mapa opcional (front usa se existir)
+    rca_code_to_sev = {
+        str(CODE_INVALID): "none",
+        "0": "ok",
+        "1": "ok",
+        "2": "anom",
+        "3": "crit",
+        "4": "crit",
+    }
+
     payload = {
         "ok": True,
         "plant": {"id": plant.id, "nome": plant.nome, "tz": tz_name},
@@ -681,21 +739,18 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
         },
         "x_local": x_local,
         "x_utc": x_utc,
+        "rca_code_to_sev": rca_code_to_sev,
+        "dump_fields": dump_fields,
+        "dump_by_tkey": dump_by_tkey,
         "series": {
-            # aliases esperados pelo front
             "t_local": x_local,
             "t_utc": x_utc,
             "g_poa": g_poa_used,
             "labels": labels,
             "codes": codes,
 
-            # extras p/ heatmap sem Date()
             "hm_day_local": hm_day_local,
             "hm_minute_local": hm_minute_local,
-
-            # mantém nomes atuais
-            "x_local": x_local,
-            "x_utc": x_utc,
 
             "p_ac_w": p_ac_w,
             "p_ac_real_w": p_ac_w,
@@ -740,4 +795,3 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
     }
 
     return _json_response_strict(payload)
-

@@ -1,313 +1,350 @@
+{# templates/fdd/mismatch.html #}
 {% extends "base.html" %}
 {% load static %}
 
-{% block title %}FDD por Mismatch (P_model vs P_real){% endblock %}
+{% block title %}FDD — Mismatch{% endblock %}
 
 {% block extra_head %}
-  <!-- Chart.js (se você já carrega globalmente no base.html, pode remover esta linha) -->
-  <script src="{% static 'vendor/chartjs/chart.umd.min.js' %}"></script>
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 
   <style>
+    .dash, .dash *{ box-sizing: border-box; }
     .dash{
       display:grid;
-      grid-template-columns: repeat(auto-fit, minmax(330px, 1fr));
+      grid-template-columns: repeat(12, minmax(0, 1fr));
       gap: 1rem;
       align-items:start;
       align-content:start;
       grid-auto-rows: min-content;
     }
-    .dash > .card{ min-width:0; }
+    .span-12{ grid-column: span 12; }
+    .span-6{ grid-column: span 6; }
+    .span-4{ grid-column: span 4; }
+    .span-3{ grid-column: span 3; }
+    @media (max-width: 1100px){
+      .span-6, .span-4, .span-3{ grid-column: span 12; }
+    }
 
-    .ctl-row{display:flex; flex-wrap:wrap; gap:.8rem; align-items:flex-end;}
-    .ctl{display:flex; flex-direction:column; gap:.35rem; min-width: 220px;}
-    .ctl label{font-size:.90rem; opacity:.90}
+    .page-head{
+      display:flex; gap: 1rem; align-items:flex-start; justify-content:space-between;
+      flex-wrap: wrap;
+    }
+    .page-head h1{ margin:0; font-size: 1.25rem; }
+    .page-head .sub{ margin:.15rem 0 0; opacity:.8; line-height:1.35; }
+
+    .ctl-row{
+      display:flex; flex-wrap:wrap; gap:.8rem; align-items:flex-end;
+      width:100%;
+    }
+    .ctl{ display:flex; flex-direction:column; gap:.35rem; min-width: 220px; }
+    .ctl.sm{ min-width: 160px; }
+    .ctl label{ font-size:.85rem; opacity:.85 }
     .ctl select, .ctl input[type="date"], .ctl input[type="number"]{
-      padding:.60rem .75rem;
-      border-radius:14px;
+      padding:.55rem .7rem;
+      border-radius:12px;
       background: rgba(10,20,40,.35);
       border:1px solid rgba(255,255,255,.18);
       color:#e9f6ff;
       outline:none;
       backdrop-filter: blur(6px);
-      font-size: 1rem;
     }
     .ctl select option{ color:#111; }
 
-    .btn{
-      padding:.70rem 1.0rem;
-      border-radius:14px;
-      border:1px solid rgba(255,255,255,.18);
-      background: rgba(70,140,255,.35);
-      color:#e9f6ff;
-      cursor:pointer;
-      font-weight:800;
-      letter-spacing:.2px;
-      font-size: 1rem;
-    }
-    .btn:disabled{opacity:.6; cursor:not-allowed;}
-    .btn.secondary{background: rgba(255,255,255,.06);}
+    .mono{ font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
 
-    .kpis{display:grid; grid-template-columns: repeat(3, 1fr); gap:.8rem;}
-    .kpi{
-      border:1px solid rgba(255,255,255,.14);
-      background: rgba(255,255,255,.06);
-      border-radius: 16px;
-      padding:.85rem .9rem;
-    }
-    .kpi .k{font-size:.9rem; opacity:.85}
-    .kpi .v{font-size:1.55rem; font-weight:900; margin-top:.25rem}
-
-    .mono{font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;}
-    .muted{opacity:.85}
-
-    .chart-wrap{width:100%; height:360px;}
-    .chart-wrap.sm{height:280px;}
-    canvas{width:100% !important; height:100% !important;}
-
-    .err{border:1px solid rgba(255,120,120,.5); background: rgba(255,120,120,.12); padding:.7rem .9rem; border-radius:14px;}
-    .ok{border:1px solid rgba(80,255,160,.45); background: rgba(80,255,160,.10); padding:.7rem .9rem; border-radius:14px;}
-
-    /* =========================
-       HEATMAP (robusto)
-       - cor = rca_code (fonte única)
-       - sem dado/invalid = branco
-       - normal = verde
-       - anômalo = amarelo
-       - crítico = vermelho
-       ========================= */
-    :root{
-      --hm-bg: rgba(255,255,255,.06);
-
-      --hm-none: rgba(255,255,255,.88);     /* branco (sem dado / invalid) */
-      --hm-ok:   rgba(70,230,140,.95);      /* verde (normal) */
-      --hm-anom: rgba(255,210, 90,.95);     /* amarelo (anômalo) */
-      --hm-crit: rgba(255, 90,110,.95);     /* vermelho (crítico) */
-
-      --hm-border: rgba(255,255,255,.12);
-      --hm-text: rgba(233,246,255,.92);
-      --hm-text2: rgba(233,246,255,.78);
-    }
-
-    .ev-head{
-      display:flex;
-      align-items:flex-start;
-      justify-content:space-between;
-      gap: 12px;
-      width:100%;
-    }
-    .ev-title{
-      margin:0;
-      display:flex;
-      align-items:center;
-      gap:.55rem;
-    }
-    .ev-sub{ margin:.2rem 0 0; color: var(--hm-text2); line-height:1.35; }
-
-    .ev-legend{
-      display:flex;
-      flex-wrap:wrap;
-      gap: 12px 16px;
-      margin-top: .75rem;
-      align-items:center;
-      user-select:none;
-    }
-    .ev-pill{
-      display:flex;
-      align-items:center;
-      gap:.55rem;
-      padding:.38rem .62rem;
-      border:1px solid rgba(255,255,255,.18);
-      border-radius: 999px;
-      background: rgba(255,255,255,.06);
-      font-size:.95rem;
-      color: var(--hm-text);
-      white-space: nowrap;
-    }
-    .ev-sq{
-      width:16px; height:16px;
-      border-radius: 4px;
-      background: var(--hm-none);
-      box-shadow: 0 0 0 1px rgba(0,0,0,.18) inset;
-    }
-    .ev-sq.none{ background: var(--hm-none); }
-    .ev-sq.ok{ background: var(--hm-ok); }
-    .ev-sq.anom{ background: var(--hm-anom); }
-    .ev-sq.crit{ background: var(--hm-crit); }
-
-    .ev-wrap{
-      width:100%;
-      overflow:auto;
-      background: rgba(255,255,255,.03);
-      border: 1px solid var(--hm-border);
-      border-radius: 16px;
-      padding: 12px;
-      position: relative;
-      margin-top:.8rem;
-    }
-    .ev-wrap::before{
-      content:"";
-      position:absolute; inset:0;
-      background:
-        radial-gradient(circle at 15% 0%, rgba(110,210,255,.10), transparent 40%),
-        radial-gradient(circle at 85% 10%, rgba(255,190,90,.08), transparent 38%),
-        radial-gradient(circle at 55% 100%, rgba(90,255,190,.08), transparent 42%);
-      pointer-events:none;
-      mix-blend-mode: screen;
-      opacity:.85;
-    }
-    #eventCanvas{ display:block; position: relative; z-index: 1; cursor: pointer; }
-    .ev-tip{ margin-top:.55rem; min-height: 1.2em; color: var(--hm-text2); font-size:.95rem; }
-
-    .ev-drawer{
-      position: fixed;
-      inset: 0;
-      z-index: 9999;
-      display: none;
-    }
-    .ev-drawer.open{ display:block; }
-    .ev-backdrop{
-      position:absolute; inset:0;
-      background: rgba(0,0,0,.55);
-      backdrop-filter: blur(6px);
-    }
-    .ev-panel{
-      position:absolute;
-      top: 0; right: 0;
-      height: 100%;
-      width: min(560px, 92vw);
-      background: linear-gradient(180deg, rgba(18,32,55,.98), rgba(10,20,40,.98));
-      border-left: 1px solid rgba(255,255,255,.14);
-      box-shadow: -18px 0 60px rgba(0,0,0,.45);
-      display:flex;
-      flex-direction:column;
-    }
-    .ev-panel-head{
-      padding: 14px 14px 10px;
-      border-bottom: 1px solid rgba(255,255,255,.10);
-      display:flex;
-      align-items:flex-start;
-      justify-content:space-between;
-      gap: 12px;
-    }
-    .ev-panel-title{
-      font-weight: 900;
-      letter-spacing: .2px;
-      color: var(--hm-text);
-      display:flex;
-      align-items:center;
-      gap: 10px;
-      flex-wrap:wrap;
-    }
-    .ev-panel-sub{
-      margin-top: 6px;
-      opacity: .88;
-      font-size: .95rem;
-      line-height: 1.35;
-      color: var(--hm-text2);
-    }
-    .btn-x{
-      border:1px solid rgba(255,255,255,.16);
-      background: rgba(255,255,255,.06);
-      color: rgba(233,246,255,.96);
-      border-radius: 12px;
-      padding: .50rem .65rem;
-      cursor:pointer;
-      transition: .12s ease;
-      font-weight: 900;
-      line-height: 1;
-    }
-    .btn-x:hover{ background: rgba(255,255,255,.10); border-color: rgba(255,255,255,.26); }
-
-    .ev-panel-body{
-      padding: 12px 14px 16px;
-      overflow:auto;
-    }
-    .card-lite{
-      border:1px solid rgba(255,255,255,.10);
-      background: rgba(255,255,255,.04);
-      border-radius: 16px;
-      padding: .85rem .9rem;
-      margin-bottom: 12px;
-    }
-    .card-lite h4{
-      margin: 0 0 .65rem 0;
-      color: rgba(233,246,255,.95);
-      font-weight: 900;
-      letter-spacing: .2px;
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-      gap: 10px;
-    }
-    .kv-grid{ display:grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-    .kv{
-      border:1px solid rgba(255,255,255,.10);
-      background: rgba(0,0,0,.10);
-      border-radius: 14px;
-      padding: .65rem .75rem;
-    }
-    .kv .k{ font-size:.85rem; opacity:.80; margin-bottom: .20rem; color: var(--hm-text2); }
-    .kv .v{ font-size: 1.05rem; font-weight: 900; letter-spacing: .2px; color: var(--hm-text); }
-
-    .badge{
+    /* =========================================================
+       Botões personalizados (mesma “família” do Dashboard)
+       ========================================================= */
+    .btn-glow{
       display:inline-flex;
       align-items:center;
+      justify-content:center;
       gap:.55rem;
-      padding:.28rem .65rem;
-      border-radius: 999px;
-      border:1px solid rgba(255,255,255,.16);
-      background: rgba(255,255,255,.06);
-      font-size:.90rem;
-      color: var(--hm-text);
-      white-space: nowrap;
-    }
-    .badge .dot{
-      width:11px; height:11px; border-radius:99px;
-      background: rgba(255,255,255,.35);
-      box-shadow: 0 0 0 1px rgba(0,0,0,.18) inset;
-    }
-    .badge.none .dot{ background: var(--hm-none); }
-    .badge.ok .dot{ background: var(--hm-ok); }
-    .badge.anom .dot{ background: var(--hm-anom); }
-    .badge.crit .dot{ background: var(--hm-crit); }
 
-    table.src{
-      width:100%;
-      border-collapse: separate;
-      border-spacing: 0 8px;
-      font-size: .92rem;
-    }
-    table.src td{
-      padding: .45rem .55rem;
-      border-top:1px solid rgba(255,255,255,.10);
-      border-bottom:1px solid rgba(255,255,255,.10);
-      background: rgba(0,0,0,.10);
-    }
-    table.src td:first-child{
-      border-left:1px solid rgba(255,255,255,.10);
-      border-radius: 12px 0 0 12px;
-      font-weight: 900;
+      padding: .70rem .95rem;
+
+      border-radius: 14px;
+      border: 1px solid rgba(110,210,255,.35);
+      background: linear-gradient(180deg, rgba(110,210,255,.22), rgba(90,200,255,.08));
+      color: rgba(233,246,255,.96);
+      text-decoration:none;
+      font-weight: 750;
+      letter-spacing: .2px;
+
+      box-shadow: 0 10px 24px rgba(0,0,0,.22);
+      transition: transform .12s ease, box-shadow .12s ease, border-color .12s ease, background .12s ease;
+
+      cursor: pointer;
+      appearance: none;
+      -webkit-appearance: none;
+      outline: none;
+      user-select:none;
       white-space: nowrap;
     }
-    table.src td:last-child{
-      border-right:1px solid rgba(255,255,255,.10);
-      border-radius: 0 12px 12px 0;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    .btn-glow:hover{
+      transform: translateY(-1px);
+      border-color: rgba(110,210,255,.55);
+      box-shadow: 0 14px 34px rgba(0,0,0,.28);
+      background: linear-gradient(180deg, rgba(110,210,255,.28), rgba(90,200,255,.10));
+    }
+    .btn-glow:active{
+      transform: translateY(0px);
+      box-shadow: 0 8px 18px rgba(0,0,0,.22);
+    }
+    .btn-glow:disabled{
+      opacity: .65;
+      cursor: not-allowed;
+      transform: none;
+      box-shadow: 0 8px 18px rgba(0,0,0,.18);
+    }
+    .btn-glow.secondary{
+      border-color: rgba(255,255,255,.18);
+      background: rgba(255,255,255,.06);
+      box-shadow: 0 10px 24px rgba(0,0,0,.18);
+    }
+    .btn-glow.secondary:hover{
+      border-color: rgba(255,255,255,.28);
+      background: rgba(255,255,255,.10);
+      box-shadow: 0 14px 34px rgba(0,0,0,.22);
+    }
+    .btn-glow.danger{
+      border-color: rgba(255,110,140,.35);
+      background: linear-gradient(180deg, rgba(255,110,140,.20), rgba(255,110,140,.06));
+    }
+    .btn-glow.danger:hover{
+      border-color: rgba(255,110,140,.55);
+      background: linear-gradient(180deg, rgba(255,110,140,.26), rgba(255,110,140,.08));
+    }
+    .btn-glow .icon{
+      width: 18px;
+      height: 18px;
       opacity:.95;
+      flex: 0 0 auto;
+    }
+    .btn-glow .label{ line-height: 1; }
+
+    /* Ações alinhadas no “slot” do Reset */
+    .ctl-actions{
+      display:flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items:center;
+    }
+    .ctl-actions .btn-glow{ padding: .62rem .85rem; border-radius: 14px; }
+
+    /* KPIs */
+    .kpi{
+      display:grid; grid-template-columns: repeat(6, minmax(0, 1fr));
+      gap: .75rem;
+    }
+    .kpi .tile{
+      padding: .85rem .9rem;
+      border-radius: 16px;
+      border: 1px solid rgba(255,255,255,.12);
+      background: rgba(255,255,255,.05);
+      min-width:0;
+    }
+    .kpi .t{ font-size:.82rem; opacity:.78; margin:0 0 .15rem; }
+    .kpi .v{ font-size: 1.15rem; font-weight: 900; margin:0; }
+    .kpi .s{ margin:.2rem 0 0; font-size:.82rem; opacity:.78; overflow-wrap:anywhere; }
+    @media (max-width: 1100px){
+      .kpi{ grid-template-columns: repeat(2, minmax(0,1fr)); }
+    }
+
+    .chart-wrap{ position: relative; height: 330px; width: 100%; }
+    .chart-wrap.sm{ height: 280px; }
+
+    /* Heatmap */
+    .hm-wrap{
+      width:100%;
+      border: 1px solid rgba(255,255,255,.12);
+      border-radius: 16px;
+      padding: 10px;
+      margin-top:.8rem;
+      background: rgba(255,255,255,.03);
+
+      overflow-x: hidden;
+      overflow-y: auto;
+
+      display:flex;
+      justify-content:center;
+      align-items:flex-start;
+    }
+    .hm-canvas{
+      display:block;
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,.10);
+      background: rgba(10,20,40,.25);
+      cursor: pointer;
+
+      max-width: 100%;
+      height: auto;
+    }
+    .hm-head{ display:flex; align-items:flex-start; justify-content:space-between; gap: 12px; width:100%; }
+    .hm-sub{ margin:.2rem 0 0; opacity:.78; line-height:1.35; }
+    .hm-tip{ margin-top:.55rem; min-height: 1.2em; opacity:.85; }
+
+    .legend{ display:flex; gap:.6rem; flex-wrap:wrap; align-items:center; justify-content:flex-end; }
+    .badge{
+      display:inline-flex; align-items:center; gap:.5rem;
+      padding:.28rem .65rem; border-radius: 999px;
+      border:1px solid rgba(255,255,255,.16); background: rgba(255,255,255,.06);
+      font-size:.90rem; white-space: nowrap; user-select:none;
+    }
+    .dot{ width:11px; height:11px; border-radius:99px; box-shadow: 0 0 0 1px rgba(0,0,0,.18) inset; }
+
+    :root{
+      --hm-none: rgba(255,255,255,.85);
+      --hm-ok:   rgba(70,230,140,.95);
+      --hm-anom: rgba(255,210, 90,.95);
+      --hm-crit: rgba(255, 90,110,.95);
+      --hm-grid: rgba(255,255,255,.08);
+      --hm-text: rgba(233,246,255,.92);
+      --hm-text2: rgba(233,246,255,.75);
+      --hm-sel: rgba(90,200,255,.95);
+    }
+
+    .status{
+      display:flex; align-items:center; gap:.6rem; flex-wrap:wrap;
+      padding:.55rem .7rem;
+      border:1px solid rgba(255,255,255,.14);
+      background: rgba(255,255,255,.06);
+      border-radius: 14px;
+      color: rgba(233,246,255,.9);
+    }
+    .spin{
+      width: 14px; height: 14px; border-radius: 999px;
+      border: 2px solid rgba(255,255,255,.25);
+      border-top-color: rgba(233,246,255,.9);
+      animation: sp 1s linear infinite;
+    }
+    @keyframes sp{ to{ transform: rotate(360deg); } }
+
+    /* =========================================================
+       Drawer lateral (detalhe do ponto)
+       - ações abaixo do cabeçalho
+       ========================================================= */
+    .detail-drawer{
+      position: fixed;
+      top: 0; right: 0;
+      height: 100vh;
+      width: 440px;
+      max-width: 92vw;
+      z-index: 50;
+
+      border-left: 1px solid rgba(255,255,255,.12);
+      background: rgba(12,18,32,.96);
+      box-shadow: -24px 0 48px rgba(0,0,0,.38);
+
+      transform: translateX(110%);
+      transition: transform .18s ease;
+      display:flex;
+      flex-direction: column;
+      pointer-events: none;
+    }
+    .detail-drawer.open{
+      transform: translateX(0%);
+      pointer-events: auto;
+    }
+
+    .detail-drawer .hd{
+      padding: 14px 14px 12px;
+      border-bottom: 1px solid rgba(255,255,255,.10);
+      display:flex;
+      flex-direction: column;  /* ações abaixo */
+      gap: 10px;
+    }
+    .detail-drawer .title{
+      margin:0;
+      font-size: 1.02rem;
+      font-weight: 800;
+    }
+    .detail-drawer .meta{
+      margin:.25rem 0 0;
+      opacity:.82;
+      line-height:1.35;
+      font-size: .88rem;
+      overflow-wrap:anywhere;
+    }
+    .detail-drawer .actions{
+      display:flex;
+      gap: 10px;
+      align-items:center;
+      justify-content:flex-end; /* bem à direita */
+      flex-wrap: wrap;
+      width: 100%;
+    }
+    .detail-drawer .actions .btn-glow{ padding: .60rem .82rem; }
+
+    .detail-drawer .body{
+      padding: 12px 14px 14px;
+      overflow: auto;
+      flex: 1 1 auto;
+    }
+
+    table.kv{
+      width:100%;
+      border-collapse: collapse;
+      border-radius: 14px;
+      overflow:hidden;
+      border:1px solid rgba(255,255,255,.12);
+      background: rgba(255,255,255,.03);
+    }
+    table.kv td{
+      padding: .55rem .65rem;
+      border-bottom:1px solid rgba(255,255,255,.08);
+      vertical-align: top;
+      overflow-wrap:anywhere;
+    }
+    table.kv tr:last-child td{ border-bottom: 0; }
+    td.k{ width: 52%; opacity:.85; }
+    td.v{ font-weight: 800; }
+
+    pre.dump{
+      margin:0;
+      padding:.75rem;
+      border-radius: 14px;
+      border:1px solid rgba(255,255,255,.12);
+      background: rgba(10,20,40,.25);
+      max-height: 46vh;
+      overflow:auto;
+      color: rgba(233,246,255,.92);
+      font-size: .88rem;
+      line-height: 1.35;
+      white-space: pre;
     }
   </style>
 {% endblock %}
 
 {% block content %}
-  <div class="dash">
+<div id="fddPage" class="dash" data-api="{% url 'mismatch_fdd_api' %}">
+  <!-- Header + Controles -->
+  <div class="card glass span-12">
+    <div class="page-head">
+      <div style="min-width:0;">
+        <h1>FDD — Mismatch</h1>
+        <div class="sub">
+          Clique num quadrado para ver os dados operativos daquele instante.
+        </div>
+      </div>
 
-    <div class="card glass">
-      <h2 style="margin-top:0">Classificação por mismatch (P_model vs P_real)</h2>
-      <p class="muted" style="margin-top:.25rem">
-        Heatmap por bins de 15 min. Cor é <b>sempre</b> derivada do <b>rca_code</b> retornado pela API (sem divergência visual).
-      </p>
+      <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+        <a class="btn-glow secondary" href="{% url 'pv_dashboard' %}" title="Voltar ao Dashboard PV">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M10 6H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"
+                  stroke="rgba(233,246,255,.92)" stroke-width="2" stroke-linecap="round"/>
+            <path d="M14 4h6v6" stroke="rgba(233,246,255,.92)" stroke-width="2" stroke-linecap="round"/>
+            <path d="M20 4 10 14" stroke="rgba(233,246,255,.92)" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+          <span class="label">Dashboard PV</span>
+        </a>
+      </div>
+    </div>
 
-      <div class="ctl-row" style="margin-top:.9rem">
+    <div style="height:.8rem"></div>
+
+    <div class="ctl-row">
         <div class="ctl">
           <label>Planta</label>
           <select id="plant_id">
@@ -320,880 +357,1130 @@
           </select>
         </div>
 
-        <div class="ctl">
-          <label>Início</label>
-          <!-- FIX: sem today; fallback seguro -->
-          <input id="start" type="date" value="{{ start_date|default:default_start }}">
-        </div>
-
-        <div class="ctl">
-          <label>Fim</label>
-          <!-- FIX: sem today; fallback seguro -->
-          <input id="end" type="date" value="{{ end_date|default:default_end }}">
-        </div>
-
-        <div class="ctl">
-          <label>GPOA gate (W/m²)</label>
-          <input id="gpoa_gate" type="number" step="10" value="200">
-        </div>
-
-        <div class="ctl">
-          <label>|mismatch| normal &lt;</label>
-          <input id="warn_abs" type="number" step="0.05" value="0.35">
-        </div>
-
-        <div class="ctl">
-          <label>Crítico (mismatch ≤ -)</label>
-          <input id="fault_abs" type="number" step="0.05" value="0.80">
-        </div>
-
-        <div class="ctl">
-          <label>Meteo/sensor (mismatch ≥ +)</label>
-          <input id="meteo_pos_abs" type="number" step="0.05" value="0.25">
-        </div>
-
-        <div class="ctl">
-          <label>Std p/ shading_like</label>
-          <input id="shading_std_abs" type="number" step="0.01" value="0.22">
-        </div>
-
-        <div class="ctl">
-          <label>Janela shading (pontos)</label>
-          <input id="shading_window_points" type="number" step="1" value="6">
-        </div>
-
-        <div class="ctl" style="min-width:190px">
-          <label>&nbsp;</label>
-          <button id="btnRun" class="btn" type="button">Executar</button>
-        </div>
-
-        <div class="ctl" style="min-width:230px">
-          <label>Persistir eventos (15min)</label>
-          <button id="btnPersist" class="btn secondary" type="button">Executar + Salvar</button>
-        </div>
+      <div class="ctl sm">
+        <label for="start">Início</label>
+        <input id="start" type="date" value="{{ start|default:'' }}">
       </div>
 
-      <div id="msg" style="margin-top:1rem"></div>
-    </div>
-
-    <div class="card glass">
-      <h3 style="margin-top:0">KPIs</h3>
-      <div class="kpis" style="margin-top:.7rem">
-        <div class="kpi">
-          <div class="k">Pontos</div>
-          <div class="v mono" id="k_n">—</div>
-        </div>
-        <div class="kpi">
-          <div class="k">|mismatch| médio (válidos)</div>
-          <div class="v mono" id="k_mabs">—</div>
-        </div>
-        <div class="kpi">
-          <div class="k">Eventos (não-normal)</div>
-          <div class="v mono" id="k_ev">—</div>
-        </div>
+      <div class="ctl sm">
+        <label for="end">Fim</label>
+        <input id="end" type="date" value="{{ end|default:'' }}">
       </div>
 
-      <div style="margin-top:1rem">
-        <div class="muted">Contagem por classe</div>
-        <pre class="mono" id="k_counts" style="white-space:pre-wrap; margin: .5rem 0 0 0;">—</pre>
+      <div class="ctl sm">
+        <label for="dt_minutes">Resolução (min)</label>
+        <select id="dt_minutes">
+          <option value="5"  {% if dt_minutes == 5 %}selected{% endif %}>5</option>
+          <option value="10" {% if dt_minutes == 10 %}selected{% endif %}>10</option>
+          <option value="15" {% if dt_minutes|default:15 == 15 %}selected{% endif %}>15</option>
+          <option value="30" {% if dt_minutes == 30 %}selected{% endif %}>30</option>
+          <option value="60" {% if dt_minutes == 60 %}selected{% endif %}>60</option>
+        </select>
       </div>
-    </div>
 
-    <div class="card glass" style="grid-column: 1 / -1;">
-      <h3 style="margin-top:0">Mismatch ao longo do tempo</h3>
-      <div class="chart-wrap"><canvas id="chartMismatch"></canvas></div>
-    </div>
+      <!-- PREFILL robusto (server + client): warn=0.35, crit=0.90, gpoa_min=50 -->
+      <div class="ctl sm">
+        <label for="warn_abs">Limiar WARN (|mismatch|)</label>
+        <input id="warn_abs" type="number" step="0.01" min="0" value="{{ warn_abs|default_if_none:0.35 }}">
+      </div>
 
-    <div class="card glass" style="grid-column: 1 / -1;">
-      <h3 style="margin-top:0">Potência (Real vs Modelo)</h3>
-      <div class="chart-wrap sm"><canvas id="chartPower"></canvas></div>
-    </div>
+      <div class="ctl sm">
+        <label for="fault_abs">Limiar CRIT (mismatch ≤ −)</label>
+        <input id="fault_abs" type="number" step="0.01" min="0" value="{{ fault_abs|default_if_none:0.90 }}">
+      </div>
 
-    <div class="card glass" style="grid-column: 1 / -1;">
-      <div class="ev-head">
-        <div style="min-width:0;">
-          <h3 class="ev-title" style="margin-top:0;">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true" style="opacity:.92;">
-              <path d="M4 19V5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14" stroke="rgba(233,246,255,.92)" stroke-width="2" stroke-linecap="round"/>
-              <path d="M8 17v-6M12 17V7M16 17v-3" stroke="rgba(233,246,255,.92)" stroke-width="2" stroke-linecap="round"/>
+      <div class="ctl sm">
+        <label for="gpoa_min">GPOA mínimo (W/m²)</label>
+        <input id="gpoa_min" type="number" step="1" min="0" value="{{ gpoa_min|default_if_none:50 }}">
+      </div>
+
+      <div class="ctl sm">
+        <label for="pmin_w">Potência mínima (W)</label>
+        <input id="pmin_w" type="number" step="1" min="0" value="{{ pmin_w|default_if_none:0 }}">
+      </div>
+
+      <!-- AÇÕES -->
+      <div class="ctl" style="min-width: 320px;">
+        <label>&nbsp;</label>
+        <div class="ctl-actions">
+          <button class="btn-glow" id="btnRun" type="button" title="Executar FDD (mismatch)">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M8 5v14l11-7-11-7Z" fill="rgba(233,246,255,.92)"/>
             </svg>
-            Heatmap de eventos (15 min)
-          </h3>
-          <div class="ev-sub">
-            Linhas = dias • Colunas = bins de 15 min • Células coloridas indicam a severidade do <b>rca_code</b>.
-          </div>
+            <span class="label">Executar</span>
+          </button>
 
-          <div class="ev-legend" aria-label="Legenda do heatmap">
-            <span class="ev-pill"><span class="ev-sq none"></span> Sem dado / invalid</span>
-            <span class="ev-pill"><span class="ev-sq ok"></span> Normal</span>
-            <span class="ev-pill"><span class="ev-sq anom"></span> Anômalo</span>
-            <span class="ev-pill"><span class="ev-sq crit"></span> Crítico</span>
-          </div>
-        </div>
+          <button class="btn-glow" id="btnRunSave" type="button" title="Executar e salvar resultados no banco">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M7 3h10l3 3v15a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z"
+                    stroke="rgba(233,246,255,.92)" stroke-width="2" stroke-linejoin="round"/>
+              <path d="M8 3v6h8V3" stroke="rgba(233,246,255,.92)" stroke-width="2" stroke-linecap="round"/>
+              <path d="M9 14h6" stroke="rgba(233,246,255,.92)" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+            <span class="label">Executar + Salvar</span>
+          </button>
 
-        <div class="badge none" id="evBadge" style="margin-top:.2rem;">
-          <span class="dot"></span><span class="mono" id="evBadgeTxt">—</span>
+          <button class="btn-glow danger" id="btnReset" type="button" title="Limpar gráficos/seleção">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M21 12a9 9 0 1 1-2.64-6.36" stroke="rgba(233,246,255,.92)" stroke-width="2" stroke-linecap="round"/>
+              <path d="M21 4v6h-6" stroke="rgba(233,246,255,.92)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <span class="label">Reset</span>
+          </button>
         </div>
       </div>
-
-      <div class="ev-wrap">
-        <canvas id="eventCanvas"></canvas>
-      </div>
-      <div id="eventTip" class="ev-tip"></div>
     </div>
 
-  </div>
+    <div style="height:.8rem"></div>
 
-  <div id="evDrawer" class="ev-drawer" aria-hidden="true">
-    <div id="evBackdrop" class="ev-backdrop"></div>
-    <div class="ev-panel" role="dialog" aria-modal="true" aria-label="Detalhes do evento selecionado">
-      <div class="ev-panel-head">
-        <div style="min-width:0;">
-          <div class="ev-panel-title">
-            <span id="evDTitle">Momento</span>
-            <span id="evDBadge" class="badge none"><span class="dot"></span><span>—</span></span>
-          </div>
-          <div id="evDSub" class="ev-panel-sub">—</div>
-        </div>
-        <button id="evClose" class="btn-x" title="Fechar">✕</button>
-      </div>
-      <div id="evBody" class="ev-panel-body"></div>
+    <div class="status" id="statusBox" style="display:none;">
+      <span class="spin" aria-hidden="true"></span>
+      <span id="statusTxt">Executando…</span>
     </div>
   </div>
 
-  <script>
-    const $ = (id) => document.getElementById(id);
+  <!-- KPIs -->
+  <div class="card glass span-12">
+    <div class="kpi" id="kpiGrid">
+      <div class="tile"><p class="t">Pontos</p><p class="v" id="kpiPts">—</p><p class="s">total na série</p></div>
+      <div class="tile"><p class="t">Válidos</p><p class="v" id="kpiValid">—</p><p class="s">valid_model != false</p></div>
+      <div class="tile"><p class="t">OK</p><p class="v" id="kpiOk">—</p><p class="s">sev=ok</p></div>
+      <div class="tile"><p class="t">WARN</p><p class="v" id="kpiAnom">—</p><p class="s">sev=anom</p></div>
+      <div class="tile"><p class="t">CRIT</p><p class="v" id="kpiCrit">—</p><p class="s">sev=crit</p></div>
+      <div class="tile"><p class="t">Intervalo</p><p class="v" id="kpiRange">—</p><p class="s">start → end</p></div>
+    </div>
+  </div>
 
-    function csrfToken(){
-      const m = document.cookie.match(/csrftoken=([^;]+)/);
-      return m ? decodeURIComponent(m[1]) : "";
-    }
+  <!-- Curvas -->
+  <div class="card glass span-12">
+    <h3 style="margin-top:0">Mismatch ao longo do tempo</h3>
+    <div class="chart-wrap"><canvas id="chartMismatch"></canvas></div>
+  </div>
 
-    function escapeHtml(s){
-      const x = String(s ?? "");
-      return x
-        .replace(/&/g,"&amp;")
-        .replace(/</g,"&lt;")
-        .replace(/>/g,"&gt;")
-        .replace(/"/g,"&quot;")
-        .replace(/'/g,"&#039;");
-    }
+  <div class="card glass span-12">
+    <h3 style="margin-top:0">Potência (Real vs Modelo)</h3>
+    <div class="chart-wrap sm"><canvas id="chartPower"></canvas></div>
+  </div>
 
-    function setMsg(html, kind="ok"){
-      $("msg").innerHTML = `<div class="${kind}">${html}</div>`;
-    }
+  <!-- Heatmap -->
+  <div class="card glass span-12">
+    <div class="hm-head">
+      <div style="min-width:0;">
+        <h3 style="margin-top:0">Heatmap — dia × bin (canvas)</h3>
+        <div class="hm-sub">
+          Linhas = dias • Colunas = bins de <b id="hmBinLbl">15</b> min • Cor = severidade.
+          Clique em um quadrado para fixar o ponto e ver os dados operativos (aba lateral).
+        </div>
+      </div>
 
-    function fmtN(x, nd=2){
-      const n = Number(x);
-      if (!Number.isFinite(n)) return "—";
-      return n.toFixed(nd).replace(/\.?0+$/,'');
-    }
-    function fmtUnit(x, unit, nd=2){
-      const n = Number(x);
-      if (!Number.isFinite(n)) return "—";
-      return `${fmtN(n, nd)} ${unit}`;
-    }
-    function fmtPct(x, nd=1){
-      const n = Number(x);
-      if (!Number.isFinite(n)) return "—";
-      return (n*100).toFixed(nd) + "%";
-    }
+      <div class="legend">
+        <span class="badge"><span class="dot" style="background:var(--hm-none)"></span>none</span>
+        <span class="badge"><span class="dot" style="background:var(--hm-ok)"></span>ok</span>
+        <span class="badge"><span class="dot" style="background:var(--hm-anom)"></span>warn</span>
+        <span class="badge"><span class="dot" style="background:var(--hm-crit)"></span>crit</span>
+        <span class="badge"><span class="mono" id="hmBadgeTxt">—</span></span>
+      </div>
+    </div>
 
-    function chartCommonOptions(){
-      return {
-        responsive: true,
-        maintainAspectRatio: false,
-        interaction: { mode: "index", intersect: false },
-        plugins: {
-          legend: {
-            display: true,
-            labels: {
-              color: "rgba(233,246,255,.95)",
-              font: { size: 14, weight: "700" },
-              boxWidth: 14,
-              boxHeight: 14,
-              padding: 18
-            }
-          },
-          tooltip: {
-            titleColor: "rgba(233,246,255,.98)",
-            bodyColor: "rgba(233,246,255,.95)"
-          }
-        },
-        scales: {
-          x: {
-            ticks: { color: "rgba(233,246,255,.85)", maxTicksLimit: 10, font: { size: 12 } },
-            grid: { color: "rgba(255,255,255,.06)" }
-          },
-          y: {
-            ticks: { color: "rgba(233,246,255,.85)", font: { size: 12 } },
-            grid: { color: "rgba(255,255,255,.06)" }
-          }
-        }
+    <div class="hm-wrap" id="hmWrap">
+      <canvas id="hmCanvas" class="hm-canvas" width="800" height="420" title="Clique para selecionar um ponto"></canvas>
+    </div>
+    <div id="hmTip" class="hm-tip"></div>
+  </div>
+</div>
+
+<!-- Drawer lateral (detalhe do ponto) -->
+<aside id="detailDrawer" class="detail-drawer" aria-hidden="true">
+  <div class="hd">
+    <div style="min-width:0;">
+      <h3 class="title">Detalhe do ponto selecionado</h3>
+      <div class="meta" id="detailMeta">—</div>
+    </div>
+
+    <!-- AÇÕES abaixo do cabeçalho -->
+    <div class="actions">
+      <button class="btn-glow secondary" type="button" id="btnCopySel" title="Copiar JSON do ponto">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M9 9h11v12H9V9Z" stroke="rgba(233,246,255,.92)" stroke-width="2" />
+          <path d="M4 15H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1h11a1 1 0 0 1 1 1v1"
+                stroke="rgba(233,246,255,.92)" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+        <span class="label">Copiar</span>
+      </button>
+
+      <button class="btn-glow secondary" type="button" id="btnClearSel" title="Limpar seleção">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M6 6l12 12M18 6 6 18" stroke="rgba(233,246,255,.92)" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+        <span class="label">Limpar</span>
+      </button>
+
+      <button class="btn-glow danger" type="button" id="btnCloseDetail" title="Fechar aba lateral">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M6 6l12 12M18 6 6 18" stroke="rgba(233,246,255,.92)" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+        <span class="label">Fechar</span>
+      </button>
+    </div>
+  </div>
+
+  <div class="body">
+    <!-- removido: "Principais variáveis (resumo)" -->
+
+    <h4 style="margin:.2rem 0 .6rem;">Principais variáveis (todas as séries no índice)</h4>
+    <table class="kv" id="detailAll"></table>
+
+    <div style="height:.8rem"></div>
+
+    <h4 style="margin:.2rem 0 .6rem;">Dump (todas as séries no índice)</h4>
+    <pre class="dump" id="detailDump">{}</pre>
+
+    <div class="mono" style="opacity:.78; font-size:.82rem; margin-top:.55rem;">
+      Dica: o dump vem com nomes “humanos” (e o nome original entre parênteses).
+    </div>
+  </div>
+</aside>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+
+  function setStatus(on, txt){
+    const box = $("statusBox");
+    const t = $("statusTxt");
+    if (!box || !t) return;
+    if (!on){
+      box.style.display = "none";
+      t.textContent = "";
+      return;
+    }
+    box.style.display = "";
+    t.textContent = txt || "Executando…";
+  }
+
+  function setBtnLoading(btn, isLoading, labelIdle, labelLoading){
+    if (!btn) return;
+    btn.disabled = !!isLoading;
+    const lbl = btn.querySelector(".label");
+    if (lbl){
+      lbl.textContent = isLoading ? (labelLoading || "Carregando...") : (labelIdle || lbl.textContent);
+    }
+  }
+
+  function getNum(id, fallback=NaN){
+    const el = $(id);
+    if (!el) return fallback;
+    let raw = String(el.value ?? "").trim();
+    if (!raw) return fallback;
+    raw = raw.replace(",", "."); // tolera vírgula
+    const v = Number(raw);
+    return Number.isFinite(v) ? v : fallback;
+  }
+
+  function fmtN(x, nd=2){
+    const n = Number(x);
+    if (!Number.isFinite(n)) return "—";
+    return n.toFixed(nd).replace(/\.?0+$/,'');
+  }
+
+  function fmtPct(x, nd=1){
+    const n = Number(x);
+    if (!Number.isFinite(n)) return "—";
+    return (n*100).toFixed(nd) + "%";
+  }
+
+  function fmtAny(v){
+    if (v === null || v === undefined) return "—";
+    if (typeof v === "number"){
+      if (!Number.isFinite(v)) return "—";
+      return Number.isInteger(v) ? String(v) : fmtN(v, 6);
+    }
+    if (typeof v === "boolean") return v ? "true" : "false";
+    if (typeof v === "string") return v === "" ? "—" : v;
+    try{ return JSON.stringify(v); }catch(_e){ return String(v); }
+  }
+
+  /* =========================================================
+     Prefill robusto: se vier vazio/ inválido, força defaults
+     ========================================================= */
+  function normalizeNumberInput(id, def){
+    const el = $(id);
+    if (!el) return;
+    let v = String(el.value ?? "").trim();
+    if (!v){
+      el.value = String(def);
+      return;
+    }
+    v = v.replace(",", ".");
+    const n = Number(v);
+    if (!Number.isFinite(n)){
+      el.value = String(def);
+      return;
+    }
+    el.value = String(n);
+  }
+
+  function prefillDefaultsIfEmpty(){
+    const s = $("start");
+    const e = $("end");
+    if (!s || !e) return;
+
+    const hasS = !!String(s.value || "").trim();
+    const hasE = !!String(e.value || "").trim();
+    if (!hasS || !hasE){
+      const today = new Date();
+      const end = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+      const start = new Date(end.getTime() - 7 * 86400000);
+
+      const toYMD = (d) => {
+        const y = d.getFullYear();
+        const m = String(d.getMonth()+1).padStart(2,"0");
+        const dd = String(d.getDate()).padStart(2,"0");
+        return `${y}-${m}-${dd}`;
       };
+
+      if (!hasE) e.value = toYMD(end);
+      if (!hasS) s.value = toYMD(start);
     }
 
-    let chartMismatch = null;
-    let chartPower = null;
+    // defaults warm/crit/gpoa_min sempre garantidos
+    normalizeNumberInput("warn_abs", 0.35);
+    normalizeNumberInput("fault_abs", 0.90);
+    normalizeNumberInput("gpoa_min", 50);
+    normalizeNumberInput("pmin_w", 0);
+  }
 
-    function destroyCharts(){
-      if(chartMismatch){ chartMismatch.destroy(); chartMismatch = null; }
-      if(chartPower){ chartPower.destroy(); chartPower = null; }
-    }
+  /* =========================================================
+     Labels “humanos”
+     ========================================================= */
+  const FIELD_LABELS = {
+    t_local: "Timestamp (local)",
+    x_local: "Timestamp (local)",
+    t: "Timestamp",
+    x: "Timestamp",
 
-    function buildCharts(payload){
-      destroyCharts();
+    mismatch_rel: "Mismatch relativo (P_real−P_model)/P_model",
+    mismatch: "Mismatch relativo (P_real−P_model)/P_model",
+    mm_rel: "Mismatch relativo (P_real−P_model)/P_model",
+    mm: "Mismatch",
 
-      if (!window.Chart){
-        setMsg(`<b>Erro:</b> Chart.js não carregou. Verifique o static vendor/chartjs.`, "err");
-        return;
-      }
+    p_ac_real_w: "Potência AC (real) [W]",
+    pac_real_w:  "Potência AC (real) [W]",
+    p_ac_w:      "Potência AC (real) [W]",
+    pac_w:       "Potência AC (real) [W]",
+    pac:         "Potência AC (real) [W]",
 
-      const t = payload?.series?.t_local || payload?.series?.x_local || payload?.x_local || [];
-      const mm = payload?.series?.mismatch_rel || [];
+    p_ac_model_w: "Potência AC (modelo) [W]",
+    pac_model_w:  "Potência AC (modelo) [W]",
+    p_model_w:    "Potência AC (modelo) [W]",
+    p_ac_model:   "Potência AC (modelo) [W]",
+    pac_model:    "Potência AC (modelo) [W]",
 
-      const pr = payload?.series?.p_ac_real_w || payload?.series?.p_ac_w || payload?.series?.pac_real_w || [];
-      const pm = payload?.series?.p_ac_model_w || payload?.series?.pac_model_w || [];
+    valid_model: "Válido (modelo)",
+    valid_ok:    "Válido (modelo)",
+    valid:       "Válido (modelo)",
 
-      chartMismatch = new Chart($("chartMismatch"), {
-        type: "line",
-        data: {
-          labels: t,
-          datasets: [
-            { label: "mismatch_rel", data: mm, borderWidth: 2, pointRadius: 0, tension: 0.15 },
-          ]
+    rca_code: "Código diagnóstico (RCA)",
+    codes:    "Código diagnóstico (RCA)",
+    code:     "Código diagnóstico (RCA)",
+
+    rca_label: "Rótulo diagnóstico (RCA)",
+    label_t:   "Rótulo diagnóstico (RCA)",
+    labels:    "Rótulo diagnóstico (RCA)",
+    label:     "Rótulo diagnóstico (RCA)",
+
+    gpoa_wm2: "GPOA (POA) [W/m²]",
+    poa_wm2:  "GPOA (POA) [W/m²]",
+    g_poa:    "GPOA (POA) [W/m²]",
+    poa:      "GPOA (POA) [W/m²]",
+    gpoa:     "GPOA (POA) [W/m²]",
+
+    ghi_wm2:  "GHI [W/m²]",
+    ghi:      "GHI [W/m²]",
+
+    tmod_c:   "Temperatura do módulo [°C]",
+    t_mod_c:  "Temperatura do módulo [°C]",
+    tmodule_c:"Temperatura do módulo [°C]",
+    tamb_c:   "Temperatura ambiente [°C]",
+    t_amb_c:  "Temperatura ambiente [°C]",
+
+    vdc_v: "Tensão DC (Vdc) [V]",
+    vdc:   "Tensão DC (Vdc) [V]",
+    idc_a: "Corrente DC (Idc) [A]",
+    idc:   "Corrente DC (Idc) [A]",
+    vac_v: "Tensão AC (Vac) [V]",
+    vac:   "Tensão AC (Vac) [V]",
+    iac_a: "Corrente AC (Iac) [A]",
+    iac:   "Corrente AC (Iac) [A]",
+  };
+
+  function humanizeKey(s){
+    const k = String(s || "");
+    if (!k) return "—";
+    // snake_case -> "Snake case"
+    const base = k.replace(/[_\-]+/g, " ").trim();
+    if (!base) return k;
+    return base.charAt(0).toUpperCase() + base.slice(1);
+  }
+
+  // compact = só nome prático (sem literal)
+  function prettyKeyCompact(k){
+    const s = String(k || "");
+    return FIELD_LABELS[s] || humanizeKey(s);
+  }
+
+  // verbose = nome prático + (literal) para o dump
+  function prettyKeyVerbose(k){
+    const s = String(k || "");
+    const human = FIELD_LABELS[s] || humanizeKey(s);
+    return human ? `${human} (${s})` : s;
+  }
+
+  /* =========================================================
+     Charts
+     ========================================================= */
+  let chartMismatch = null;
+  let chartPower = null;
+
+  function chartCommonOptions(){
+    return {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: "index", intersect: false },
+      plugins: {
+        legend: {
+          display: true,
+          labels: {
+            color: "rgba(233,246,255,.95)",
+            font: { size: 14, weight: "700" },
+            boxWidth: 14, boxHeight: 14, padding: 18
+          }
         },
-        options: {
-          ...chartCommonOptions(),
-          scales: {
-            ...chartCommonOptions().scales,
-            y: {
-              ...chartCommonOptions().scales.y,
-              title: { display: true, text: "mismatch_rel", color: "rgba(233,246,255,.95)", font: { size: 13, weight: "800" } }
-            }
+        tooltip: {
+          titleColor: "rgba(233,246,255,.98)",
+          bodyColor: "rgba(233,246,255,.95)"
+        }
+      },
+      scales: {
+        x: { ticks: { color: "rgba(233,246,255,.85)", maxTicksLimit: 10, font: { size: 12 } },
+             grid: { color: "rgba(255,255,255,.06)" } },
+        y: { ticks: { color: "rgba(233,246,255,.85)", font: { size: 12 } },
+             grid: { color: "rgba(255,255,255,.06)" } }
+      }
+    };
+  }
+
+  function destroyCharts(){
+    if(chartMismatch){ chartMismatch.destroy(); chartMismatch = null; }
+    if(chartPower){ chartPower.destroy(); chartPower = null; }
+  }
+
+  function buildCharts(payload){
+    destroyCharts();
+    if (!window.Chart) return;
+
+    const s = payload?.series || {};
+    const t  = s.t_local || s.x_local || payload?.x_local || [];
+    const mm = s.mismatch_rel || s.mismatch || s.mm_rel || [];
+
+    const pr = s.p_ac_real_w  || s.p_ac_w || s.pac_real_w || s.pac_w || [];
+    const pm = s.p_ac_model_w || s.p_model_w || s.pac_model_w || s.pac_model || [];
+
+    chartMismatch = new Chart($("chartMismatch"), {
+      type: "line",
+      data: { labels: t, datasets: [
+        { label: "Mismatch relativo", data: mm, borderWidth: 2, pointRadius: 0, tension: 0.15 },
+      ]},
+      options: {
+        ...chartCommonOptions(),
+        scales: {
+          ...chartCommonOptions().scales,
+          y: {
+            ...chartCommonOptions().scales.y,
+            title: { display: true, text: "Mismatch relativo", color: "rgba(233,246,255,.95)", font: { size: 13, weight: "800" } }
           }
         }
-      });
+      }
+    });
 
-      chartPower = new Chart($("chartPower"), {
-        type: "line",
-        data: {
-          labels: t,
-          datasets: [
-            { label: "P_real (W)",  data: pr, borderWidth: 2, pointRadius: 0, tension: 0.15 },
-            { label: "P_model (W)", data: pm, borderWidth: 2, pointRadius: 0, tension: 0.15 },
-          ]
-        },
-        options: chartCommonOptions()
+    chartPower = new Chart($("chartPower"), {
+      type: "line",
+      data: { labels: t, datasets: [
+        { label: "Potência AC real (W)",  data: pr, borderWidth: 2, pointRadius: 0, tension: 0.15 },
+        { label: "Potência AC modelo (W)", data: pm, borderWidth: 2, pointRadius: 0, tension: 0.15 },
+      ]},
+      options: chartCommonOptions()
+    });
+  }
+
+  /* =========================================================
+     Séries / Aliases
+     ========================================================= */
+  function seriesAt(payload, key, idx){
+    const s = payload?.series || {};
+    const ALIASES = {
+      t_local:      ["x_local","t","x"],
+      p_ac_real_w:  ["pac_real_w","p_ac_w","pac_w","pac"],
+      p_ac_model_w: ["pac_model_w","p_model_w","p_ac_model","pac_model"],
+      mismatch_rel: ["mismatch","mm_rel","mm"],
+      valid:        ["valid_model","valid_ok"],
+      label:        ["rca_label","label_t","labels"],
+      code:         ["rca_code","codes"],
+
+      gpoa_wm2:     ["poa_wm2","g_poa","irr_poa_wm2","poa","gpoa"],
+      ghi_wm2:      ["ghi","g_hi","irr_ghi_wm2"],
+      tmod_c:       ["t_mod_c","tmodule_c","module_temp_c","temp_module_c","tmod"],
+      tamb_c:       ["t_amb_c","ambient_temp_c","temp_amb_c","tamb"],
+
+      vdc_v:        ["v_dc_v","vdc","dc_voltage_v","v_dc"],
+      idc_a:        ["i_dc_a","idc","dc_current_a","i_dc"],
+      vac_v:        ["v_ac_v","vac","ac_voltage_v","v_ac"],
+      iac_a:        ["i_ac_a","iac","ac_current_a","i_ac"],
+    };
+    const keys = [key, ...((ALIASES[key] || []))];
+    for (const k of keys){
+      const arr = s?.[k];
+      if (Array.isArray(arr) && idx >= 0 && idx < arr.length) return arr[idx];
+    }
+    return null;
+  }
+
+  function sevFromCode(code){
+    const c = Number(code);
+    if (!Number.isFinite(c) || c === 0) return "none";
+    if (c === 1) return "ok";
+    if (c === 3) return "crit";
+    return "anom";
+  }
+
+  function sevFromLabel(lbl){
+    const s = String(lbl ?? "").trim().toLowerCase();
+    if (!s || s === "invalid") return "none";
+    if (s === "normal") return "ok";
+    if (s.includes("string_disconnected") || s.includes("disconnected")) return "crit";
+    return "anom";
+  }
+
+  function sevFromMismatch(mm){
+    const m = Number(mm);
+    if (!Number.isFinite(m)) return "none";
+    const warnAbs  = Math.max(0, getNum("warn_abs", 0.35));
+    const faultAbs = Math.max(0, getNum("fault_abs", 0.90));
+    if (m <= -faultAbs) return "crit";
+    if (Math.abs(m) >= warnAbs) return "anom";
+    return "ok";
+  }
+
+  function pointSeverity(payload, idx){
+    const vOK = seriesAt(payload, "valid", idx);
+    if (vOK === false) return { sev: "none", reason: "valid=false" };
+
+    const code = seriesAt(payload, "code", idx);
+    if (code != null && code !== "") return { sev: sevFromCode(code), reason: "rca_code", code };
+
+    const lbl = seriesAt(payload, "label", idx);
+    if (lbl != null && String(lbl).trim() !== "") return { sev: sevFromLabel(lbl), reason: "label", lbl };
+
+    const mm = seriesAt(payload, "mismatch_rel", idx);
+    return { sev: sevFromMismatch(mm), reason: "mismatch", mm };
+  }
+
+  /* =========================================================
+     KPIs
+     ========================================================= */
+  function setKpis(payload){
+    const s = payload?.series || {};
+    const t = s.t_local || s.x_local || payload?.x_local || [];
+    const pts = Array.isArray(t) ? t.length : 0;
+
+    let valid = 0, ok = 0, anom = 0, crit = 0;
+    for (let i=0; i<pts; i++){
+      const vOK = seriesAt(payload, "valid", i);
+      if (vOK !== false) valid++;
+      const sev = pointSeverity(payload, i).sev;
+      if (sev === "ok") ok++;
+      else if (sev === "anom") anom++;
+      else if (sev === "crit") crit++;
+    }
+
+    const rs = payload?.range?.start || ($("start")?.value || "—");
+    const re = payload?.range?.end   || ($("end")?.value || "—");
+
+    $("kpiPts").textContent = pts ? String(pts) : "—";
+    $("kpiValid").textContent = pts ? String(valid) : "—";
+    $("kpiOk").textContent = pts ? String(ok) : "—";
+    $("kpiAnom").textContent = pts ? String(anom) : "—";
+    $("kpiCrit").textContent = pts ? String(crit) : "—";
+    $("kpiRange").textContent = `${rs} → ${re}`;
+  }
+
+  /* =========================================================
+     Heatmap canvas (dia × bin)
+     ========================================================= */
+  function ymdList(aYmd, bYmd){
+    const out = [];
+    const mA = String(aYmd||"").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    const mB = String(bYmd||"").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!mA || !mB) return out;
+
+    let a = Date.UTC(+mA[1], +mA[2]-1, +mA[3]);
+    let b = Date.UTC(+mB[1], +mB[2]-1, +mB[3]);
+    if (!Number.isFinite(a) || !Number.isFinite(b) || b < a) return out;
+
+    for (let t=a; t<=b; t += 86400000){
+      const d = new Date(t);
+      const y = d.getUTCFullYear();
+      const m = String(d.getUTCMonth()+1).padStart(2,"0");
+      const dd = String(d.getUTCDate()).padStart(2,"0");
+      out.push(`${y}-${m}-${dd}`);
+    }
+    return out;
+  }
+
+  function localPartsFromIso(str){
+    let x = String(str||"").trim();
+    if (!x) return { day:null, minute:null };
+    if (x.includes(" ") && !x.includes("T")) x = x.replace(" ","T");
+    const day = x.slice(0,10);
+    const hh = Number(x.slice(11,13));
+    const mi = Number(x.slice(14,16));
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return { day:null, minute:null };
+    if (!Number.isFinite(hh) || !Number.isFinite(mi)) return { day, minute:null };
+    return { day, minute: hh*60 + mi };
+  }
+
+  function buildCellMap(payload, dtm){
+    const start = payload?.range?.start || $("start")?.value;
+    const end   = payload?.range?.end   || $("end")?.value;
+
+    const days = ymdList(start, end);
+    const dayToIdx = new Map(days.map((d,i)=>[d,i]));
+    const nBins = Math.floor(1440 / dtm);
+
+    const s = payload?.series || {};
+    const t = s.t_local || s.x_local || payload?.x_local || [];
+
+    const hmDay = Array.isArray(s.hm_day_local) ? s.hm_day_local : null;
+    const hmMin = Array.isArray(s.hm_minute_local) ? s.hm_minute_local : null;
+
+    const cell = new Map();
+    const bestDist = new Map();
+
+    for (let i=0; i<t.length; i++){
+      let ds = (hmDay && i < hmDay.length) ? hmDay[i] : null;
+      let minutes = (hmMin && i < hmMin.length) ? hmMin[i] : null;
+
+      if (!ds || minutes == null){
+        const lp = localPartsFromIso(t[i]);
+        ds = ds || lp.day;
+        if (minutes == null) minutes = lp.minute;
+      }
+      if (!ds || minutes == null) continue;
+
+      const di = dayToIdx.get(ds);
+      if (di == null) continue;
+
+      const ti = Math.floor(Number(minutes) / dtm);
+      if (ti < 0 || ti >= nBins) continue;
+
+      const binCenter = ti*dtm + dtm/2;
+      const dist = Math.abs(Number(minutes) - binCenter);
+
+      const key = `${di}|${ti}`;
+      const prev = bestDist.get(key);
+      if (prev != null && dist >= prev) continue;
+      bestDist.set(key, dist);
+
+      const sevObj = pointSeverity(payload, i);
+      const mm = seriesAt(payload, "mismatch_rel", i);
+      const lbl = seriesAt(payload, "label", i);
+      const code = seriesAt(payload, "code", i);
+
+      cell.set(key, {
+        idx: i,
+        sev: sevObj.sev,
+        mm: (mm == null ? null : Number(mm)),
+        lbl: (lbl == null ? null : String(lbl)),
+        code: (code == null ? null : Number(code)),
+        day: ds,
+        minute: Number(minutes),
       });
     }
 
-    function fillKPIs(payload){
-      const s = payload.summary || {};
-      $("k_n").textContent = s.n_points ?? "—";
-      $("k_mabs").textContent = (s.mean_abs_mismatch_valid == null) ? "—" : fmtN(s.mean_abs_mismatch_valid, 3);
-      const events = s.events || [];
-      $("k_ev").textContent = events.length;
+    return { days, nBins, cell };
+  }
 
-      const counts = s.counts || {};
-      $("k_counts").textContent = JSON.stringify(counts, null, 2);
+  function sevColor(sev){
+    const cs = getComputedStyle(document.documentElement);
+    if (sev === "crit") return cs.getPropertyValue("--hm-crit").trim();
+    if (sev === "anom") return cs.getPropertyValue("--hm-anom").trim();
+    if (sev === "ok")   return cs.getPropertyValue("--hm-ok").trim();
+    return cs.getPropertyValue("--hm-none").trim();
+  }
+
+  const hmState = {
+    payload:null, days:[], nBins:0, dtm:15, cell:new Map(), geo:null,
+    selectedKey: null, selected: null, selectedSnapshot: null
+  };
+
+  function fitHeatmapToWidth(){
+    const wrap = $("hmWrap");
+    const canvas = $("hmCanvas");
+    if (!wrap || !canvas) return;
+
+    const W = canvas.width;
+    const H = canvas.height;
+    if (!W || !H) return;
+
+    const avail = Math.max(0, wrap.clientWidth - 2);
+    if (!avail) return;
+
+    const scale = Math.min(1, avail / W);
+    canvas.style.width = (W * scale) + "px";
+    canvas.style.height = (H * scale) + "px";
+  }
+
+  function drawHeatmapCanvas(){
+    const payload = hmState.payload;
+    const canvas = $("hmCanvas");
+    const tip = $("hmTip");
+    if (!canvas || !payload) return;
+
+    const ctx = canvas.getContext("2d");
+    const days = hmState.days;
+    const nBins = hmState.nBins;
+
+    if (!days.length || !nBins){
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      if (tip) tip.textContent = "Sem dados suficientes para heatmap.";
+      return;
     }
 
-    // =========================
-    // EVENT HEATMAP (robusto)
-    // =========================
-    const evState = {
-      payload: null,
-      map: null,
-      days: [],
-      times: [],
-      keyToIdx: null,
-      dtm: 15,
-      cell: 14, gap: 4,
-      mL: 78, mT: 26, mR: 12, mB: 22,
+    const pad = 10;
+    const topH = 26;
+    const leftW = 78;
+    const cell = 12;
+    const gap = 3;
+
+    const W = pad + leftW + (nBins * (cell+gap)) + pad;
+    const H = pad + topH + (days.length * (cell+gap)) + pad;
+
+    canvas.width = W;
+    canvas.height = H;
+
+    ctx.clearRect(0,0,W,H);
+    ctx.fillStyle = "rgba(10,20,40,.10)";
+    ctx.fillRect(0,0,W,H);
+
+    ctx.fillStyle = "rgba(233,246,255,.85)";
+    ctx.font = "bold 11px ui-monospace, Menlo, Consolas, monospace";
+    ctx.textBaseline = "middle";
+
+    const dtm = hmState.dtm;
+    const binsPerHour = Math.max(1, Math.floor(60/dtm));
+    for (let ti=0; ti<nBins; ti++){
+      if (ti % binsPerHour !== 0) continue;
+      const minutes = ti*dtm;
+      const hh = String(Math.floor(minutes/60)).padStart(2,"0");
+      const mm = String(minutes%60).padStart(2,"0");
+      const label = `${hh}:${mm}`;
+      const x = pad + leftW + ti*(cell+gap);
+      const y = pad + 12;
+      ctx.fillText(label, x, y);
+    }
+
+    ctx.font = "12px ui-monospace, Menlo, Consolas, monospace";
+    for (let di=0; di<days.length; di++){
+      const ds = days[di];
+      const ddmm = ds.length >= 10 ? `${ds.slice(8,10)}/${ds.slice(5,7)}` : ds;
+
+      const y = pad + topH + di*(cell+gap);
+
+      ctx.fillStyle = "rgba(233,246,255,.88)";
+      ctx.fillText(ddmm, pad, y + cell/2);
+
+      for (let ti=0; ti<nBins; ti++){
+        const key = `${di}|${ti}`;
+        const obj = hmState.cell.get(key);
+        const sev = obj ? obj.sev : "none";
+        const x = pad + leftW + ti*(cell+gap);
+
+        ctx.fillStyle = sevColor(sev);
+        ctx.fillRect(x, y, cell, cell);
+      }
+    }
+
+    if (hmState.selectedKey){
+      const [diS, tiS] = hmState.selectedKey.split("|").map(Number);
+      if (Number.isFinite(diS) && Number.isFinite(tiS)){
+        const x = pad + leftW + tiS*(cell+gap);
+        const y = pad + topH + diS*(cell+gap);
+        ctx.save();
+        ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue("--hm-sel").trim();
+        ctx.lineWidth = 2.5;
+        ctx.strokeRect(x-1, y-1, cell+2, cell+2);
+        ctx.restore();
+      }
+    }
+
+    hmState.geo = { pad, topH, leftW, cell, gap, W, H, days, nBins, dtm };
+    fitHeatmapToWidth();
+  }
+
+  function renderHeatmapCanvas(payload){
+    hmState.payload = payload;
+    hmState.dtm = Math.max(1, Number($("dt_minutes")?.value || 15));
+    $("hmBinLbl").textContent = String(hmState.dtm);
+
+    const built = buildCellMap(payload, hmState.dtm);
+    hmState.days = built.days;
+    hmState.nBins = built.nBins;
+    hmState.cell = built.cell;
+
+    let ok=0, anom=0, crit=0;
+    for (const v of hmState.cell.values()){
+      if (v.sev === "ok") ok++;
+      else if (v.sev === "anom") anom++;
+      else if (v.sev === "crit") crit++;
+    }
+    $("hmBadgeTxt").textContent = `ok=${ok} | warn=${anom} | crit=${crit} | bins com dado=${hmState.cell.size}`;
+
+    if (hmState.selectedKey && !hmState.cell.has(hmState.selectedKey)){
+      clearSelection();
+    }
+
+    drawHeatmapCanvas();
+  }
+
+  function binTimeStr(mins){
+    const m = Number(mins);
+    if (!Number.isFinite(m)) return "—";
+    const hh = String(Math.floor(m/60)).padStart(2,"0");
+    const mm = String(m%60).padStart(2,"0");
+    return `${hh}:${mm}`;
+  }
+
+  function pointSnapshot(payload, idx){
+    const s = payload?.series || {};
+    const out = {};
+    const keys = Object.keys(s).sort();
+    for (const k of keys){
+      const arr = s[k];
+      if (!Array.isArray(arr)) continue;
+      if (idx < 0 || idx >= arr.length) continue;
+      out[k] = arr[idx];
+    }
+    return out;
+  }
+
+  function snapshotVerbose(raw){
+    const out = {};
+    const keys = Object.keys(raw).sort();
+    for (const k of keys){
+      out[prettyKeyVerbose(k)] = raw[k];
+    }
+    return out;
+  }
+
+  function openDetailDrawer(){
+    const dr = $("detailDrawer");
+    if (!dr) return;
+    dr.classList.add("open");
+    dr.setAttribute("aria-hidden", "false");
+  }
+
+  function closeDetailDrawer(){
+    const dr = $("detailDrawer");
+    if (!dr) return;
+    dr.classList.remove("open");
+    dr.setAttribute("aria-hidden", "true");
+  }
+
+  function renderDetail(payload, cellObj){
+    const meta = $("detailMeta");
+    const tblAll = $("detailAll");
+    const dump = $("detailDump");
+    if (!meta || !tblAll || !dump) return;
+
+    if (!payload || !cellObj){
+      meta.textContent = "—";
+      tblAll.innerHTML = "";
+      dump.textContent = "{}";
+      closeDetailDrawer();
+      return;
+    }
+
+    const idx = cellObj.idx;
+    const ds = cellObj.day;
+    const ts = binTimeStr(cellObj.minute);
+
+    const sevInfo = pointSeverity(payload, idx);
+    meta.textContent = `${ds} ${ts} • idx=${idx} • sev=${sevInfo.sev} (${sevInfo.reason})`;
+
+    const raw = pointSnapshot(payload, idx);
+
+    // TABELA: nomes práticos (sem literal)
+    const items = Object.entries(raw).map(([k,v]) => ({ k, v, label: prettyKeyCompact(k) }));
+    items.sort((a,b) => (String(a.label).localeCompare(String(b.label)) || String(a.k).localeCompare(String(b.k))));
+
+    // desambiguação sem expor o nome literal: acrescenta sufixo (1), (2) se repetir label
+    const counts = new Map();
+    for (const it of items){
+      counts.set(it.label, (counts.get(it.label) || 0) + 1);
+    }
+    const seen = new Map();
+    const rows = items.map(it => {
+      const nTotal = counts.get(it.label) || 1;
+      if (nTotal > 1){
+        const n = (seen.get(it.label) || 0) + 1;
+        seen.set(it.label, n);
+        return [ `${it.label} (${n})`, it.v ];
+      }
+      return [ it.label, it.v ];
+    });
+
+    tblAll.innerHTML = rows.map(([k,v]) => (
+      `<tr><td class="k mono">${String(k)}</td><td class="v mono">${fmtAny(v)}</td></tr>`
+    )).join("") || `<tr><td class="k mono">—</td><td class="v mono">—</td></tr>`;
+
+    // DUMP: mantém humano + (literal)
+    const dumpObj = snapshotVerbose(raw);
+    hmState.selectedSnapshot = dumpObj;
+    dump.textContent = JSON.stringify(dumpObj, null, 2);
+
+    openDetailDrawer();
+  }
+
+  function clearSelection(){
+    hmState.selectedKey = null;
+    hmState.selected = null;
+    hmState.selectedSnapshot = null;
+    renderDetail(null, null);
+    drawHeatmapCanvas();
+  }
+
+  function bindHeatmapHoverAndClick(){
+    const canvas = $("hmCanvas");
+    const tip = $("hmTip");
+    if (!canvas || canvas.__bound) return;
+    canvas.__bound = true;
+
+    const hitTest = (ev) => {
+      if (!hmState.geo) return null;
+      const r = canvas.getBoundingClientRect();
+
+      const sx = canvas.width / Math.max(1, r.width);
+      const sy = canvas.height / Math.max(1, r.height);
+
+      const x = (ev.clientX - r.left) * sx;
+      const y = (ev.clientY - r.top)  * sy;
+
+      const { pad, topH, leftW, cell, gap, days, nBins, dtm } = hmState.geo;
+      const gx = x - (pad + leftW);
+      const gy = y - (pad + topH);
+
+      const stride = (cell + gap);
+      const ti = Math.floor(gx / stride);
+      const di = Math.floor(gy / stride);
+
+      if (ti < 0 || ti >= nBins || di < 0 || di >= days.length) return null;
+      const ds = days[di];
+      const minutes = ti*dtm;
+      const ts = binTimeStr(minutes);
+      const key = `${di}|${ti}`;
+      return { di, ti, ds, ts, key };
     };
 
-    function parseDateSafe(s){
-      if (s instanceof Date) return s;
-      let x = String(s ?? "").trim();
-      if (!x) return new Date(NaN);
-      if (x.includes(" ") && !x.includes("T")) x = x.replace(" ", "T");
-      return new Date(x);
-    }
-
-    function ymd(dt){
-      const y = dt.getFullYear();
-      const m = String(dt.getMonth()+1).padStart(2,"0");
-      const d = String(dt.getDate()).padStart(2,"0");
-      return `${y}-${m}-${d}`;
-    }
-
-    function ymdList(aYmd, bYmd){
-      const out = [];
-      const a = new Date(aYmd + "T00:00:00");
-      const b = new Date(bYmd + "T00:00:00");
-      if (isNaN(a.getTime()) || isNaN(b.getTime())) return out;
-
-      let cur = new Date(a.getTime());
-      while (cur.getTime() <= b.getTime()){
-        out.push(ymd(cur));
-        cur.setDate(cur.getDate() + 1);
+    canvas.addEventListener("mousemove", (ev) => {
+      const h = hitTest(ev);
+      if (!h){
+        if (tip) tip.textContent = "";
+        return;
       }
-      return out;
-    }
-
-    function sevFromCode(code){
-      const c = Number(code);
-      if (!Number.isFinite(c) || c === 0) return "none"; // invalid/sem dado
-      if (c === 1) return "ok";                          // normal
-      if (c === 3) return "crit";                        // fault severa
-      return "anom";                                     // resto = anômalo
-    }
-
-    function sevFromLabel(lbl){
-      const s = String(lbl ?? "").trim().toLowerCase();
-      if (!s || s === "invalid") return "none";
-      if (s === "normal") return "ok";
-      if (s.includes("string_disconnected") || s.includes("disconnected")) return "crit";
-      return "anom";
-    }
-
-    function getNum(id, fallback=NaN){
-      const el = $(id);
-      const v = el ? Number(el.value) : NaN;
-      return Number.isFinite(v) ? v : fallback;
-    }
-
-    function sevFromMismatch(mm){
-      const m = Number(mm);
-      if (!Number.isFinite(m)) return "none";
-      const warnAbs  = Math.max(0, getNum("warn_abs", 0.35));
-      const faultAbs = Math.max(0, getNum("fault_abs", 0.80));
-      if (m <= -faultAbs) return "crit";
-      if (Math.abs(m) >= warnAbs) return "anom";
-      return "ok";
-    }
-
-    function sevColor(sev){
-      const cs = getComputedStyle(document.documentElement);
-      if (sev === "ok") return cs.getPropertyValue("--hm-ok").trim();
-      if (sev === "anom") return cs.getPropertyValue("--hm-anom").trim();
-      if (sev === "crit") return cs.getPropertyValue("--hm-crit").trim();
-      return cs.getPropertyValue("--hm-none").trim();
-    }
-
-    function seriesAt(payload, key, idx){
-      const s = payload?.series || {};
-      const ALIASES = {
-        p_ac_real_w: ["pac_real_w","p_ac_w","pac_w","pac"],
-        p_ac_model_w:["pac_model_w","p_model_w","p_ac_model","pac_model"],
-        p_dc_w:      ["pdc_w","p_dc","pdc"],
-        v_dc_v:      ["vdc_v","v_dc","vdc"],
-        i_dc_a:      ["idc_a","i_dc","idc"],
-        v_ac_v:      ["vac_v","v_ac","vac"],
-        i_ac_a:      ["iac_a","i_ac","iac"],
-
-        mismatch_rel:["mismatch","mm_rel"],
-        valid:       ["valid_model","valid_ok"],
-
-        label:       ["rca_label","label_t","labels"],
-        code:        ["rca_code","codes"],
-
-        g_poa:       ["g_poa_used","g_poa_wm2","poa","poa_wm2","gpoa","gti","GTI"],
-        ghi:         ["GHI","ghi"],
-        gti:         ["GTI","gti","poa_global"],
-        dni:         ["DNI","dni"],
-        dhi:         ["DHI","dhi"],
-        temp_air:    ["tamb_c","t_air_c","ta_c","temp_amb_c","temp_air"],
-        wind_speed:  ["ws_ms","vento_ms","wind_speed"],
-        rh:          ["RH","umid_rel","rh"],
-        tcell_c:     ["t_cell_c","tcell","t_cell","tcell_c"],
-      };
-
-      const keys = [key, ...((ALIASES[key] || []))];
-      for (const k of keys){
-        const arr = s?.[k];
-        if (Array.isArray(arr) && idx >= 0 && idx < arr.length) return arr[idx];
+      const obj = hmState.cell.get(h.key);
+      if (!obj){
+        if (tip) tip.textContent = `${h.ds} ${h.ts} • sem dado`;
+        return;
       }
-      return null;
-    }
+      const mmTxt = (obj.mm == null) ? "—" : `${fmtN(obj.mm,3)} (${fmtPct(obj.mm,1)})`;
+      if (tip) tip.textContent = `${h.ds} ${h.ts} • sev=${obj.sev} • RCA=${obj.code ?? "—"} • rótulo=${obj.lbl ?? "—"} • mismatch=${mmTxt}`;
+    });
 
-    function pointSeverity(payload, idx){
-      const vOK = seriesAt(payload, "valid", idx);
-      if (vOK === false) return { sev: "none", reason: "valid=false" };
+    canvas.addEventListener("mouseleave", () => {
+      if (tip) tip.textContent = "";
+    });
 
-      const code = seriesAt(payload, "code", idx);
-      if (code != null && code !== "") return { sev: sevFromCode(code), reason: "rca_code", code };
+    canvas.addEventListener("click", (ev) => {
+      const h = hitTest(ev);
+      if (!h) return;
 
-      const lbl = seriesAt(payload, "label", idx);
-      if (lbl != null && String(lbl).trim() !== "") return { sev: sevFromLabel(lbl), reason: "label", lbl };
-
-      const mm = seriesAt(payload, "mismatch_rel", idx);
-      return { sev: sevFromMismatch(mm), reason: "mismatch", mm };
-    }
-
-    function buildEventMap(payload){
-      const t = payload?.series?.t_local || payload?.series?.x_local || payload?.x_local || [];
-      const start = $("start").value;
-      const end = $("end").value;
-
-      const days = ymdList(start, end);
-      const dayToIdx = new Map(days.map((d,i)=>[d,i]));
-
-      const dtm = evState.dtm;
-      const nBins = Math.floor(1440 / dtm);
-      const times = [];
-      for (let k=0;k<nBins;k++){
-        const mm = k*dtm;
-        const hh = String(Math.floor(mm/60)).padStart(2,"0");
-        const mi = String(mm%60).padStart(2,"0");
-        times.push(`${hh}:${mi}`);
-      }
-
-      const map = new Map();
-      const keyToIdx = new Map();
-
-      for (let i=0; i<t.length; i++){
-        const dt = parseDateSafe(t[i]);
-        if (isNaN(dt.getTime())) continue;
-
-        const ds = ymd(dt);
-        const di = dayToIdx.get(ds);
-        if (di == null) continue;
-
-        const minutes = dt.getHours()*60 + dt.getMinutes();
-        const ti = Math.floor(minutes / dtm);
-        if (ti < 0 || ti >= nBins) continue;
-
-        const mm  = seriesAt(payload, "mismatch_rel", i);
-        const lbl = seriesAt(payload, "label", i);
-        const code = seriesAt(payload, "code", i);
-        const vOK = seriesAt(payload, "valid", i);
-
-        const sevObj = pointSeverity(payload, i);
-
-        map.set(`${di}|${ti}`, {
-          sev: sevObj.sev,
-          lbl: (lbl == null ? null : String(lbl)),
-          code: (code == null ? null : Number(code)),
-          vOK: (vOK === false ? false : true),
-          mm: (mm == null ? null : Number(mm)),
-        });
-        keyToIdx.set(`${di}|${ti}`, i);
-      }
-
-      return { days, times, map, keyToIdx };
-    }
-
-    function roundRect(ctx, x, y, w, h, r){
-      const rr = Math.min(r, w/2, h/2);
-      ctx.beginPath();
-      ctx.moveTo(x+rr, y);
-      ctx.arcTo(x+w, y, x+w, y+h, rr);
-      ctx.arcTo(x+w, y+h, x, y+h, rr);
-      ctx.arcTo(x, y+h, x, y, rr);
-      ctx.arcTo(x, y, x+w, y, rr);
-      ctx.closePath();
-    }
-
-    function renderEventHeatmap(payload){
-      evState.payload = payload;
-
-      const canvas = $("eventCanvas");
-      const tipEl = $("eventTip");
-      if (!canvas) return;
-
-      const built = buildEventMap(payload);
-      evState.days = built.days;
-      evState.times = built.times;
-      evState.map = built.map;
-      evState.keyToIdx = built.keyToIdx;
-
-      const days = evState.days;
-      const times = evState.times;
-      const map = evState.map;
-
-      let anom = 0, crit = 0, none = 0;
-      for (const obj of map.values()){
-        if (obj.sev === "crit") crit++;
-        else if (obj.sev === "anom") anom++;
-        else if (obj.sev === "none") none++;
-      }
-
-      const badge = $("evBadge");
-      const badgeTxt = $("evBadgeTxt");
-      if (badge && badgeTxt){
-        badge.className = "badge none";
-        badgeTxt.textContent =
-          `anom=${anom} | crit=${crit} | (pontos com dado=${map.size}) | range: ${$("start").value} → ${$("end").value}`;
-      }
-
-      if (!days.length || !times.length){
-        if (tipEl) tipEl.textContent = "Sem dados suficientes para heatmap.";
-        const ctx0 = canvas.getContext("2d");
-        if (ctx0) ctx0.clearRect(0,0,canvas.width,canvas.height);
+      const obj = hmState.cell.get(h.key);
+      if (!obj){
+        clearSelection();
         return;
       }
 
-      const dpr = window.devicePixelRatio || 1;
-      const cell = evState.cell, gap = evState.gap;
-      const mL = evState.mL, mT = evState.mT, mR = evState.mR, mB = evState.mB;
+      hmState.selectedKey = h.key;
+      hmState.selected = { ...h, obj };
 
-      const W = mL + times.length * (cell + gap) + mR;
-      const H = mT + days.length * (cell + gap) + mB;
+      drawHeatmapCanvas();
+      renderDetail(hmState.payload, obj);
+    });
+  }
 
-      canvas.style.width = `${W}px`;
-      canvas.style.height = `${H}px`;
-      canvas.width = Math.round(W * dpr);
-      canvas.height = Math.round(H * dpr);
+  /* =========================================================
+     API (GET com querystring)
+     ========================================================= */
+  function buildQuery(payload){
+    const qs = new URLSearchParams();
+    for (const [k,v] of Object.entries(payload)){
+      if (v === undefined || v === null || v === "") continue;
+      qs.set(k, String(v));
+    }
+    if (payload.plant_id != null){
+      qs.set("plant_pk", String(payload.plant_id));
+      qs.set("pk", String(payload.plant_id));
+    }
+    return qs.toString();
+  }
 
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return;
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  async function fetchFddData(apiUrl, payload){
+    const url = apiUrl + "?" + buildQuery(payload);
+    const res = await fetch(url, { method: "GET", headers: { "Accept": "application/json" } });
 
-      ctx.clearRect(0,0,W,H);
-      ctx.fillStyle = "rgba(255,255,255,.02)";
-      ctx.fillRect(0,0,W,H);
+    const txt = await res.text();
+    let data = null;
+    try{ data = JSON.parse(txt); }catch(_e){}
 
-      ctx.fillStyle = "rgba(233,246,255,.92)";
-      ctx.font = "13px system-ui";
+    if (!res.ok){
+      const msg = (data && (data.error || data.detail)) ? (data.error || data.detail) : txt.slice(0, 400);
+      throw new Error(`HTTP ${res.status}: ${msg}`);
+    }
+    return data;
+  }
 
-      for (let ti = 0; ti < times.length; ti += 8){
-        const x = mL + ti * (cell + gap);
-        ctx.fillText(times[ti], x, 16);
-      }
+  function currentPayloadBase(){
+    const plantId = $("plant_id")?.value;
+    const start = $("start")?.value;
+    const end   = $("end")?.value;
 
-      for (let di = 0; di < days.length; di++){
-        const ds = days[di];
-        const ddmm = ds.length >= 10 ? `${ds.slice(8,10)}/${ds.slice(5,7)}` : ds;
-        const y = mT + di * (cell + gap) + cell - 2;
-        ctx.fillText(ddmm, 8, y);
-      }
+    if (!plantId){ throw new Error("Informe plant_id"); }
+    if (!start || !end){ throw new Error("Informe start e end"); }
 
-      for (let di=0; di<days.length; di++){
-        for (let ti=0; ti<times.length; ti++){
-          const key = `${di}|${ti}`;
-          const obj = map.get(key);
+    return {
+      plant_id: Number(plantId),
+      start,
+      end,
+      warn_abs: getNum("warn_abs", 0.35),
+      fault_abs: getNum("fault_abs", 0.90),
+      gpoa_min: getNum("gpoa_min", 50),
+      pmin_w: getNum("pmin_w", 0),
+      dt_minutes: Math.max(1, Number($("dt_minutes")?.value || 15)),
+    };
+  }
 
-          const x = mL + ti * (cell + gap);
-          const y = mT + di * (cell + gap);
-
-          const sev = obj ? (obj.sev || "none") : "none";
-          const fill = sevColor(sev);
-
-          ctx.fillStyle = fill;
-          roundRect(ctx, x, y, cell, cell, 4);
-          ctx.fill();
-
-          ctx.strokeStyle = (sev === "none") ? "rgba(0,0,0,.25)" : "rgba(0,0,0,.10)";
-          ctx.lineWidth = 1;
-          roundRect(ctx, x, y, cell, cell, 4);
-          ctx.stroke();
-        }
-      }
-
-      if (!canvas.__evBound){
-        canvas.__evBound = true;
-
-        canvas.addEventListener("mousemove", (ev) => {
-          const rect = canvas.getBoundingClientRect();
-          const mx = (ev.clientX - rect.left);
-          const my = (ev.clientY - rect.top);
-
-          const ti = Math.floor((mx - mL) / (cell + gap));
-          const di = Math.floor((my - mT) / (cell + gap));
-
-          if (ti < 0 || di < 0 || ti >= times.length || di >= days.length){
-            if (tipEl) tipEl.textContent = "";
-            return;
-          }
-
-          const key = `${di}|${ti}`;
-          const obj = map.get(key);
-          const ds = days[di];
-          const ts = times[ti];
-
-          if (!obj){
-            if (tipEl) tipEl.textContent = `${ds} ${ts} • sem dado`;
-            return;
-          }
-
-          const mmTxt = (obj.mm == null) ? "—" : `${fmtN(obj.mm,3)} (${fmtPct(obj.mm,1)})`;
-          const lbl = obj.lbl ?? "—";
-          const code = (obj.code == null ? "—" : String(obj.code));
-          const sev = obj.sev ?? "none";
-
-          if (tipEl) tipEl.textContent =
-            `${ds} ${ts} • sev=${sev} • code=${code} • label=${lbl} • mismatch=${mmTxt} • valid=${String(!!obj.vOK)}`;
-        });
-
-        canvas.addEventListener("mouseleave", () => {
-          if (tipEl) tipEl.textContent = "";
-        });
-
-        canvas.addEventListener("click", (ev) => {
-          if (!evState.payload) return;
-
-          const rect = canvas.getBoundingClientRect();
-          const mx = (ev.clientX - rect.left);
-          const my = (ev.clientY - rect.top);
-
-          const ti = Math.floor((mx - mL) / (cell + gap));
-          const di = Math.floor((my - mT) / (cell + gap));
-          if (ti < 0 || di < 0 || ti >= times.length || di >= days.length) return;
-
-          const key = `${di}|${ti}`;
-          const idx = evState.keyToIdx.get(key);
-          if (idx === undefined){
-            setMsg(`<b>Aviso:</b> sem dado para este bin (15 min).`, "err");
-            return;
-          }
-          openEventDrawer(idx);
-        });
-      }
+  async function runFdd(opts = { save:false }){
+    const page = $("fddPage");
+    const apiUrl = page ? page.dataset.api : null;
+    if (!apiUrl){
+      alert("API URL não configurada.");
+      return;
     }
 
-    function openDrawer(){
-      const d = $("evDrawer");
-      if (!d) return;
-      d.classList.add("open");
-      d.setAttribute("aria-hidden","false");
-      document.body.style.overflow = "hidden";
+    const btnRun = $("btnRun");
+    const btnSave = $("btnRunSave");
+
+    try{
+      const payload = currentPayloadBase();
+      if (opts && opts.save) payload.save = 1;
+
+      setBtnLoading(btnRun, true, "Executar", "Executando...");
+      setBtnLoading(btnSave, true, "Executar + Salvar", "Salvando...");
+      setStatus(true, opts.save ? "Executando FDD e salvando no banco…" : "Executando FDD (mismatch)…");
+
+      const data = await fetchFddData(apiUrl, payload);
+
+      setKpis(data);
+      buildCharts(data);
+      renderHeatmapCanvas(data);
+      bindHeatmapHoverAndClick();
+
+      setStatus(false);
+    }catch(err){
+      console.error(err);
+      setStatus(true, `Erro: ${String(err.message || err)}`);
+    }finally{
+      setBtnLoading(btnRun, false, "Executar", "Executando...");
+      setBtnLoading(btnSave, false, "Executar + Salvar", "Salvando...");
     }
-    function closeDrawer(){
-      const d = $("evDrawer");
-      if (!d) return;
-      d.classList.remove("open");
-      d.setAttribute("aria-hidden","true");
-      document.body.style.overflow = "";
+  }
+
+  function resetUi(){
+    destroyCharts();
+    clearSelection();
+
+    const c = $("hmCanvas");
+    if (c){
+      const ctx = c.getContext("2d");
+      ctx.clearRect(0,0,c.width,c.height);
     }
+    $("hmTip").textContent = "";
+    $("hmBadgeTxt").textContent = "—";
+    $("kpiPts").textContent = "—";
+    $("kpiValid").textContent = "—";
+    $("kpiOk").textContent = "—";
+    $("kpiAnom").textContent = "—";
+    $("kpiCrit").textContent = "—";
+    $("kpiRange").textContent = "—";
+    setStatus(false);
+    closeDetailDrawer();
+  }
 
-    function openEventDrawer(idx){
-      const p = evState.payload;
-
-      const tLocal = p?.series?.t_local?.[idx] ?? p?.series?.x_local?.[idx] ?? null;
-
-      const lbl = seriesAt(p, "label", idx);
-      const code = seriesAt(p, "code", idx);
-      const vOK = seriesAt(p, "valid", idx);
-
-      const sevObj = pointSeverity(p, idx);
-      const sev = sevObj.sev;
-
-      const mismatch = seriesAt(p, "mismatch_rel", idx);
-      const gpoa     = seriesAt(p, "g_poa", idx);
-
-      const pacR     = seriesAt(p, "p_ac_real_w", idx);
-      const pacM     = seriesAt(p, "p_ac_model_w", idx);
-
-      const pdc      = seriesAt(p, "p_dc_w", idx);
-      const vdc      = seriesAt(p, "v_dc_v", idx);
-      const idc      = seriesAt(p, "i_dc_a", idx);
-      const vac      = seriesAt(p, "v_ac_v", idx);
-      const iac      = seriesAt(p, "i_ac_a", idx);
-
-      const ghi      = seriesAt(p, "ghi", idx);
-      const gti      = seriesAt(p, "gti", idx);
-      const dni      = seriesAt(p, "dni", idx);
-      const dhi      = seriesAt(p, "dhi", idx);
-      const ta       = seriesAt(p, "temp_air", idx);
-      const ws       = seriesAt(p, "wind_speed", idx);
-      const rh       = seriesAt(p, "rh", idx);
-
-      const tcell    = seriesAt(p, "tcell_c", idx);
-
-      $("evDTitle").textContent = "Momento selecionado";
-      $("evDSub").textContent = tLocal ? `t_local: ${tLocal}` : "—";
-
-      const badge = $("evDBadge");
-      if (badge){
-        const labelTxt = (lbl != null && String(lbl).trim() !== "") ? String(lbl) : "—";
-        const codeTxt  = (code == null || code === "") ? "—" : String(code);
-
-        badge.className = `badge ${sev}`;
-        badge.innerHTML =
-          `<span class="dot"></span><span>${escapeHtml(sev.toUpperCase())}</span>` +
-          `<span class="muted mono" style="margin-left:6px;">code=${escapeHtml(codeTxt)}</span>` +
-          `<span class="muted" style="margin-left:6px;">label=${escapeHtml(labelTxt)}</span>`;
+  function bindDetailButtons(){
+    $("btnClearSel")?.addEventListener("click", () => clearSelection());
+    $("btnCloseDetail")?.addEventListener("click", () => closeDetailDrawer());
+    $("btnCopySel")?.addEventListener("click", async () => {
+      const snap = hmState.selectedSnapshot;
+      if (!snap){
+        alert("Nenhum ponto selecionado.");
+        return;
       }
-
-      const bySrc = p?.series_by_source || {};
-      const srcNames = Object.keys(bySrc).sort();
-
-      let srcRows = "";
-      if (srcNames.length){
-        for (const sname of srcNames){
-          const row = bySrc[sname] || {};
-
-          const spac = Array.isArray(row.p_ac_real_w) ? row.p_ac_real_w[idx] :
-                       Array.isArray(row.p_ac_w) ? row.p_ac_w[idx] :
-                       Array.isArray(row.pac_real_w) ? row.pac_real_w[idx] : null;
-
-          const spdc = Array.isArray(row.p_dc_w) ? row.p_dc_w[idx] :
-                       Array.isArray(row.pdc_w) ? row.pdc_w[idx] : null;
-
-          const svdc = Array.isArray(row.v_dc_v) ? row.v_dc_v[idx] :
-                       Array.isArray(row.vdc_v) ? row.vdc_v[idx] : null;
-
-          const sidc = Array.isArray(row.i_dc_a) ? row.i_dc_a[idx] :
-                       Array.isArray(row.idc_a) ? row.idc_a[idx] : null;
-
-          srcRows += `
-            <tr>
-              <td>${escapeHtml(sname)}</td>
-              <td>
-                Pac=${escapeHtml(fmtN(spac,0))}W |
-                Pdc=${escapeHtml(fmtN(spdc,0))}W |
-                Vdc=${escapeHtml(fmtN(svdc,1))}V |
-                Idc=${escapeHtml(fmtN(sidc,2))}A
-              </td>
-            </tr>
-          `;
-        }
-      } else {
-        srcRows = `<tr><td>—</td><td class="muted">Sem series_by_source no payload.</td></tr>`;
-      }
-
-      function missTag(val, name){
-        const ok = Number.isFinite(Number(val));
-        return ok ? "" : `<span class="badge none" style="margin-right:8px;"><span class="dot"></span><span>${name} n/a</span></span>`;
-      }
-      const missing =
-        missTag(vdc,"Vdc") + missTag(idc,"Idc") + missTag(vac,"Vac") + missTag(iac,"Iac") + missTag(pdc,"Pdc");
-
-      const body = $("evBody");
-      if (body){
-        body.innerHTML = `
-          <div class="card-lite">
-            <h4>
-              <span>Resumo</span>
-              <span class="muted mono">idx=${escapeHtml(String(idx))}</span>
-            </h4>
-            <div class="kv-grid">
-              <div class="kv"><div class="k">sev</div><div class="v mono">${escapeHtml(sev)}</div></div>
-              <div class="kv"><div class="k">valid</div><div class="v mono">${escapeHtml(String(vOK !== false))}</div></div>
-              <div class="kv"><div class="k">rca_code</div><div class="v mono">${escapeHtml(code == null ? "—" : String(code))}</div></div>
-              <div class="kv"><div class="k">rca_label</div><div class="v mono">${escapeHtml(lbl == null ? "—" : String(lbl))}</div></div>
-              <div class="kv"><div class="k">mismatch_rel</div><div class="v mono">${escapeHtml(fmtN(mismatch,3))} <span class="muted">(${escapeHtml(fmtPct(mismatch,1))})</span></div></div>
-              <div class="kv"><div class="k">G_POA</div><div class="v mono">${escapeHtml(fmtUnit(gpoa,"W/m²",0))}</div></div>
-              <div class="kv"><div class="k">P_real</div><div class="v mono">${escapeHtml(fmtUnit(pacR,"W",0))}</div></div>
-              <div class="kv"><div class="k">P_model</div><div class="v mono">${escapeHtml(fmtUnit(pacM,"W",0))}</div></div>
-            </div>
-
-            ${missing ? `<div style="margin-top:.75rem;">${missing}</div>` : ``}
-          </div>
-
-          <div class="card-lite">
-            <h4><span>Operativo (inversor)</span><span class="muted">15 min</span></h4>
-            <div class="kv-grid">
-              <div class="kv"><div class="k">Pdc</div><div class="v mono">${escapeHtml(fmtUnit(pdc,"W",0))}</div></div>
-              <div class="kv"><div class="k">Vdc</div><div class="v mono">${escapeHtml(fmtUnit(vdc,"V",1))}</div></div>
-              <div class="kv"><div class="k">Idc</div><div class="v mono">${escapeHtml(fmtUnit(idc,"A",2))}</div></div>
-              <div class="kv"><div class="k">Vac</div><div class="v mono">${escapeHtml(fmtUnit(vac,"V",1))}</div></div>
-              <div class="kv"><div class="k">Iac</div><div class="v mono">${escapeHtml(fmtUnit(iac,"A",2))}</div></div>
-              <div class="kv"><div class="k">Pac</div><div class="v mono">${escapeHtml(fmtUnit(pacR,"W",0))}</div></div>
-            </div>
-          </div>
-
-          <div class="card-lite">
-            <h4><span>Meteo</span><span class="muted">W/m² • °C</span></h4>
-            <div class="kv-grid">
-              <div class="kv"><div class="k">GHI</div><div class="v mono">${escapeHtml(fmtUnit(ghi,"W/m²",0))}</div></div>
-              <div class="kv"><div class="k">GTI</div><div class="v mono">${escapeHtml(fmtUnit(gti,"W/m²",0))}</div></div>
-              <div class="kv"><div class="k">DNI</div><div class="v mono">${escapeHtml(fmtUnit(dni,"W/m²",0))}</div></div>
-              <div class="kv"><div class="k">DHI</div><div class="v mono">${escapeHtml(fmtUnit(dhi,"W/m²",0))}</div></div>
-              <div class="kv"><div class="k">Tamb</div><div class="v mono">${escapeHtml(fmtUnit(ta,"°C",1))}</div></div>
-              <div class="kv"><div class="k">Vento</div><div class="v mono">${escapeHtml(fmtUnit(ws,"m/s",1))}</div></div>
-              <div class="kv"><div class="k">RH</div><div class="v mono">${escapeHtml(fmtUnit(rh,"%",0))}</div></div>
-              <div class="kv"><div class="k">G_POA (usado)</div><div class="v mono">${escapeHtml(fmtUnit(gpoa,"W/m²",0))}</div></div>
-            </div>
-          </div>
-
-          <div class="card-lite">
-            <h4><span>Modelo</span><span class="muted">estimativas</span></h4>
-            <div class="kv-grid">
-              <div class="kv"><div class="k">Tcell</div><div class="v mono">${escapeHtml(fmtUnit(tcell,"°C",1))}</div></div>
-              <div class="kv"><div class="k">Pac_model</div><div class="v mono">${escapeHtml(fmtUnit(pacM,"W",0))}</div></div>
-            </div>
-          </div>
-
-          <div class="card-lite">
-            <h4><span>Por MPPT/string</span><span class="muted">series_by_source</span></h4>
-            <table class="src"><tbody>${srcRows}</tbody></table>
-          </div>
-        `;
-      }
-
-      openDrawer();
-    }
-
-    async function run(persist=false){
-      const url = "{% url 'mismatch_fdd_api' %}";
-      const payload = {
-        plant_id: $("plant_id").value,
-        start: $("start").value,
-        end: $("end").value,
-        gpoa_gate: $("gpoa_gate").value,
-        warn_abs: $("warn_abs").value,
-        fault_abs: $("fault_abs").value,
-        meteo_pos_abs: $("meteo_pos_abs").value,
-        shading_std_abs: $("shading_std_abs").value,
-        shading_window_points: $("shading_window_points").value,
-        persist: persist ? "1" : ""
-      };
-
-      $("btnRun").disabled = true;
-      $("btnPersist").disabled = true;
-
       try{
-        const resp = await fetch(url, {
-          method: "POST",
-          headers: {
-            "Content-Type":"application/x-www-form-urlencoded;charset=UTF-8",
-            "X-CSRFToken": csrfToken(),
-          },
-          body: new URLSearchParams(payload).toString()
-        });
-        const data = await resp.json();
-
-        if(!data.ok){
-          setMsg(`<b>Erro:</b> ${escapeHtml(data.error || "falha")}`, "err");
-          return;
-        }
-
-        const plant = data.plant || {};
-        const range = data.range || {};
-        const saved = data.persist
-          ? ` | <span class="mono">saved:</span> created=${data.persist.created}, updated=${data.persist.updated}`
-          : "";
-
-        // FIX: suporta plant.nome OU plant.name
-        setMsg(
-          `<b>OK</b> — ${escapeHtml(plant.nome || plant.name || "")} | ${escapeHtml(range.start || "")} → ${escapeHtml(range.end || "")}${saved}`,
-          "ok"
-        );
-
-        buildCharts(data);
-        fillKPIs(data);
-        renderEventHeatmap(data);
-
-      }catch(e){
-        setMsg(`<b>Erro:</b> ${escapeHtml(String(e))}`, "err");
-      }finally{
-        $("btnRun").disabled = false;
-        $("btnPersist").disabled = false;
+        await navigator.clipboard.writeText(JSON.stringify(snap, null, 2));
+      }catch(_e){
+        alert("Não foi possível copiar (permissão). Selecione o texto do dump e copie manualmente.");
       }
+    });
+  }
+
+  function bindHeatmapFit(){
+    const wrap = $("hmWrap");
+    if (!wrap) return;
+
+    try{
+      const ro = new ResizeObserver(() => fitHeatmapToWidth());
+      ro.observe(wrap);
+    }catch(_e){
+      window.addEventListener("resize", fitHeatmapToWidth);
     }
+  }
 
-    $("btnRun").addEventListener("click", () => run(false));
-    $("btnPersist").addEventListener("click", () => run(true));
+  document.addEventListener("DOMContentLoaded", () => {
+    prefillDefaultsIfEmpty();
 
-    $("evBackdrop")?.addEventListener("click", closeDrawer);
-    $("evClose")?.addEventListener("click", closeDrawer);
-    document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeDrawer(); });
+    $("btnRun")?.addEventListener("click", () => runFdd({ save:false }));
+    $("btnRunSave")?.addEventListener("click", () => runFdd({ save:true }));
+    $("btnReset")?.addEventListener("click", resetUi);
 
-    if($("plant_id") && $("plant_id").options.length){
-      run(false);
-    }
-  </script>
+    $("dt_minutes")?.addEventListener("change", () => {
+      if (hmState.payload) renderHeatmapCanvas(hmState.payload);
+    });
+
+    bindDetailButtons();
+    bindHeatmapFit();
+
+    document.addEventListener("keydown", (ev) => {
+      if (ev.key === "Escape") closeDetailDrawer();
+    });
+  });
+</script>
 {% endblock %}

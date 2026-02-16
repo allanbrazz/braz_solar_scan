@@ -1120,7 +1120,7 @@ def expected_and_mismatch(
     cv_max_stable: float = 0.20,
     force_zero_when_invalid: bool = True,
     # ---- CORREÇÃO de desencontro temporal (principal) ----
-    meteo_time_shift_minutes: float = 15.0,          # ajuste manual (ex.: +7.5 para dados 15-min "no início da janela")
+    meteo_time_shift_minutes: float = 0.0,          # ajuste manual (ex.: +7.5 para dados 15-min "no início da janela")
     auto_time_shift: bool = True,                   # estima lag automaticamente (pac_real vs G) e corrige
     max_auto_shift_minutes: float = 90.0,           # limite do auto-shift
     auto_shift_smooth_minutes: float = 30.0,         # suavização antes de correlacionar
