@@ -21,7 +21,7 @@ from django.contrib.auth.decorators import login_required
 
 from core.services.fdd_mismatch import (
     MismatchThresholds,
-    classify_mismatch_series,
+    classify_mismatch_series,  # legado (opcional)
     CODE_INVALID,
 )
 
@@ -32,6 +32,7 @@ from core.models import (
 )
 
 logger = logging.getLogger(__name__)
+
 
 # ----------------------------
 # JSON strict/robusto
@@ -110,7 +111,11 @@ def _mean_none(xs: List[Optional[float]]) -> Optional[float]:
     return (acc / n) if n else None
 
 
-def _pick_best_sources(plant_id: int, dt0_utc: datetime, dt1_utc: datetime) -> Tuple[Optional[str], Optional[str]]:
+def _pick_best_sources(
+    plant_id: int,
+    dt0_utc: datetime,
+    dt1_utc: datetime
+) -> Tuple[Optional[str], Optional[str]]:
     """Escolhe (source_oper, source_meteo) com maior n no range."""
     row = (
         PVPlantMergedRecord15m.objects.filter(
@@ -220,7 +225,7 @@ def _upsert_diag15m(
 @require_GET
 @login_required
 def mismatch_fdd_view(request: HttpRequest):
-    """Página: Heatmap tipo GitHub (dia x 15min) + drawer com dump ao clicar."""
+    """Página: Heatmap tipo GitHub (dia x bin) + drawer com dump ao clicar."""
     qs = (
         PVPlant.objects.all().order_by("nome")
         if request.user.is_superuser
@@ -231,14 +236,25 @@ def mismatch_fdd_view(request: HttpRequest):
     d_end = date.today()
     d_start = d_end - timedelta(days=7)
 
+    # tenta preselect via querystring; fallback: primeira planta
+    plant_id = request.GET.get("plant_id") or request.GET.get("pk") or request.GET.get("plant_pk")
+    if not plant_id and plants:
+        plant_id = str(plants[0].id)
+
     return render(
         request,
-        "dashboard/mismatch_fdd.html",
+        "dashboard/mismatch_fdd.html",  # <<< FIX: template path coerente com o arquivo que você mandou
         {
             "plants": plants,
-            "default_start": d_start.isoformat(),
-            "default_end": d_end.isoformat(),
-            "today": d_end.isoformat(),
+            "plant_id": plant_id,
+            "start": request.GET.get("start") or d_start.isoformat(),
+            "end": request.GET.get("end") or d_end.isoformat(),
+            # defaults de UI
+            "dt_minutes": int(float(request.GET.get("dt_minutes") or 15)),
+            "warn_abs": float((request.GET.get("warn_abs") or 0.35)),
+            "fault_abs": float((request.GET.get("fault_abs") or 0.90)),
+            "gpoa_min": float((request.GET.get("gpoa_min") or 50)),
+            "pmin_w": float((request.GET.get("pmin_w") or 0)),
             "api_url": reverse("mismatch_fdd_api"),
         },
     )
@@ -250,7 +266,7 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
     data = request.POST if request.method == "POST" else request.GET
 
     try:
-        plant_id = int((data.get("plant_id") or "0").strip())
+        plant_id = int((data.get("plant_id") or data.get("plant_pk") or data.get("pk") or "0").strip())
     except Exception:
         return _json_response_strict({"ok": False, "error": "plant_id inválido"}, status=400)
 
@@ -353,7 +369,7 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
         return _json_response_strict({"ok": False, "error": "Sem registros no range para as fontes selecionadas."}, status=404)
 
     # ----------------------------
-    # Agrupa por timestamp e source (DUMP)
+    # Agrupa por timestamp e source
     # ----------------------------
     per_ts: Dict[datetime, Dict[str, Dict[str, Any]]] = {}
     for r in rows:
@@ -379,7 +395,7 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
     inv_cov: List[Optional[float]] = [None] * n
     flag_inv_missing: List[bool] = [False] * n
 
-    # meteo (pega de um row por ts)
+    # meteo (um row por ts)
     gti: List[Optional[float]] = [None] * n
     ghi: List[Optional[float]] = [None] * n
     dni: List[Optional[float]] = [None] * n
@@ -389,7 +405,7 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
     rh: List[Optional[float]] = [None] * n
     flag_meteo_missing: List[bool] = [False] * n
 
-    # por source (para tabela/strings)
+    # por source
     series_by_source: Dict[str, Dict[str, List[Optional[float]]]] = {
         src: {
             "p_ac_w": [None] * n,
@@ -482,15 +498,15 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
     hm_day_local = [t.date().isoformat() for t in x_local_dt]
     hm_minute_local = [t.hour * 60 + t.minute for t in x_local_dt]
 
-    # GPOA usado: GTI se existir, senão GHI
-    g_poa_used = [gti_i if gti_i is not None else ghi_i for gti_i, ghi_i in zip(gti, ghi)]
+    # POA final (GTI se existir; senão transposição; fallback: GHI)
+    g_poa_used: List[Optional[float]] = [None] * n
 
     def _gf(key: str, default: float) -> float:
         raw = (data.get(key) or "").strip()
         if not raw:
             return float(default)
         try:
-            return float(raw)
+            return float(str(raw).replace(",", "."))
         except Exception:
             return float(default)
 
@@ -499,14 +515,18 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
         if not raw:
             return int(default)
         try:
-            return int(float(raw))
+            return int(float(str(raw).replace(",", ".")))
         except Exception:
             return int(default)
 
+    # >>> UI manda gpoa_min/pmin_w; aceitamos também gpoa_gate como alias “técnico”
+    gpoa_gate = _gf("gpoa_gate", _gf("gpoa_min", 50.0))
+    pmin_w = _gf("pmin_w", 0.0)
+
     thr = MismatchThresholds(
-        gpoa_gate_wm2=_gf("gpoa_gate", 200.0),
+        gpoa_gate_wm2=gpoa_gate,
         warn_abs=_gf("warn_abs", 0.35),
-        fault_abs=_gf("fault_abs", 0.80),
+        fault_abs=_gf("fault_abs", 0.90),
         meteo_pos_abs=_gf("meteo_pos_abs", 0.25),
         shading_std_abs=_gf("shading_std_abs", 0.22),
         shading_window_points=_gi("shading_window_points", 6),
@@ -528,12 +548,17 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
             status=400,
         )
 
+    # ----------------------------
+    # power_model: P_expected + mismatch + valid + (tcell)
+    # e construção de g_poa_used coerente
+    # ----------------------------
     try:
         import numpy as np
         from core.services.power_model.power_model import (
             expected_and_mismatch,
             module_from_pvmodule,
             plant_from_details,
+            transpose_ghi_to_poa_isotropic,
         )
 
         mod = module_from_pvmodule(details.module)
@@ -560,13 +585,65 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
                     out[j] = np.nan
             return out
 
-        gpoa_np = list_to_np_nan(g_poa_used)
+        gti_np = list_to_np_nan(gti)
+        ghi_np = list_to_np_nan(ghi)
+        dni_np = list_to_np_nan(dni)
+        dhi_np = list_to_np_nan(dhi)
+
+        mask_gti = np.isfinite(gti_np)
+        has_any_gti = bool(mask_gti.any())
+
+        ghi_arg = ghi_np if np.isfinite(ghi_np).any() else None
+        dni_arg = dni_np if np.isfinite(dni_np).any() else None
+        dhi_arg = dhi_np if np.isfinite(dhi_np).any() else None
+
+        # tenta POA transposto
+        g_poa_transpo = None
+        if (ghi_arg is not None) and (times_utc is not None):
+            lat = getattr(pl, "lat_deg", None)
+            lon = getattr(pl, "lon_deg", None)
+            tilt = getattr(pl, "tilt_deg", None)
+            azs = getattr(pl, "azimuth_deg", None)
+            if None not in (lat, lon, tilt, azs):
+                shift_min = float(getattr(pl, "meteo_time_shift_minutes", 0.0) or 0.0)
+                trans = transpose_ghi_to_poa_isotropic(
+                    ghi=ghi_arg,
+                    dhi=dhi_arg,
+                    dni=dni_arg,
+                    times_utc=times_utc,
+                    lat_deg=float(lat),
+                    lon_deg=float(lon),
+                    tilt_deg=float(tilt),
+                    azimuth_deg=float(azs),
+                    albedo=float(getattr(pl, "albedo", 0.20) or 0.20),
+                    times_shift_minutes=shift_min,
+                )
+                g_poa_transpo = np.asarray(trans.get("g_poa"), dtype=float)
+
+        # POA final usado p/ gating/persistência/payload
+        if has_any_gti:
+            if g_poa_transpo is not None and g_poa_transpo.size == gti_np.size:
+                g_poa_used_np = np.where(mask_gti, gti_np, g_poa_transpo)
+            else:
+                g_poa_used_np = gti_np
+        else:
+            if g_poa_transpo is not None and g_poa_transpo.size == gti_np.size:
+                g_poa_used_np = g_poa_transpo
+            else:
+                g_poa_used_np = ghi_arg if ghi_arg is not None else np.full_like(gti_np, np.nan)
+
+        g_poa_used = [None if (not np.isfinite(v)) else float(v) for v in g_poa_used_np.tolist()]
+
         tamb_np = list_to_np_nan(temp_air)
         pac_real_np = list_to_np_nan(p_ac_w)
 
         sig = inspect.signature(expected_and_mismatch)
+
+        # se não há GTI, deixa o model transpor (quando suportado)
+        g_poa_for_model = None if (not has_any_gti) else g_poa_used_np
+
         kwargs: Dict[str, Any] = dict(
-            g_poa=gpoa_np,
+            g_poa=g_poa_for_model,
             tamb_c=tamb_np,
             pac_real_w=pac_real_np,
             module=mod,
@@ -575,12 +652,28 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
             n_points=60,
             eps_w=50.0,
         )
+
+        if not has_any_gti:
+            if "ghi" in sig.parameters:
+                kwargs["ghi"] = ghi_arg
+            if "dni" in sig.parameters:
+                kwargs["dni"] = dni_arg
+            if "dhi" in sig.parameters:
+                kwargs["dhi"] = dhi_arg
+            if "times_utc" in sig.parameters:
+                kwargs["times_utc"] = times_utc
+            if "use_transposition_if_needed" in sig.parameters:
+                kwargs["use_transposition_if_needed"] = True
+        else:
+            if "use_transposition_if_needed" in sig.parameters:
+                kwargs["use_transposition_if_needed"] = False
+            if "times_utc" in sig.parameters:
+                kwargs["times_utc"] = times_utc
+
         if "dt_minutes" in sig.parameters:
             kwargs["dt_minutes"] = 15.0
         if "window_minutes" in sig.parameters:
             kwargs["window_minutes"] = 60.0
-        if "times_utc" in sig.parameters:
-            kwargs["times_utc"] = times_utc
 
         out_model = expected_and_mismatch(**kwargs) or {}
         pac_expected = out_model.get("pac_expected_w")
@@ -620,17 +713,146 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
         logger.exception("Falha no power_model (mismatch_fdd_api) plant_id=%s", plant_id)
         return _json_response_strict({"ok": False, "error": f"{type(e).__name__}: {e}"}, status=500)
 
-    out_cls = classify_mismatch_series(
-        times_utc=times_utc,
-        mismatch_rel=mismatch_rel,
-        g_poa_wm2=g_poa_used,
-        valid=valid_model,
-        thresholds=thr,
-    )
-    codes = out_cls["codes"]
-    labels = out_cls["labels"]
+    # ----------------------------
+    # PIPELINE: Detecção (EWMA/CUSUM) + RCA
+    # ----------------------------
+    use_legacy = (data.get("legacy") or data.get("use_legacy") or "").strip().lower() in ("1", "true", "yes", "on")
 
-    persist = (data.get("persist") or "").strip().lower() in ("1", "true", "yes", "on")
+    # gating base adicional (UI)
+    base_gate: List[bool] = []
+    for i in range(n):
+        gp = g_poa_used[i]
+        pr = p_ac_w[i]
+        ok = bool(valid_model[i])
+        ok = ok and (gp is not None) and (float(gp) >= float(gpoa_gate))
+        ok = ok and (pr is not None) and (float(pr) >= float(pmin_w))
+        ok = ok and (not bool(flag_meteo_missing[i]))
+        ok = ok and (not bool(flag_inv_missing[i]))
+        base_gate.append(ok)
+
+    if use_legacy:
+        out_cls = classify_mismatch_series(
+            times_utc=times_utc,
+            mismatch_rel=mismatch_rel,
+            g_poa_wm2=g_poa_used,
+            valid=base_gate,  # aplica gate para reduzir falso positivo também no legado
+            thresholds=thr,
+        )
+        codes = [int(c) for c in out_cls["codes"]]
+        labels = [str(x) for x in out_cls["labels"]]
+        valid_period = [bool(v) for v in base_gate]
+        anomaly = [False] * n
+        stable_sky = [False] * n
+        det_dbg = {}
+        rca_dbg = {}
+        pipeline_name = "legacy_mismatch_classifier"
+
+    else:
+        try:
+            from core.services.fdd.detection import DetectionParams, detect_anomalies
+            from core.services.fdd.rca import RCAParams, diagnose_rca_series
+        except Exception as e:
+            return _json_response_strict(
+                {"ok": False, "error": f"ImportError fdd/detection ou fdd/rca: {type(e).__name__}: {e}"},
+                status=500,
+            )
+
+        det_params = DetectionParams(
+            gpoa_gate_wm2=float(gpoa_gate),
+            stable_cv_max=_gf("stable_cv_max", 0.08),
+            stable_window_points=_gi("stable_window_points", 6),
+            ewma_lambda=_gf("ewma_lambda", 0.20),
+            ewma_L=_gf("ewma_L", 3.0),
+            cusum_k=_gf("cusum_k", 0.50),
+            cusum_h=_gf("cusum_h", 8.0),
+            min_baseline_points=_gi("min_baseline_points", 24),
+            inv_cov_min=_gf("inv_cov_min", 0.30),
+        )
+
+        det = detect_anomalies(
+            mismatch_rel=mismatch_rel,
+            g_poa_wm2=g_poa_used,
+            valid_model=base_gate,  # gate base + flags
+            flag_meteo_missing=flag_meteo_missing,
+            flag_inv_missing=flag_inv_missing,
+            inv_coverage=inv_cov,
+            params=det_params,
+        ) or {}
+
+        valid_period = [bool(v) for v in (det.get("valid_period") or base_gate)]
+        anomaly = [bool(v) for v in (det.get("anomaly") or [False] * n)]
+        stable_sky = [bool(v) for v in (det.get("stable_sky") or [False] * n)]
+        det_dbg = {
+            "z": det.get("z"),
+            "ewma_z": det.get("ewma_z"),
+            "cusum": det.get("cusum"),
+            "baseline": det.get("baseline"),
+        }
+
+        # tenta cap do inversor p/ clipping (opcional)
+        pac_cap_w = None
+        try:
+            inv_obj = getattr(details, "inverter", None)
+            for attr in ("pac_nom_w", "p_ac_nom_w", "rated_power_w", "pnom_w", "pac_nom_kw", "rated_power_kw"):
+                vv = getattr(inv_obj, attr, None) if inv_obj is not None else None
+                if vv is None:
+                    continue
+                pac_cap_w = float(vv) * (1000.0 if str(attr).endswith("_kw") else 1.0)
+                break
+        except Exception:
+            pac_cap_w = None
+
+        rca_params = RCAParams(
+            warn_abs=float(thr.warn_abs),
+            fault_abs=float(thr.fault_abs),
+            min_baseline_points=_gi("rca_min_baseline_points", 24),
+        )
+
+        rca = diagnose_rca_series(
+            anomaly=anomaly,
+            valid_period=valid_period,
+            mismatch_rel=mismatch_rel,
+            v_dc_v=v_dc_v,
+            i_dc_a=i_dc_a,
+            pac_real_w=p_ac_w,
+            pac_model_w=pac_model_w,
+            flag_inv_missing=flag_inv_missing,
+            flag_meteo_missing=flag_meteo_missing,
+            inv_coverage=inv_cov,
+            pac_cap_w=pac_cap_w,
+            params=rca_params,
+        ) or {}
+
+        rca_codes_raw = rca.get("codes") or [0] * n
+        rca_labels_raw = rca.get("labels") or ["normal"] * n
+
+        codes: List[int] = [CODE_INVALID] * n
+        labels: List[str] = ["invalid"] * n
+
+        for i in range(n):
+            if not valid_period[i]:
+                codes[i] = CODE_INVALID
+                labels[i] = "invalid"
+                continue
+            if not anomaly[i]:
+                codes[i] = 0
+                labels[i] = "normal"
+                continue
+            try:
+                c = int(rca_codes_raw[i])
+            except Exception:
+                c = 2
+            lbl = str(rca_labels_raw[i] or "anom")
+            codes[i] = c
+            labels[i] = lbl
+
+        rca_dbg = {"baseline": rca.get("baseline")}
+        pipeline_name = "ewma_cusum_detection + rca_patterns"
+
+    # ----------------------------
+    # Persistência
+    # ----------------------------
+    persist = (data.get("persist") or data.get("save") or "").strip().lower() in ("1", "true", "yes", "on")
     upsert = None
     if persist:
         upsert = _upsert_diag15m(
@@ -638,7 +860,7 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
             times_utc=times_utc,
             codes=codes,
             labels=labels,
-            valid=valid_model,
+            valid=valid_period,  # <<< FIX: salva só o que foi "avaliado" (gate + céu estável)
             g_poa=g_poa_used,
             tcell_c=tcell_c,
             pac_real_w=p_ac_w,
@@ -646,19 +868,8 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
             mismatch_rel=mismatch_rel,
         )
 
-    def _mean_abs_valid() -> Optional[float]:
-        buf: List[float] = []
-        for v_ok, mi, code in zip(valid_model, mismatch_rel, codes):
-            if (not v_ok) or int(code) == CODE_INVALID:
-                continue
-            if mi is None:
-                continue
-            buf.append(abs(float(mi)))
-        return (sum(buf) / len(buf)) if buf else None
-
     # ----------------------------
-    # DUMP por "tkey" (YYYY-MM-DDTHH:MM local)
-    # -> usado no front ao clicar no quadrado
+    # DUMP por tkey (mantido)
     # ----------------------------
     dump_fields = [
         "p_ac_w", "p_dc_w", "e_ac_wh_15", "v_dc_v", "i_dc_a", "v_ac_v", "i_ac_a",
@@ -669,13 +880,12 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
     dump_by_tkey: Dict[str, Any] = {}
     for ts_utc in times_utc:
         tloc = ts_utc.astimezone(tz)
-        tkey = tloc.strftime("%Y-%m-%dT%H:%M")  # SEM offset (compatível com seu JS normTimeKey)
+        tkey = tloc.strftime("%Y-%m-%dT%H:%M")
 
         by_src = per_ts.get(ts_utc, {})
         src_dump: Dict[str, Any] = {}
         meteo_dump: Dict[str, Any] = {}
 
-        # meteos (pega do primeiro row disponível do ts)
         any_row = None
         for sname in selected_sources:
             rr = by_src.get(sname)
@@ -684,7 +894,7 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
                 break
 
         if any_row is not None:
-            for k in ["gti","ghi","dni","dhi","temp_air","wind_speed","rh","flag_meteo_missing"]:
+            for k in ["gti", "ghi", "dni", "dhi", "temp_air", "wind_speed", "rh", "flag_meteo_missing"]:
                 meteo_dump[k] = any_row.get(k)
 
         for sname in selected_sources:
@@ -711,7 +921,7 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
             "meteo": meteo_dump,
         }
 
-    # mapa opcional (front usa se existir)
+    # mapa opcional (front usa)
     rca_code_to_sev = {
         str(CODE_INVALID): "none",
         "0": "ok",
@@ -721,8 +931,18 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
         "4": "crit",
     }
 
+    # resumo simples
+    sev_counts = {"none": 0, "ok": 0, "anom": 0, "crit": 0}
+    for c, v in zip(codes, valid_period):
+        if not v or int(c) == int(CODE_INVALID):
+            sev_counts["none"] += 1
+            continue
+        sev = rca_code_to_sev.get(str(int(c)), "anom")
+        sev_counts[sev] = sev_counts.get(sev, 0) + 1
+
     payload = {
         "ok": True,
+        "pipeline": pipeline_name,
         "plant": {"id": plant.id, "nome": plant.nome, "tz": tz_name},
         "range": {
             "start": d0.isoformat(),
@@ -745,13 +965,20 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
         "series": {
             "t_local": x_local,
             "t_utc": x_utc,
+
+            # meteo
             "g_poa": g_poa_used,
-            "labels": labels,
-            "codes": codes,
+            "g_poa_used": g_poa_used,
+            "gti": gti,
+            "ghi": ghi,
+            "dni": dni,
+            "dhi": dhi,
+            "temp_air": temp_air,
+            "wind_speed": wind_speed,
+            "rh": rh,
+            "flag_meteo_missing": flag_meteo_missing,
 
-            "hm_day_local": hm_day_local,
-            "hm_minute_local": hm_minute_local,
-
+            # oper
             "p_ac_w": p_ac_w,
             "p_ac_real_w": p_ac_w,
             "p_dc_w": p_dc_w,
@@ -763,34 +990,44 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
             "inv_coverage": inv_cov,
             "flag_inv_missing": flag_inv_missing,
 
-            "gti": gti,
-            "ghi": ghi,
-            "dni": dni,
-            "dhi": dhi,
-            "temp_air": temp_air,
-            "wind_speed": wind_speed,
-            "rh": rh,
-            "flag_meteo_missing": flag_meteo_missing,
-
+            # model
             "p_ac_model_w": pac_model_w,
             "tcell_c": tcell_c,
             "mismatch_rel": mismatch_rel,
 
-            "g_poa_used": g_poa_used,
+            # detecção + validade
             "valid_model": valid_model,
-            "valid": valid_model,
+            "valid_period": valid_period,
+            "valid": valid_period,  # <<< front usa "valid"
+            "stable_sky": stable_sky,
+            "anomaly": anomaly,
 
+            # rca
             "rca_code": codes,
             "rca_label": labels,
+            "codes": codes,
+            "labels": labels,
+
+            # heatmap helpers (local)
+            "hm_day_local": hm_day_local,
+            "hm_minute_local": hm_minute_local,
         },
         "series_by_source": series_by_source,
         "summary": {
-            "counts": out_cls.get("summary", {}),
-            "events": out_cls.get("events", []),
-            "mean_abs_mismatch_valid": _mean_abs_valid(),
+            "counts": sev_counts,
+            "events": [],
             "n_points": n,
         },
-        "thresholds": out_cls.get("thresholds", {}),
+        "thresholds": {
+            "gpoa_gate": gpoa_gate,
+            "pmin_w": pmin_w,
+            "warn_abs": float(thr.warn_abs),
+            "fault_abs": float(thr.fault_abs),
+        },
+        "debug": {
+            "det": det_dbg,
+            "rca": rca_dbg,
+        },
         "persist": upsert,
     }
 

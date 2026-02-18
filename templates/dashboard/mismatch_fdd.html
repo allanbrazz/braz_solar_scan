@@ -5,7 +5,6 @@
 {% block title %}FDD — Mismatch{% endblock %}
 
 {% block extra_head %}
-  <!-- Chart.js -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 
   <style>
@@ -53,17 +52,12 @@
 
     .mono{ font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
 
-    /* =========================================================
-       Botões personalizados (mesma “família” do Dashboard)
-       ========================================================= */
     .btn-glow{
       display:inline-flex;
       align-items:center;
       justify-content:center;
       gap:.55rem;
-
       padding: .70rem .95rem;
-
       border-radius: 14px;
       border: 1px solid rgba(110,210,255,.35);
       background: linear-gradient(180deg, rgba(110,210,255,.22), rgba(90,200,255,.08));
@@ -71,10 +65,8 @@
       text-decoration:none;
       font-weight: 750;
       letter-spacing: .2px;
-
       box-shadow: 0 10px 24px rgba(0,0,0,.22);
       transition: transform .12s ease, box-shadow .12s ease, border-color .12s ease, background .12s ease;
-
       cursor: pointer;
       appearance: none;
       -webkit-appearance: none;
@@ -124,7 +116,6 @@
     }
     .btn-glow .label{ line-height: 1; }
 
-    /* Ações alinhadas no “slot” do Reset */
     .ctl-actions{
       display:flex;
       gap: 10px;
@@ -133,7 +124,6 @@
     }
     .ctl-actions .btn-glow{ padding: .62rem .85rem; border-radius: 14px; }
 
-    /* KPIs */
     .kpi{
       display:grid; grid-template-columns: repeat(6, minmax(0, 1fr));
       gap: .75rem;
@@ -155,7 +145,6 @@
     .chart-wrap{ position: relative; height: 330px; width: 100%; }
     .chart-wrap.sm{ height: 280px; }
 
-    /* Heatmap */
     .hm-wrap{
       width:100%;
       border: 1px solid rgba(255,255,255,.12);
@@ -163,10 +152,8 @@
       padding: 10px;
       margin-top:.8rem;
       background: rgba(255,255,255,.03);
-
       overflow-x: hidden;
       overflow-y: auto;
-
       display:flex;
       justify-content:center;
       align-items:flex-start;
@@ -175,9 +162,8 @@
       display:block;
       border-radius: 12px;
       border: 1px solid rgba(255,255,255,.10);
-      background: rgba(10,20,40,.25);
+      background: rgba(10,20,40,.22);
       cursor: pointer;
-
       max-width: 100%;
       height: auto;
     }
@@ -194,16 +180,15 @@
     }
     .dot{ width:11px; height:11px; border-radius:99px; box-shadow: 0 0 0 1px rgba(0,0,0,.18) inset; }
 
+    /* branco=sem dados, verde=normal, amarelo=warn, vermelho=falha */
     :root{
-      --hm-none: rgba(255,255,255,.85);
-      --hm-ok:   rgba(70,230,140,.95);
-      --hm-anom: rgba(255,210, 90,.95);
-      --hm-crit: rgba(255, 90,110,.95);
-      --hm-grid: rgba(255,255,255,.08);
-      --hm-text: rgba(233,246,255,.92);
-      --hm-text2: rgba(233,246,255,.75);
-      --hm-sel: rgba(90,200,255,.95);
+      --hm-none: #a0a2a786;   /* sem dados -> cinza escuro */
+      --hm-ok:   #46e68c;
+      --hm-warn: #ffd25a;
+      --hm-crit: #ff5a6e;
+      --hm-sel:  rgba(90,200,255,.95);
     }
+
 
     .status{
       display:flex; align-items:center; gap:.6rem; flex-wrap:wrap;
@@ -221,10 +206,6 @@
     }
     @keyframes sp{ to{ transform: rotate(360deg); } }
 
-    /* =========================================================
-       Drawer lateral (detalhe do ponto)
-       - ações abaixo do cabeçalho
-       ========================================================= */
     .detail-drawer{
       position: fixed;
       top: 0; right: 0;
@@ -232,34 +213,25 @@
       width: 440px;
       max-width: 92vw;
       z-index: 50;
-
       border-left: 1px solid rgba(255,255,255,.12);
       background: rgba(12,18,32,.96);
       box-shadow: -24px 0 48px rgba(0,0,0,.38);
-
       transform: translateX(110%);
       transition: transform .18s ease;
       display:flex;
       flex-direction: column;
       pointer-events: none;
     }
-    .detail-drawer.open{
-      transform: translateX(0%);
-      pointer-events: auto;
-    }
+    .detail-drawer.open{ transform: translateX(0%); pointer-events: auto; }
 
     .detail-drawer .hd{
       padding: 14px 14px 12px;
       border-bottom: 1px solid rgba(255,255,255,.10);
       display:flex;
-      flex-direction: column;  /* ações abaixo */
+      flex-direction: column;
       gap: 10px;
     }
-    .detail-drawer .title{
-      margin:0;
-      font-size: 1.02rem;
-      font-weight: 800;
-    }
+    .detail-drawer .title{ margin:0; font-size: 1.02rem; font-weight: 800; }
     .detail-drawer .meta{
       margin:.25rem 0 0;
       opacity:.82;
@@ -271,17 +243,13 @@
       display:flex;
       gap: 10px;
       align-items:center;
-      justify-content:flex-end; /* bem à direita */
+      justify-content:flex-end;
       flex-wrap: wrap;
       width: 100%;
     }
     .detail-drawer .actions .btn-glow{ padding: .60rem .82rem; }
 
-    .detail-drawer .body{
-      padding: 12px 14px 14px;
-      overflow: auto;
-      flex: 1 1 auto;
-    }
+    .detail-drawer .body{ padding: 12px 14px 14px; overflow: auto; flex: 1 1 auto; }
 
     table.kv{
       width:100%;
@@ -319,14 +287,11 @@
 
 {% block content %}
 <div id="fddPage" class="dash" data-api="{% url 'mismatch_fdd_api' %}">
-  <!-- Header + Controles -->
   <div class="card glass span-12">
     <div class="page-head">
       <div style="min-width:0;">
         <h1>FDD — Mismatch</h1>
-        <div class="sub">
-          Clique num quadrado para ver os dados operativos daquele instante.
-        </div>
+        <div class="sub">Clique num quadrado para ver os dados operativos daquele instante (inclusive quando não houver dados).</div>
       </div>
 
       <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
@@ -345,17 +310,17 @@
     <div style="height:.8rem"></div>
 
     <div class="ctl-row">
-        <div class="ctl">
-          <label>Planta</label>
-          <select id="plant_id">
-            {% for p in plants %}
-              <option value="{{ p.id }}"
-                {% if plant_id and plant_id|stringformat:"s" == p.id|stringformat:"s" %}selected{% endif %}>
-                {% firstof p.nome p.name %}
-              </option>
-            {% endfor %}
-          </select>
-        </div>
+      <div class="ctl">
+        <label>Planta</label>
+        <select id="plant_id">
+          {% for p in plants %}
+            <option value="{{ p.id }}"
+              {% if plant_id and plant_id|stringformat:"s" == p.id|stringformat:"s" %}selected{% endif %}>
+              {% firstof p.nome p.name %}
+            </option>
+          {% endfor %}
+        </select>
+      </div>
 
       <div class="ctl sm">
         <label for="start">Início</label>
@@ -368,7 +333,7 @@
       </div>
 
       <div class="ctl sm">
-        <label for="dt_minutes">Resolução (min)</label>
+        <label for="dt_minutes">Bin do heatmap (min)</label>
         <select id="dt_minutes">
           <option value="5"  {% if dt_minutes == 5 %}selected{% endif %}>5</option>
           <option value="10" {% if dt_minutes == 10 %}selected{% endif %}>10</option>
@@ -378,19 +343,18 @@
         </select>
       </div>
 
-      <!-- PREFILL robusto (server + client): warn=0.35, crit=0.90, gpoa_min=50 -->
       <div class="ctl sm">
         <label for="warn_abs">Limiar WARN (|mismatch|)</label>
         <input id="warn_abs" type="number" step="0.01" min="0" value="{{ warn_abs|default_if_none:0.35 }}">
       </div>
 
       <div class="ctl sm">
-        <label for="fault_abs">Limiar CRIT (mismatch ≤ −)</label>
+        <label for="fault_abs">Limiar FALHA (mismatch ≤ −)</label>
         <input id="fault_abs" type="number" step="0.01" min="0" value="{{ fault_abs|default_if_none:0.90 }}">
       </div>
 
       <div class="ctl sm">
-        <label for="gpoa_min">GPOA mínimo (W/m²)</label>
+        <label for="gpoa_min">GPOA gate (W/m²)</label>
         <input id="gpoa_min" type="number" step="1" min="0" value="{{ gpoa_min|default_if_none:50 }}">
       </div>
 
@@ -399,11 +363,10 @@
         <input id="pmin_w" type="number" step="1" min="0" value="{{ pmin_w|default_if_none:0 }}">
       </div>
 
-      <!-- AÇÕES -->
       <div class="ctl" style="min-width: 320px;">
         <label>&nbsp;</label>
         <div class="ctl-actions">
-          <button class="btn-glow" id="btnRun" type="button" title="Executar FDD (mismatch)">
+          <button class="btn-glow" id="btnRun" type="button" title="Executar FDD (detecção + RCA)">
             <svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
               <path d="M8 5v14l11-7-11-7Z" fill="rgba(233,246,255,.92)"/>
             </svg>
@@ -439,19 +402,17 @@
     </div>
   </div>
 
-  <!-- KPIs -->
   <div class="card glass span-12">
     <div class="kpi" id="kpiGrid">
-      <div class="tile"><p class="t">Pontos</p><p class="v" id="kpiPts">—</p><p class="s">total na série</p></div>
-      <div class="tile"><p class="t">Válidos</p><p class="v" id="kpiValid">—</p><p class="s">valid_model != false</p></div>
-      <div class="tile"><p class="t">OK</p><p class="v" id="kpiOk">—</p><p class="s">sev=ok</p></div>
-      <div class="tile"><p class="t">WARN</p><p class="v" id="kpiAnom">—</p><p class="s">sev=anom</p></div>
-      <div class="tile"><p class="t">CRIT</p><p class="v" id="kpiCrit">—</p><p class="s">sev=crit</p></div>
+      <div class="tile"><p class="t">Bins</p><p class="v" id="kpiPts">—</p><p class="s">total no heatmap</p></div>
+      <div class="tile"><p class="t">Normal</p><p class="v" id="kpiOk">—</p><p class="s">verde</p></div>
+      <div class="tile"><p class="t">Warn</p><p class="v" id="kpiWarn">—</p><p class="s">amarelo</p></div>
+      <div class="tile"><p class="t">Falha</p><p class="v" id="kpiCrit">—</p><p class="s">vermelho</p></div>
+      <div class="tile"><p class="t">Sem dados</p><p class="v" id="kpiNoData">—</p><p class="s">branco</p></div>
       <div class="tile"><p class="t">Intervalo</p><p class="v" id="kpiRange">—</p><p class="s">start → end</p></div>
     </div>
   </div>
 
-  <!-- Curvas -->
   <div class="card glass span-12">
     <h3 style="margin-top:0">Mismatch ao longo do tempo</h3>
     <div class="chart-wrap"><canvas id="chartMismatch"></canvas></div>
@@ -462,22 +423,21 @@
     <div class="chart-wrap sm"><canvas id="chartPower"></canvas></div>
   </div>
 
-  <!-- Heatmap -->
   <div class="card glass span-12">
     <div class="hm-head">
       <div style="min-width:0;">
         <h3 style="margin-top:0">Heatmap — dia × bin (canvas)</h3>
         <div class="hm-sub">
-          Linhas = dias • Colunas = bins de <b id="hmBinLbl">15</b> min • Cor = severidade.
-          Clique em um quadrado para fixar o ponto e ver os dados operativos (aba lateral).
+          Linhas = dias • Colunas = bins de <b id="hmBinLbl">15</b> min •
+          branco=sem dados, verde=normal, amarelo=warn, vermelho=falha.
         </div>
       </div>
 
       <div class="legend">
-        <span class="badge"><span class="dot" style="background:var(--hm-none)"></span>none</span>
-        <span class="badge"><span class="dot" style="background:var(--hm-ok)"></span>ok</span>
-        <span class="badge"><span class="dot" style="background:var(--hm-anom)"></span>warn</span>
-        <span class="badge"><span class="dot" style="background:var(--hm-crit)"></span>crit</span>
+        <span class="badge"><span class="dot" style="background:var(--hm-none)"></span>sem dados</span>
+        <span class="badge"><span class="dot" style="background:var(--hm-ok)"></span>normal</span>
+        <span class="badge"><span class="dot" style="background:var(--hm-warn)"></span>warn</span>
+        <span class="badge"><span class="dot" style="background:var(--hm-crit)"></span>falha</span>
         <span class="badge"><span class="mono" id="hmBadgeTxt">—</span></span>
       </div>
     </div>
@@ -489,7 +449,6 @@
   </div>
 </div>
 
-<!-- Drawer lateral (detalhe do ponto) -->
 <aside id="detailDrawer" class="detail-drawer" aria-hidden="true">
   <div class="hd">
     <div style="min-width:0;">
@@ -497,7 +456,6 @@
       <div class="meta" id="detailMeta">—</div>
     </div>
 
-    <!-- AÇÕES abaixo do cabeçalho -->
     <div class="actions">
       <button class="btn-glow secondary" type="button" id="btnCopySel" title="Copiar JSON do ponto">
         <svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -525,8 +483,6 @@
   </div>
 
   <div class="body">
-    <!-- removido: "Principais variáveis (resumo)" -->
-
     <h4 style="margin:.2rem 0 .6rem;">Principais variáveis (todas as séries no índice)</h4>
     <table class="kv" id="detailAll"></table>
 
@@ -534,10 +490,6 @@
 
     <h4 style="margin:.2rem 0 .6rem;">Dump (todas as séries no índice)</h4>
     <pre class="dump" id="detailDump">{}</pre>
-
-    <div class="mono" style="opacity:.78; font-size:.82rem; margin-top:.55rem;">
-      Dica: o dump vem com nomes “humanos” (e o nome original entre parênteses).
-    </div>
   </div>
 </aside>
 
@@ -571,7 +523,7 @@
     if (!el) return fallback;
     let raw = String(el.value ?? "").trim();
     if (!raw) return fallback;
-    raw = raw.replace(",", "."); // tolera vírgula
+    raw = raw.replace(",", ".");
     const v = Number(raw);
     return Number.isFinite(v) ? v : fallback;
   }
@@ -599,24 +551,14 @@
     try{ return JSON.stringify(v); }catch(_e){ return String(v); }
   }
 
-  /* =========================================================
-     Prefill robusto: se vier vazio/ inválido, força defaults
-     ========================================================= */
   function normalizeNumberInput(id, def){
     const el = $(id);
     if (!el) return;
     let v = String(el.value ?? "").trim();
-    if (!v){
-      el.value = String(def);
-      return;
-    }
+    if (!v){ el.value = String(def); return; }
     v = v.replace(",", ".");
     const n = Number(v);
-    if (!Number.isFinite(n)){
-      el.value = String(def);
-      return;
-    }
-    el.value = String(n);
+    el.value = Number.isFinite(n) ? String(n) : String(def);
   }
 
   function prefillDefaultsIfEmpty(){
@@ -642,102 +584,47 @@
       if (!hasS) s.value = toYMD(start);
     }
 
-    // defaults warm/crit/gpoa_min sempre garantidos
     normalizeNumberInput("warn_abs", 0.35);
     normalizeNumberInput("fault_abs", 0.90);
     normalizeNumberInput("gpoa_min", 50);
     normalizeNumberInput("pmin_w", 0);
   }
 
-  /* =========================================================
-     Labels “humanos”
-     ========================================================= */
   const FIELD_LABELS = {
-    t_local: "Timestamp (local)",
-    x_local: "Timestamp (local)",
-    t: "Timestamp",
-    x: "Timestamp",
-
     mismatch_rel: "Mismatch relativo (P_real−P_model)/P_model",
-    mismatch: "Mismatch relativo (P_real−P_model)/P_model",
-    mm_rel: "Mismatch relativo (P_real−P_model)/P_model",
-    mm: "Mismatch",
-
-    p_ac_real_w: "Potência AC (real) [W]",
-    pac_real_w:  "Potência AC (real) [W]",
-    p_ac_w:      "Potência AC (real) [W]",
-    pac_w:       "Potência AC (real) [W]",
-    pac:         "Potência AC (real) [W]",
-
+    p_ac_real_w:  "Potência AC (real) [W]",
     p_ac_model_w: "Potência AC (modelo) [W]",
-    pac_model_w:  "Potência AC (modelo) [W]",
-    p_model_w:    "Potência AC (modelo) [W]",
-    p_ac_model:   "Potência AC (modelo) [W]",
-    pac_model:    "Potência AC (modelo) [W]",
-
-    valid_model: "Válido (modelo)",
-    valid_ok:    "Válido (modelo)",
-    valid:       "Válido (modelo)",
-
-    rca_code: "Código diagnóstico (RCA)",
-    codes:    "Código diagnóstico (RCA)",
-    code:     "Código diagnóstico (RCA)",
-
-    rca_label: "Rótulo diagnóstico (RCA)",
-    label_t:   "Rótulo diagnóstico (RCA)",
-    labels:    "Rótulo diagnóstico (RCA)",
-    label:     "Rótulo diagnóstico (RCA)",
-
-    gpoa_wm2: "GPOA (POA) [W/m²]",
-    poa_wm2:  "GPOA (POA) [W/m²]",
-    g_poa:    "GPOA (POA) [W/m²]",
-    poa:      "GPOA (POA) [W/m²]",
-    gpoa:     "GPOA (POA) [W/m²]",
-
-    ghi_wm2:  "GHI [W/m²]",
-    ghi:      "GHI [W/m²]",
-
-    tmod_c:   "Temperatura do módulo [°C]",
-    t_mod_c:  "Temperatura do módulo [°C]",
-    tmodule_c:"Temperatura do módulo [°C]",
-    tamb_c:   "Temperatura ambiente [°C]",
-    t_amb_c:  "Temperatura ambiente [°C]",
-
-    vdc_v: "Tensão DC (Vdc) [V]",
-    vdc:   "Tensão DC (Vdc) [V]",
-    idc_a: "Corrente DC (Idc) [A]",
-    idc:   "Corrente DC (Idc) [A]",
-    vac_v: "Tensão AC (Vac) [V]",
-    vac:   "Tensão AC (Vac) [V]",
-    iac_a: "Corrente AC (Iac) [A]",
-    iac:   "Corrente AC (Iac) [A]",
+    anomaly:      "Anomalia (detecção/IV)",
+    rca_code:     "Código diagnóstico (RCA)",
+    rca_label:    "Rótulo diagnóstico (RCA)",
+    g_poa:        "GPOA (POA) [W/m²]",
+    gti:          "GTI [W/m²]",
+    ghi:          "GHI [W/m²]",
+    v_dc_v:       "Tensão DC [V]",
+    i_dc_a:       "Corrente DC [A]",
+    inv_coverage: "Cobertura inversor",
   };
 
   function humanizeKey(s){
     const k = String(s || "");
     if (!k) return "—";
-    // snake_case -> "Snake case"
     const base = k.replace(/[_\-]+/g, " ").trim();
     if (!base) return k;
     return base.charAt(0).toUpperCase() + base.slice(1);
   }
 
-  // compact = só nome prático (sem literal)
   function prettyKeyCompact(k){
     const s = String(k || "");
     return FIELD_LABELS[s] || humanizeKey(s);
   }
 
-  // verbose = nome prático + (literal) para o dump
   function prettyKeyVerbose(k){
     const s = String(k || "");
     const human = FIELD_LABELS[s] || humanizeKey(s);
     return human ? `${human} (${s})` : s;
   }
 
-  /* =========================================================
-     Charts
-     ========================================================= */
+  /* Charts */
   let chartMismatch = null;
   let chartPower = null;
 
@@ -755,10 +642,7 @@
             boxWidth: 14, boxHeight: 14, padding: 18
           }
         },
-        tooltip: {
-          titleColor: "rgba(233,246,255,.98)",
-          bodyColor: "rgba(233,246,255,.95)"
-        }
+        tooltip: { titleColor: "rgba(233,246,255,.98)", bodyColor: "rgba(233,246,255,.95)" }
       },
       scales: {
         x: { ticks: { color: "rgba(233,246,255,.85)", maxTicksLimit: 10, font: { size: 12 } },
@@ -780,10 +664,9 @@
 
     const s = payload?.series || {};
     const t  = s.t_local || s.x_local || payload?.x_local || [];
-    const mm = s.mismatch_rel || s.mismatch || s.mm_rel || [];
-
-    const pr = s.p_ac_real_w  || s.p_ac_w || s.pac_real_w || s.pac_w || [];
-    const pm = s.p_ac_model_w || s.p_model_w || s.pac_model_w || s.pac_model || [];
+    const mm = s.mismatch_rel || [];
+    const pr = s.p_ac_real_w  || s.p_ac_w || s.pac_w || [];
+    const pm = s.p_ac_model_w || s.p_model_w || [];
 
     chartMismatch = new Chart($("chartMismatch"), {
       type: "line",
@@ -812,29 +695,21 @@
     });
   }
 
-  /* =========================================================
-     Séries / Aliases
-     ========================================================= */
+  /* Séries / Aliases */
   function seriesAt(payload, key, idx){
     const s = payload?.series || {};
     const ALIASES = {
       t_local:      ["x_local","t","x"],
-      p_ac_real_w:  ["pac_real_w","p_ac_w","pac_w","pac"],
-      p_ac_model_w: ["pac_model_w","p_model_w","p_ac_model","pac_model"],
       mismatch_rel: ["mismatch","mm_rel","mm"],
-      valid:        ["valid_model","valid_ok"],
-      label:        ["rca_label","label_t","labels"],
-      code:         ["rca_code","codes"],
-
-      gpoa_wm2:     ["poa_wm2","g_poa","irr_poa_wm2","poa","gpoa"],
-      ghi_wm2:      ["ghi","g_hi","irr_ghi_wm2"],
-      tmod_c:       ["t_mod_c","tmodule_c","module_temp_c","temp_module_c","tmod"],
-      tamb_c:       ["t_amb_c","ambient_temp_c","temp_amb_c","tamb"],
-
-      vdc_v:        ["v_dc_v","vdc","dc_voltage_v","v_dc"],
-      idc_a:        ["i_dc_a","idc","dc_current_a","i_dc"],
-      vac_v:        ["v_ac_v","vac","ac_voltage_v","v_ac"],
-      iac_a:        ["i_ac_a","iac","ac_current_a","i_ac"],
+      code:         ["rca_code","codes","diag_code","diagnostic_code"],
+      label:        ["rca_label","label_t","labels","diag_label","diagnostic_label"],
+      anomaly:      ["anomaly_iv","iv_anomaly","iv_ran_anomaly","iv_flag","anom","is_anomaly","anomalous","anomaly_flag"],
+      cls:          ["hm_class","hm_sev","severity","sev","status","class","classification"],
+      g_poa:        ["gpoa","g_poa_wm2","poa","poa_wm2","poa_irr","g_poa_pyr","g_poa_est"],
+      p_ac_real_w:  ["p_ac_w","pac_w","pac","p_real_w","p_ac_real","p_ac_real"],
+      v_dc_v:       ["v_dc","vdc","v_dc_volt"],
+      i_dc_a:       ["i_dc","idc","i_dc_amp"],
+      inv_coverage: ["inv_cov","coverage","has_inv","inverter_coverage","inv_present"],
     };
     const keys = [key, ...((ALIASES[key] || []))];
     for (const k of keys){
@@ -844,78 +719,161 @@
     return null;
   }
 
-  function sevFromCode(code){
-    const c = Number(code);
-    if (!Number.isFinite(c) || c === 0) return "none";
-    if (c === 1) return "ok";
-    if (c === 3) return "crit";
-    return "anom";
+  function numVal(v){
+    if (v === null || v === undefined) return null;
+    if (typeof v === "number") return Number.isFinite(v) ? v : null;
+    if (typeof v === "boolean") return v ? 1 : 0;
+    if (typeof v === "string"){
+      const s = v.trim();
+      if (!s) return null;
+      const n = Number(s.replace(",", "."));
+      return Number.isFinite(n) ? n : null;
+    }
+    return null;
   }
 
-  function sevFromLabel(lbl){
-    const s = String(lbl ?? "").trim().toLowerCase();
-    if (!s || s === "invalid") return "none";
-    if (s === "normal") return "ok";
-    if (s.includes("string_disconnected") || s.includes("disconnected")) return "crit";
-    return "anom";
+  function isExplicitTrue(v){
+    if (v === true || v === 1) return true;
+    if (typeof v === "string"){
+      const s = v.trim().toLowerCase();
+      return (s === "true" || s === "1" || s === "yes" || s === "y" || s === "sim");
+    }
+    return false;
   }
 
-  function sevFromMismatch(mm){
-    const m = Number(mm);
-    if (!Number.isFinite(m)) return "none";
-    const warnAbs  = Math.max(0, getNum("warn_abs", 0.35));
-    const faultAbs = Math.max(0, getNum("fault_abs", 0.90));
-    if (m <= -faultAbs) return "crit";
-    if (Math.abs(m) >= warnAbs) return "anom";
-    return "ok";
+  function isNoDataClass(raw){
+    const s = String(raw ?? "").trim().toLowerCase();
+    return ["missing","no_data","nodata","sem dados","sem_dados","idle"].includes(s);
   }
 
-  function pointSeverity(payload, idx){
-    const vOK = seriesAt(payload, "valid", idx);
-    if (vOK === false) return { sev: "none", reason: "valid=false" };
-
-    const code = seriesAt(payload, "code", idx);
-    if (code != null && code !== "") return { sev: sevFromCode(code), reason: "rca_code", code };
-
-    const lbl = seriesAt(payload, "label", idx);
-    if (lbl != null && String(lbl).trim() !== "") return { sev: sevFromLabel(lbl), reason: "label", lbl };
-
-    const mm = seriesAt(payload, "mismatch_rel", idx);
-    return { sev: sevFromMismatch(mm), reason: "mismatch", mm };
-  }
-
-  /* =========================================================
-     KPIs
-     ========================================================= */
-  function setKpis(payload){
-    const s = payload?.series || {};
-    const t = s.t_local || s.x_local || payload?.x_local || [];
-    const pts = Array.isArray(t) ? t.length : 0;
-
-    let valid = 0, ok = 0, anom = 0, crit = 0;
-    for (let i=0; i<pts; i++){
-      const vOK = seriesAt(payload, "valid", i);
-      if (vOK !== false) valid++;
-      const sev = pointSeverity(payload, i).sev;
-      if (sev === "ok") ok++;
-      else if (sev === "anom") anom++;
-      else if (sev === "crit") crit++;
+  function hasInverterSample(payload, idx){
+    const cov = seriesAt(payload, "inv_coverage", idx);
+    if (cov !== null && cov !== undefined && String(cov).trim() !== ""){
+      if (typeof cov === "boolean") return cov;
+      const n = numVal(cov);
+      if (n !== null) return n > 0;
     }
 
-    const rs = payload?.range?.start || ($("start")?.value || "—");
-    const re = payload?.range?.end   || ($("end")?.value || "—");
+    const pac = seriesAt(payload, "p_ac_real_w", idx);
+    if (pac !== null && pac !== undefined && String(pac).trim() !== ""){
+      const n = numVal(pac);
+      if (n !== null) return true; // 0 conta como “há leitura”, se veio no payload
+    }
 
-    $("kpiPts").textContent = pts ? String(pts) : "—";
-    $("kpiValid").textContent = pts ? String(valid) : "—";
-    $("kpiOk").textContent = pts ? String(ok) : "—";
-    $("kpiAnom").textContent = pts ? String(anom) : "—";
-    $("kpiCrit").textContent = pts ? String(crit) : "—";
-    $("kpiRange").textContent = `${rs} → ${re}`;
+    const vdc = seriesAt(payload, "v_dc_v", idx);
+    const idc = seriesAt(payload, "i_dc_a", idx);
+    if (numVal(vdc) !== null || numVal(idc) !== null) return true;
+
+    return false;
   }
 
-  /* =========================================================
-     Heatmap canvas (dia × bin)
-     ========================================================= */
+  function passesGpoaGate(payload, idx){
+    const gate = Math.max(0, getNum("gpoa_min", 0));
+    if (!(gate > 0)) return true;
+    const g = numVal(seriesAt(payload, "g_poa", idx));
+    if (g === null) return true; // sem GPOA no payload -> não bloqueia
+    return g >= gate;
+  }
+
+  function passesPmin(payload, idx){
+    const pmin = Math.max(0, getNum("pmin_w", 0));
+    if (!(pmin > 0)) return true;
+    const pac = numVal(seriesAt(payload, "p_ac_real_w", idx));
+    if (pac === null) return false;
+    return pac >= pmin;
+  }
+
+  // classes finais: none(branco), ok(verde), warn(amarelo), crit(vermelho)
+  function normalizeClass(v){
+    const s = String(v ?? "").trim().toLowerCase();
+    if (!s) return "ok";
+
+    if (["missing","no_data","nodata","sem dados","sem_dados","idle"].includes(s)) return "none";
+    if (["ok","normal","green","pass","clean","clear","none"].includes(s)) return "ok";
+    if (["warn","warning","anom","anomaly","alert","yellow"].includes(s)) return "warn";
+    if (["crit","critical","fault","fail","failure","red"].includes(s)) return "crit";
+
+    if (/^\d+$/.test(s)){
+      const n = Number(s);
+      if (n <= 0) return "ok";
+      if (n === 1) return "warn";
+      return "crit";
+    }
+    return "warn";
+  }
+
+  function sevColor(cls){
+    const cs = getComputedStyle(document.documentElement);
+    if (cls === "crit") return cs.getPropertyValue("--hm-crit").trim();
+    if (cls === "warn") return cs.getPropertyValue("--hm-warn").trim();
+    if (cls === "ok")   return cs.getPropertyValue("--hm-ok").trim();
+    return cs.getPropertyValue("--hm-none").trim();
+  }
+
+  function classFromCode(payload, code){
+    const map = payload?.rca_code_to_sev || {};
+    const k = String(code ?? "").trim();
+    if (k !== "" && map && Object.prototype.hasOwnProperty.call(map, k)){
+      return normalizeClass(map[k]);
+    }
+    const c = Number(code);
+    if (!Number.isFinite(c)) return "ok";
+    if (c <= 0) return "ok";
+    if (c === 1) return "warn";
+    return "crit";
+  }
+
+  // regra base (sem considerar “sem dados/gate”)
+  function pointClass(payload, idx){
+    const rawCls = seriesAt(payload, "cls", idx);
+    if (rawCls != null && String(rawCls).trim() !== ""){
+      return { cls: normalizeClass(rawCls), reason: "backend_class", raw: rawCls };
+    }
+
+    const code = seriesAt(payload, "code", idx);
+    if (code != null && String(code).trim() !== ""){
+      return { cls: classFromCode(payload, code), reason: "rca_code", code };
+    }
+
+    const an = seriesAt(payload, "anomaly", idx);
+    if (isExplicitTrue(an)){
+      return { cls: "warn", reason: "anomaly/IV=true" };
+    }
+
+    return { cls: "ok", reason: "default_ok" };
+  }
+
+  // ✅ NOVO: classe VISUAL final (inclui “sem dados”/gates), sem perder click/idx quando existir
+  function pointVisualClass(payload, idx){
+    const rawCls = seriesAt(payload, "cls", idx);
+    if (rawCls != null && isNoDataClass(rawCls)){
+      return { cls: "none", reason: "backend_no_data", raw: rawCls };
+    }
+
+    const inv = hasInverterSample(payload, idx);
+    if (!inv){
+      return { cls: "none", reason: "no_inverter_sample" };
+    }
+
+    if (!passesGpoaGate(payload, idx)){
+      return { cls: "none", reason: "gpoa_below_gate" };
+    }
+
+    if (!passesPmin(payload, idx)){
+      return { cls: "none", reason: "p_below_pmin" };
+    }
+
+    return pointClass(payload, idx);
+  }
+
+  function classRank(cls){
+    if (cls === "crit") return 3;
+    if (cls === "warn") return 2;
+    if (cls === "ok")   return 1;
+    return 0; // none
+  }
+
+  /* Heatmap helpers */
   function ymdList(aYmd, bYmd){
     const out = [];
     const mA = String(aYmd||"").match(/^(\d{4})-(\d{2})-(\d{2})$/);
@@ -948,9 +906,10 @@
     return { day, minute: hh*60 + mi };
   }
 
+  // ✅ CORREÇÃO PRINCIPAL: criar entradas para TODOS os bins (inclusive sem dados), tornando-os clicáveis
   function buildCellMap(payload, dtm){
-    const start = payload?.range?.start || $("start")?.value;
-    const end   = payload?.range?.end   || $("end")?.value;
+    const start = (payload?.range?.start || $("start")?.value || "").slice(0,10);
+    const end   = (payload?.range?.end   || $("end")?.value   || "").slice(0,10);
 
     const days = ymdList(start, end);
     const dayToIdx = new Map(days.map((d,i)=>[d,i]));
@@ -962,8 +921,26 @@
     const hmDay = Array.isArray(s.hm_day_local) ? s.hm_day_local : null;
     const hmMin = Array.isArray(s.hm_minute_local) ? s.hm_minute_local : null;
 
+    // 1) preenche todos os bins com placeholder (branco), mas clicáveis
     const cell = new Map();
-    const bestDist = new Map();
+    for (let di=0; di<days.length; di++){
+      for (let ti=0; ti<nBins; ti++){
+        const key = `${di}|${ti}`;
+        cell.set(key, {
+          idx: null,                   // sem índice (não existe amostra)
+          cls: "none",                 // branco
+          reason: "no_data_bin",       // motivo
+          mm: null,
+          lbl: null,
+          code: null,
+          day: days[di],
+          minute: ti*dtm,
+        });
+      }
+    }
+
+    // 2) sobrescreve com amostras existentes (ok/warn/crit/none por gates), escolhendo a melhor por severidade e proximidade
+    const bestScore = new Map();
 
     for (let i=0; i<t.length; i++){
       let ds = (hmDay && i < hmDay.length) ? hmDay[i] : null;
@@ -984,37 +961,34 @@
 
       const binCenter = ti*dtm + dtm/2;
       const dist = Math.abs(Number(minutes) - binCenter);
-
       const key = `${di}|${ti}`;
-      const prev = bestDist.get(key);
-      if (prev != null && dist >= prev) continue;
-      bestDist.set(key, dist);
 
-      const sevObj = pointSeverity(payload, i);
+      const cinfo = pointVisualClass(payload, i);
+      const cls = cinfo.cls || "none";
+
+      const score = classRank(cls)*1_000_000 + (-dist);
+      const prev = bestScore.get(key);
+      if (prev != null && score <= prev) continue;
+      bestScore.set(key, score);
+
       const mm = seriesAt(payload, "mismatch_rel", i);
+      const mmNum = Number(mm);
       const lbl = seriesAt(payload, "label", i);
       const code = seriesAt(payload, "code", i);
 
       cell.set(key, {
-        idx: i,
-        sev: sevObj.sev,
-        mm: (mm == null ? null : Number(mm)),
+        idx: i,                 // agora existe índice
+        cls,
+        reason: cinfo.reason,
+        mm: (Number.isFinite(mmNum) ? mmNum : null),
         lbl: (lbl == null ? null : String(lbl)),
-        code: (code == null ? null : Number(code)),
+        code: (code == null ? null : String(code)),
         day: ds,
         minute: Number(minutes),
       });
     }
 
     return { days, nBins, cell };
-  }
-
-  function sevColor(sev){
-    const cs = getComputedStyle(document.documentElement);
-    if (sev === "crit") return cs.getPropertyValue("--hm-crit").trim();
-    if (sev === "anom") return cs.getPropertyValue("--hm-anom").trim();
-    if (sev === "ok")   return cs.getPropertyValue("--hm-ok").trim();
-    return cs.getPropertyValue("--hm-none").trim();
   }
 
   const hmState = {
@@ -1026,17 +1000,21 @@
     const wrap = $("hmWrap");
     const canvas = $("hmCanvas");
     if (!wrap || !canvas) return;
-
-    const W = canvas.width;
-    const H = canvas.height;
+    const W = canvas.width, H = canvas.height;
     if (!W || !H) return;
-
     const avail = Math.max(0, wrap.clientWidth - 2);
     if (!avail) return;
-
     const scale = Math.min(1, avail / W);
     canvas.style.width = (W * scale) + "px";
     canvas.style.height = (H * scale) + "px";
+  }
+
+  function binTimeStr(mins){
+    const m = Number(mins);
+    if (!Number.isFinite(m)) return "—";
+    const hh = String(Math.floor(m/60)).padStart(2,"0");
+    const mm = String(m%60).padStart(2,"0");
+    return `${hh}:${mm}`;
   }
 
   function drawHeatmapCanvas(){
@@ -1101,10 +1079,9 @@
       for (let ti=0; ti<nBins; ti++){
         const key = `${di}|${ti}`;
         const obj = hmState.cell.get(key);
-        const sev = obj ? obj.sev : "none";
+        const cls = obj ? obj.cls : "none";
         const x = pad + leftW + ti*(cell+gap);
-
-        ctx.fillStyle = sevColor(sev);
+        ctx.fillStyle = sevColor(cls);
         ctx.fillRect(x, y, cell, cell);
       }
     }
@@ -1126,6 +1103,28 @@
     fitHeatmapToWidth();
   }
 
+  function syncKpisFromHeatmap(){
+    const totalBins = hmState.days.length * hmState.nBins;
+    let ok=0, warn=0, crit=0, none=0, withIdx=0;
+
+    for (const v of hmState.cell.values()){
+      if (v.idx !== null && v.idx !== undefined) withIdx++;
+      if (v.cls === "ok") ok++;
+      else if (v.cls === "warn") warn++;
+      else if (v.cls === "crit") crit++;
+      else none++;
+    }
+
+    $("kpiPts").textContent = totalBins ? String(totalBins) : "—";
+    $("kpiOk").textContent = totalBins ? String(ok) : "—";
+    $("kpiWarn").textContent = totalBins ? String(warn) : "—";
+    $("kpiCrit").textContent = totalBins ? String(crit) : "—";
+    $("kpiNoData").textContent = totalBins ? String(none) : "—";
+
+    $("hmBadgeTxt").textContent =
+      `normal=${ok} | warn=${warn} | falha=${crit} | sem dados=${none} | bins com registro=${withIdx}`;
+  }
+
   function renderHeatmapCanvas(payload){
     hmState.payload = payload;
     hmState.dtm = Math.max(1, Number($("dt_minutes")?.value || 15));
@@ -1136,27 +1135,12 @@
     hmState.nBins = built.nBins;
     hmState.cell = built.cell;
 
-    let ok=0, anom=0, crit=0;
-    for (const v of hmState.cell.values()){
-      if (v.sev === "ok") ok++;
-      else if (v.sev === "anom") anom++;
-      else if (v.sev === "crit") crit++;
-    }
-    $("hmBadgeTxt").textContent = `ok=${ok} | warn=${anom} | crit=${crit} | bins com dado=${hmState.cell.size}`;
-
     if (hmState.selectedKey && !hmState.cell.has(hmState.selectedKey)){
       clearSelection();
     }
 
     drawHeatmapCanvas();
-  }
-
-  function binTimeStr(mins){
-    const m = Number(mins);
-    if (!Number.isFinite(m)) return "—";
-    const hh = String(Math.floor(m/60)).padStart(2,"0");
-    const mm = String(m%60).padStart(2,"0");
-    return `${hh}:${mm}`;
+    syncKpisFromHeatmap();
   }
 
   function pointSnapshot(payload, idx){
@@ -1195,6 +1179,23 @@
     dr.setAttribute("aria-hidden", "true");
   }
 
+  function syntheticDumpForEmptyBin(cellObj){
+    const gGate = Math.max(0, getNum("gpoa_min", 0));
+    const pMin  = Math.max(0, getNum("pmin_w", 0));
+    return {
+      "bin_day": cellObj?.day ?? null,
+      "bin_time": binTimeStr(cellObj?.minute),
+      "class": cellObj?.cls ?? "none",
+      "reason": cellObj?.reason ?? "no_data_bin",
+      "note": "Não há amostra do inversor para este bin (ou não foi possível associar um registro).",
+      "params": {
+        "dt_minutes": hmState.dtm,
+        "gpoa_min": gGate,
+        "pmin_w": pMin,
+      }
+    };
+  }
+
   function renderDetail(payload, cellObj){
     const meta = $("detailMeta");
     const tblAll = $("detailAll");
@@ -1209,40 +1210,39 @@
       return;
     }
 
-    const idx = cellObj.idx;
     const ds = cellObj.day;
     const ts = binTimeStr(cellObj.minute);
+    const idx = cellObj.idx;
 
-    const sevInfo = pointSeverity(payload, idx);
-    meta.textContent = `${ds} ${ts} • idx=${idx} • sev=${sevInfo.sev} (${sevInfo.reason})`;
+    // ✅ bin SEM índice: ainda abre drawer e mostra “sem dados”
+    if (idx === null || idx === undefined || idx < 0){
+      meta.textContent = `${ds} ${ts} • idx=— • class=${cellObj.cls} (${cellObj.reason || "—"})`;
+      const dd = syntheticDumpForEmptyBin(cellObj);
+
+      const items = Object.entries(dd).map(([k,v]) => ({ k, v, label: prettyKeyCompact(k) }));
+      items.sort((a,b) => String(a.label).localeCompare(String(b.label)));
+
+      tblAll.innerHTML = items.map(it => (
+        `<tr><td class="k mono">${String(it.label)}</td><td class="v mono">${fmtAny(it.v)}</td></tr>`
+      )).join("") || `<tr><td class="k mono">—</td><td class="v mono">—</td></tr>`;
+
+      hmState.selectedSnapshot = dd;
+      dump.textContent = JSON.stringify(dd, null, 2);
+      openDetailDrawer();
+      return;
+    }
+
+    // bin COM índice: mostra snapshot real
+    meta.textContent = `${ds} ${ts} • idx=${idx} • class=${cellObj.cls} (${cellObj.reason || "—"})`;
 
     const raw = pointSnapshot(payload, idx);
-
-    // TABELA: nomes práticos (sem literal)
     const items = Object.entries(raw).map(([k,v]) => ({ k, v, label: prettyKeyCompact(k) }));
     items.sort((a,b) => (String(a.label).localeCompare(String(b.label)) || String(a.k).localeCompare(String(b.k))));
 
-    // desambiguação sem expor o nome literal: acrescenta sufixo (1), (2) se repetir label
-    const counts = new Map();
-    for (const it of items){
-      counts.set(it.label, (counts.get(it.label) || 0) + 1);
-    }
-    const seen = new Map();
-    const rows = items.map(it => {
-      const nTotal = counts.get(it.label) || 1;
-      if (nTotal > 1){
-        const n = (seen.get(it.label) || 0) + 1;
-        seen.set(it.label, n);
-        return [ `${it.label} (${n})`, it.v ];
-      }
-      return [ it.label, it.v ];
-    });
-
-    tblAll.innerHTML = rows.map(([k,v]) => (
-      `<tr><td class="k mono">${String(k)}</td><td class="v mono">${fmtAny(v)}</td></tr>`
+    tblAll.innerHTML = items.map(it => (
+      `<tr><td class="k mono">${String(it.label)}</td><td class="v mono">${fmtAny(it.v)}</td></tr>`
     )).join("") || `<tr><td class="k mono">—</td><td class="v mono">—</td></tr>`;
 
-    // DUMP: mantém humano + (literal)
     const dumpObj = snapshotVerbose(raw);
     hmState.selectedSnapshot = dumpObj;
     dump.textContent = JSON.stringify(dumpObj, null, 2);
@@ -1267,10 +1267,8 @@
     const hitTest = (ev) => {
       if (!hmState.geo) return null;
       const r = canvas.getBoundingClientRect();
-
       const sx = canvas.width / Math.max(1, r.width);
       const sy = canvas.height / Math.max(1, r.height);
-
       const x = (ev.clientX - r.left) * sx;
       const y = (ev.clientY - r.top)  * sy;
 
@@ -1292,44 +1290,41 @@
 
     canvas.addEventListener("mousemove", (ev) => {
       const h = hitTest(ev);
-      if (!h){
-        if (tip) tip.textContent = "";
-        return;
-      }
+      if (!h){ if (tip) tip.textContent = ""; return; }
+
       const obj = hmState.cell.get(h.key);
       if (!obj){
-        if (tip) tip.textContent = `${h.ds} ${h.ts} • sem dado`;
+        if (tip) tip.textContent = `${h.ds} ${h.ts} • sem dados`;
         return;
       }
+
+      if (obj.idx === null || obj.idx === undefined){
+        if (tip) tip.textContent = `${h.ds} ${h.ts} • class=none • sem dados (bin vazio)`;
+        return;
+      }
+
       const mmTxt = (obj.mm == null) ? "—" : `${fmtN(obj.mm,3)} (${fmtPct(obj.mm,1)})`;
-      if (tip) tip.textContent = `${h.ds} ${h.ts} • sev=${obj.sev} • RCA=${obj.code ?? "—"} • rótulo=${obj.lbl ?? "—"} • mismatch=${mmTxt}`;
+      if (tip) tip.textContent =
+        `${h.ds} ${h.ts} • class=${obj.cls} • reason=${obj.reason ?? "—"} • RCA=${obj.code ?? "—"} • rótulo=${obj.lbl ?? "—"} • mismatch=${mmTxt}`;
     });
 
-    canvas.addEventListener("mouseleave", () => {
-      if (tip) tip.textContent = "";
-    });
+    canvas.addEventListener("mouseleave", () => { if (tip) tip.textContent = ""; });
 
+    // ✅ clique funciona para TODOS os bins (com e sem idx)
     canvas.addEventListener("click", (ev) => {
       const h = hitTest(ev);
       if (!h) return;
 
       const obj = hmState.cell.get(h.key);
-      if (!obj){
-        clearSelection();
-        return;
-      }
+      if (!obj) return;
 
       hmState.selectedKey = h.key;
-      hmState.selected = { ...h, obj };
-
       drawHeatmapCanvas();
       renderDetail(hmState.payload, obj);
     });
   }
 
-  /* =========================================================
-     API (GET com querystring)
-     ========================================================= */
+  /* API */
   function buildQuery(payload){
     const qs = new URLSearchParams();
     for (const [k,v] of Object.entries(payload)){
@@ -1381,25 +1376,23 @@
   async function runFdd(opts = { save:false }){
     const page = $("fddPage");
     const apiUrl = page ? page.dataset.api : null;
-    if (!apiUrl){
-      alert("API URL não configurada.");
-      return;
-    }
+    if (!apiUrl){ alert("API URL não configurada."); return; }
 
     const btnRun = $("btnRun");
     const btnSave = $("btnRunSave");
 
     try{
       const payload = currentPayloadBase();
-      if (opts && opts.save) payload.save = 1;
+      if (opts && opts.save){ payload.persist = 1; payload.save = 1; }
 
       setBtnLoading(btnRun, true, "Executar", "Executando...");
       setBtnLoading(btnSave, true, "Executar + Salvar", "Salvando...");
-      setStatus(true, opts.save ? "Executando FDD e salvando no banco…" : "Executando FDD (mismatch)…");
+      setStatus(true, opts.save ? "Executando FDD e salvando no banco…" : "Executando FDD…");
 
       const data = await fetchFddData(apiUrl, payload);
 
-      setKpis(data);
+      $("kpiRange").textContent = `${(data?.range?.start || payload.start)} → ${(data?.range?.end || payload.end)}`;
+
       buildCharts(data);
       renderHeatmapCanvas(data);
       bindHeatmapHoverAndClick();
@@ -1426,10 +1419,10 @@
     $("hmTip").textContent = "";
     $("hmBadgeTxt").textContent = "—";
     $("kpiPts").textContent = "—";
-    $("kpiValid").textContent = "—";
     $("kpiOk").textContent = "—";
-    $("kpiAnom").textContent = "—";
+    $("kpiWarn").textContent = "—";
     $("kpiCrit").textContent = "—";
+    $("kpiNoData").textContent = "—";
     $("kpiRange").textContent = "—";
     setStatus(false);
     closeDetailDrawer();
@@ -1440,10 +1433,7 @@
     $("btnCloseDetail")?.addEventListener("click", () => closeDetailDrawer());
     $("btnCopySel")?.addEventListener("click", async () => {
       const snap = hmState.selectedSnapshot;
-      if (!snap){
-        alert("Nenhum ponto selecionado.");
-        return;
-      }
+      if (!snap){ alert("Nenhum ponto selecionado."); return; }
       try{
         await navigator.clipboard.writeText(JSON.stringify(snap, null, 2));
       }catch(_e){
@@ -1455,7 +1445,6 @@
   function bindHeatmapFit(){
     const wrap = $("hmWrap");
     if (!wrap) return;
-
     try{
       const ro = new ResizeObserver(() => fitHeatmapToWidth());
       ro.observe(wrap);
