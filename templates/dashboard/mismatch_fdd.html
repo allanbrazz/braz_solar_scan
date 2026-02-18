@@ -180,15 +180,14 @@
     }
     .dot{ width:11px; height:11px; border-radius:99px; box-shadow: 0 0 0 1px rgba(0,0,0,.18) inset; }
 
-    /* branco=sem dados, verde=normal, amarelo=warn, vermelho=falha */
+    /* cinza=sem dados operativos do inversor no bin, verde=normal, amarelo=warn, vermelho=falha */
     :root{
-      --hm-none: #a0a2a786;   /* sem dados -> cinza escuro */
+      --hm-none: #a0a2a786; /* << pedido */
       --hm-ok:   #46e68c;
       --hm-warn: #ffd25a;
       --hm-crit: #ff5a6e;
       --hm-sel:  rgba(90,200,255,.95);
     }
-
 
     .status{
       display:flex; align-items:center; gap:.6rem; flex-wrap:wrap;
@@ -291,7 +290,7 @@
     <div class="page-head">
       <div style="min-width:0;">
         <h1>FDD — Mismatch</h1>
-        <div class="sub">Clique num quadrado para ver os dados operativos daquele instante (inclusive quando não houver dados).</div>
+        <div class="sub">Clique num quadrado para ver os dados daquele instante (mesmo se não houver dados operativos do inversor).</div>
       </div>
 
       <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
@@ -404,11 +403,11 @@
 
   <div class="card glass span-12">
     <div class="kpi" id="kpiGrid">
-      <div class="tile"><p class="t">Bins</p><p class="v" id="kpiPts">—</p><p class="s">total no heatmap</p></div>
+      <div class="tile"><p class="t">Pontos</p><p class="v" id="kpiPts">—</p><p class="s">na série</p></div>
       <div class="tile"><p class="t">Normal</p><p class="v" id="kpiOk">—</p><p class="s">verde</p></div>
       <div class="tile"><p class="t">Warn</p><p class="v" id="kpiWarn">—</p><p class="s">amarelo</p></div>
       <div class="tile"><p class="t">Falha</p><p class="v" id="kpiCrit">—</p><p class="s">vermelho</p></div>
-      <div class="tile"><p class="t">Sem dados</p><p class="v" id="kpiNoData">—</p><p class="s">branco</p></div>
+      <div class="tile"><p class="t">Sem operativos</p><p class="v" id="kpiNoData">—</p><p class="s">cinza</p></div>
       <div class="tile"><p class="t">Intervalo</p><p class="v" id="kpiRange">—</p><p class="s">start → end</p></div>
     </div>
   </div>
@@ -429,12 +428,12 @@
         <h3 style="margin-top:0">Heatmap — dia × bin (canvas)</h3>
         <div class="hm-sub">
           Linhas = dias • Colunas = bins de <b id="hmBinLbl">15</b> min •
-          branco=sem dados, verde=normal, amarelo=warn, vermelho=falha.
+          cinza=sem dados operativos do inversor, verde=normal, amarelo=warn, vermelho=falha.
         </div>
       </div>
 
       <div class="legend">
-        <span class="badge"><span class="dot" style="background:var(--hm-none)"></span>sem dados</span>
+        <span class="badge"><span class="dot" style="background:var(--hm-none)"></span>sem operativos</span>
         <span class="badge"><span class="dot" style="background:var(--hm-ok)"></span>normal</span>
         <span class="badge"><span class="dot" style="background:var(--hm-warn)"></span>warn</span>
         <span class="badge"><span class="dot" style="background:var(--hm-crit)"></span>falha</span>
@@ -483,12 +482,12 @@
   </div>
 
   <div class="body">
-    <h4 style="margin:.2rem 0 .6rem;">Principais variáveis (todas as séries no índice)</h4>
+    <h4 style="margin:.2rem 0 .6rem;">Principais variáveis</h4>
     <table class="kv" id="detailAll"></table>
 
     <div style="height:.8rem"></div>
 
-    <h4 style="margin:.2rem 0 .6rem;">Dump (todas as séries no índice)</h4>
+    <h4 style="margin:.2rem 0 .6rem;">Dump</h4>
     <pre class="dump" id="detailDump">{}</pre>
   </div>
 </aside>
@@ -598,11 +597,11 @@
     rca_code:     "Código diagnóstico (RCA)",
     rca_label:    "Rótulo diagnóstico (RCA)",
     g_poa:        "GPOA (POA) [W/m²]",
-    gti:          "GTI [W/m²]",
+    gpoa_used:    "GPOA usado [W/m²]",
     ghi:          "GHI [W/m²]",
-    v_dc_v:       "Tensão DC [V]",
-    i_dc_a:       "Corrente DC [A]",
-    inv_coverage: "Cobertura inversor",
+    gti:          "GTI [W/m²]",
+    labels:       "Label",
+    flag_inverter_missing: "Flag inversor missing",
   };
 
   function humanizeKey(s){
@@ -664,7 +663,7 @@
 
     const s = payload?.series || {};
     const t  = s.t_local || s.x_local || payload?.x_local || [];
-    const mm = s.mismatch_rel || [];
+    const mm = s.mismatch_rel || s.mismatch_relativo || s.mismatch || [];
     const pr = s.p_ac_real_w  || s.p_ac_w || s.pac_w || [];
     const pm = s.p_ac_model_w || s.p_model_w || [];
 
@@ -700,34 +699,37 @@
     const s = payload?.series || {};
     const ALIASES = {
       t_local:      ["x_local","t","x"],
-      mismatch_rel: ["mismatch","mm_rel","mm"],
+
+      mismatch_rel: [
+        "mismatch","mm_rel","mm",
+        "mismatch_relativo","mismatch_relative","mismatch_ratio","rel_mismatch","mismatch_rel_pct"
+      ],
+
       code:         ["rca_code","codes","diag_code","diagnostic_code"],
       label:        ["rca_label","label_t","labels","diag_label","diagnostic_label"],
+
       anomaly:      ["anomaly_iv","iv_anomaly","iv_ran_anomaly","iv_flag","anom","is_anomaly","anomalous","anomaly_flag"],
+
       cls:          ["hm_class","hm_sev","severity","sev","status","class","classification"],
-      g_poa:        ["gpoa","g_poa_wm2","poa","poa_wm2","poa_irr","g_poa_pyr","g_poa_est"],
-      p_ac_real_w:  ["p_ac_w","pac_w","pac","p_real_w","p_ac_real","p_ac_real"],
-      v_dc_v:       ["v_dc","vdc","v_dc_volt"],
-      i_dc_a:       ["i_dc","idc","i_dc_amp"],
-      inv_coverage: ["inv_cov","coverage","has_inv","inverter_coverage","inv_present"],
+
+      // potência e irradiância
+      p_ac_real_w:  ["p_ac_w","pac_real_w","p_real_w","p_ac_real","pac","pac_w","p_ac"],
+      p_ac_model_w: ["p_model_w","p_ac_model","p_ac_modelo_w","p_modelo_w","pac_model_w","pac_modelo_w","p_ac_mod_w"],
+
+      g_poa:        ["gpoa","g_poa_used","gpoa_used","gpoa_poa","gpoa_poa_wm2","g_poa_poa","g_poa_wm2","g_poa_w"],
+
+      // flags de missing (se existir no backend, usamos)
+      inv_missing:  ["flag_inverter_missing","inverter_missing","inv_missing","missing_inv","flag_inv_missing","flag_oper_missing","oper_missing","device_missing","flag_device_missing"],
+
+      // correntes/tensões típicas (para inferir “tem operativos?”)
+      i_ac_a:       ["i_ac_a","iac_a","i_ac_l1","i_ac","iac"],
+      v_ac_v:       ["v_ac","vac","v_ac_v","v_ac_l1","vac_l1","v_ll","v_ln"],
+      p_dc_w:       ["p_dc_w","pdc_w","p_dc","pdc"],
     };
     const keys = [key, ...((ALIASES[key] || []))];
     for (const k of keys){
       const arr = s?.[k];
       if (Array.isArray(arr) && idx >= 0 && idx < arr.length) return arr[idx];
-    }
-    return null;
-  }
-
-  function numVal(v){
-    if (v === null || v === undefined) return null;
-    if (typeof v === "number") return Number.isFinite(v) ? v : null;
-    if (typeof v === "boolean") return v ? 1 : 0;
-    if (typeof v === "string"){
-      const s = v.trim();
-      if (!s) return null;
-      const n = Number(s.replace(",", "."));
-      return Number.isFinite(n) ? n : null;
     }
     return null;
   }
@@ -741,55 +743,21 @@
     return false;
   }
 
-  function isNoDataClass(raw){
-    const s = String(raw ?? "").trim().toLowerCase();
-    return ["missing","no_data","nodata","sem dados","sem_dados","idle"].includes(s);
+  function isNullishValue(v){
+    if (v === null || v === undefined) return true;
+    if (typeof v === "number") return !Number.isFinite(v);
+    const s = String(v).trim().toLowerCase();
+    return (s === "" || s === "-" || s === "—" || s === "na" || s === "nan" || s === "null" || s === "none");
   }
 
-  function hasInverterSample(payload, idx){
-    const cov = seriesAt(payload, "inv_coverage", idx);
-    if (cov !== null && cov !== undefined && String(cov).trim() !== ""){
-      if (typeof cov === "boolean") return cov;
-      const n = numVal(cov);
-      if (n !== null) return n > 0;
-    }
-
-    const pac = seriesAt(payload, "p_ac_real_w", idx);
-    if (pac !== null && pac !== undefined && String(pac).trim() !== ""){
-      const n = numVal(pac);
-      if (n !== null) return true; // 0 conta como “há leitura”, se veio no payload
-    }
-
-    const vdc = seriesAt(payload, "v_dc_v", idx);
-    const idc = seriesAt(payload, "i_dc_a", idx);
-    if (numVal(vdc) !== null || numVal(idc) !== null) return true;
-
-    return false;
-  }
-
-  function passesGpoaGate(payload, idx){
-    const gate = Math.max(0, getNum("gpoa_min", 0));
-    if (!(gate > 0)) return true;
-    const g = numVal(seriesAt(payload, "g_poa", idx));
-    if (g === null) return true; // sem GPOA no payload -> não bloqueia
-    return g >= gate;
-  }
-
-  function passesPmin(payload, idx){
-    const pmin = Math.max(0, getNum("pmin_w", 0));
-    if (!(pmin > 0)) return true;
-    const pac = numVal(seriesAt(payload, "p_ac_real_w", idx));
-    if (pac === null) return false;
-    return pac >= pmin;
-  }
-
-  // classes finais: none(branco), ok(verde), warn(amarelo), crit(vermelho)
   function normalizeClass(v){
     const s = String(v ?? "").trim().toLowerCase();
     if (!s) return "ok";
 
-    if (["missing","no_data","nodata","sem dados","sem_dados","idle"].includes(s)) return "none";
-    if (["ok","normal","green","pass","clean","clear","none"].includes(s)) return "ok";
+    // ✅ "none" agora é CINZA (sem operativos). NÃO pode virar ok.
+    if (["none","missing","no_data","nodata","sem dados","na","nan","null","nil"].includes(s)) return "none";
+
+    if (["ok","normal","idle","green","pass","clean","clear"].includes(s)) return "ok";
     if (["warn","warning","anom","anomaly","alert","yellow"].includes(s)) return "warn";
     if (["crit","critical","fault","fail","failure","red"].includes(s)) return "crit";
 
@@ -800,6 +768,13 @@
       return "crit";
     }
     return "warn";
+  }
+
+  function classRank(cls){
+    if (cls === "crit") return 3;
+    if (cls === "warn") return 2;
+    if (cls === "ok")   return 1;
+    return 0; // none
   }
 
   function sevColor(cls){
@@ -823,57 +798,123 @@
     return "crit";
   }
 
-  // regra base (sem considerar “sem dados/gate”)
+  // ✅ Decide se existe “dado operativo do inversor” no índice.
+  // Regra:
+  // - se existir flag inv_missing (true) => sem operativos
+  // - senão: se PAC existe como número OU (Iac/Vac/Pdc existe) => tem operativos
+  // - se tudo está ausente (“-”, null, NaN) => sem operativos
+  function hasInverterOperative(payload, idx){
+    const invMiss = seriesAt(payload, "inv_missing", idx);
+    if (invMiss != null && String(invMiss).trim() !== ""){
+      return !isExplicitTrue(invMiss);
+    }
+
+    const pac = Number(seriesAt(payload, "p_ac_real_w", idx));
+    if (Number.isFinite(pac)) return true;
+
+    const iac = Number(seriesAt(payload, "i_ac_a", idx));
+    if (Number.isFinite(iac)) return true;
+
+    const vac = Number(seriesAt(payload, "v_ac_v", idx));
+    if (Number.isFinite(vac)) return true;
+
+    const pdc = Number(seriesAt(payload, "p_dc_w", idx));
+    if (Number.isFinite(pdc)) return true;
+
+    // nada confiável => sem operativos
+    return false;
+  }
+
+  // Override por mismatch/potência (aumenta severidade se necessário)
+  function overrideByMismatchOrPower(payload, idx){
+    const warnAbs  = Math.max(0, getNum("warn_abs", 0.35));
+    const faultAbs = Math.max(0, getNum("fault_abs", 0.90));
+    const gpoaMin  = Math.max(0, getNum("gpoa_min", 50));
+    const pminW    = Math.max(0, getNum("pmin_w", 0));
+
+    // mismatch (tenta direto; se não existir, calcula via (Pr-Pm)/Pm)
+    let mm = Number(seriesAt(payload, "mismatch_rel", idx));
+    if (!Number.isFinite(mm)){
+      const pr = Number(seriesAt(payload, "p_ac_real_w", idx));
+      const pm = Number(seriesAt(payload, "p_ac_model_w", idx));
+      if (Number.isFinite(pr) && Number.isFinite(pm) && Math.abs(pm) > 1e-9){
+        mm = (pr - pm) / pm;
+      }
+    }
+
+    if (Number.isFinite(mm)){
+      if (mm <= -faultAbs) return { cls: "crit", reason: "mismatch<=-fault_abs", mm };
+      if (Math.abs(mm) >= warnAbs) return { cls: "warn", reason: "|mismatch|>=warn_abs", mm };
+    }
+
+    const g = Number(seriesAt(payload, "g_poa", idx));
+    const pr = Number(seriesAt(payload, "p_ac_real_w", idx));
+    const pm = Number(seriesAt(payload, "p_ac_model_w", idx));
+
+    if (Number.isFinite(g) && Number.isFinite(pr) && Number.isFinite(pm)){
+      if (g >= gpoaMin && pm > Math.max(50, pminW) && pr <= pminW){
+        return { cls: "crit", reason: "no_generation_under_sun", g, pr, pm };
+      }
+    }
+    return null;
+  }
+
   function pointClass(payload, idx){
+    // 1) classe backend (se existir)
     const rawCls = seriesAt(payload, "cls", idx);
+    let base = null;
+
     if (rawCls != null && String(rawCls).trim() !== ""){
-      return { cls: normalizeClass(rawCls), reason: "backend_class", raw: rawCls };
+      base = { cls: normalizeClass(rawCls), reason: "backend_class", raw: rawCls };
+    } else {
+      // 2) rca_code
+      const code = seriesAt(payload, "code", idx);
+      if (code != null && String(code).trim() !== ""){
+        base = { cls: classFromCode(payload, code), reason: "rca_code", code };
+      } else {
+        // 3) anomaly/IV
+        const an = seriesAt(payload, "anomaly", idx);
+        if (isExplicitTrue(an)){
+          base = { cls: "warn", reason: "anomaly/IV=true" };
+        } else {
+          base = { cls: "ok", reason: "default_ok" };
+        }
+      }
     }
 
-    const code = seriesAt(payload, "code", idx);
-    if (code != null && String(code).trim() !== ""){
-      return { cls: classFromCode(payload, code), reason: "rca_code", code };
+    // 4) override por mismatch/potência
+    const ov = overrideByMismatchOrPower(payload, idx);
+    if (ov && classRank(ov.cls) > classRank(base.cls)){
+      return { cls: ov.cls, reason: ov.reason, override: true, base: base.cls };
     }
-
-    const an = seriesAt(payload, "anomaly", idx);
-    if (isExplicitTrue(an)){
-      return { cls: "warn", reason: "anomaly/IV=true" };
-    }
-
-    return { cls: "ok", reason: "default_ok" };
+    return base;
   }
 
-  // ✅ NOVO: classe VISUAL final (inclui “sem dados”/gates), sem perder click/idx quando existir
-  function pointVisualClass(payload, idx){
-    const rawCls = seriesAt(payload, "cls", idx);
-    if (rawCls != null && isNoDataClass(rawCls)){
-      return { cls: "none", reason: "backend_no_data", raw: rawCls };
+  /* KPIs (por ponto da série) */
+  function setKpis(payload){
+    const s = payload?.series || {};
+    const t = s.t_local || s.x_local || payload?.x_local || [];
+    const pts = Array.isArray(t) ? t.length : 0;
+
+    let ok = 0, warn = 0, crit = 0;
+    for (let i=0; i<pts; i++){
+      const cls = pointClass(payload, i).cls;
+      if (cls === "ok") ok++;
+      else if (cls === "warn") warn++;
+      else if (cls === "crit") crit++;
     }
 
-    const inv = hasInverterSample(payload, idx);
-    if (!inv){
-      return { cls: "none", reason: "no_inverter_sample" };
-    }
+    const rs = (payload?.range?.start || $("start")?.value || "—");
+    const re = (payload?.range?.end   || $("end")?.value   || "—");
 
-    if (!passesGpoaGate(payload, idx)){
-      return { cls: "none", reason: "gpoa_below_gate" };
-    }
-
-    if (!passesPmin(payload, idx)){
-      return { cls: "none", reason: "p_below_pmin" };
-    }
-
-    return pointClass(payload, idx);
+    $("kpiPts").textContent = pts ? String(pts) : "—";
+    $("kpiOk").textContent = pts ? String(ok) : "—";
+    $("kpiWarn").textContent = pts ? String(warn) : "—";
+    $("kpiCrit").textContent = pts ? String(crit) : "—";
+    $("kpiRange").textContent = `${rs} → ${re}`;
   }
 
-  function classRank(cls){
-    if (cls === "crit") return 3;
-    if (cls === "warn") return 2;
-    if (cls === "ok")   return 1;
-    return 0; // none
-  }
-
-  /* Heatmap helpers */
+  /* Heatmap */
   function ymdList(aYmd, bYmd){
     const out = [];
     const mA = String(aYmd||"").match(/^(\d{4})-(\d{2})-(\d{2})$/);
@@ -906,7 +947,6 @@
     return { day, minute: hh*60 + mi };
   }
 
-  // ✅ CORREÇÃO PRINCIPAL: criar entradas para TODOS os bins (inclusive sem dados), tornando-os clicáveis
   function buildCellMap(payload, dtm){
     const start = (payload?.range?.start || $("start")?.value || "").slice(0,10);
     const end   = (payload?.range?.end   || $("end")?.value   || "").slice(0,10);
@@ -915,21 +955,18 @@
     const dayToIdx = new Map(days.map((d,i)=>[d,i]));
     const nBins = Math.floor(1440 / dtm);
 
-    const s = payload?.series || {};
-    const t = s.t_local || s.x_local || payload?.x_local || [];
-
-    const hmDay = Array.isArray(s.hm_day_local) ? s.hm_day_local : null;
-    const hmMin = Array.isArray(s.hm_minute_local) ? s.hm_minute_local : null;
-
-    // 1) preenche todos os bins com placeholder (branco), mas clicáveis
     const cell = new Map();
+
+    // 1) Preenche TODOS os bins como CINZA (sem operativos)
     for (let di=0; di<days.length; di++){
       for (let ti=0; ti<nBins; ti++){
         const key = `${di}|${ti}`;
         cell.set(key, {
-          idx: null,                   // sem índice (não existe amostra)
-          cls: "none",                 // branco
-          reason: "no_data_bin",       // motivo
+          idx: -1,
+          has_any: false,
+          has_oper: false,
+          cls: "none",
+          reason: "no_point_in_bin",
           mm: null,
           lbl: null,
           code: null,
@@ -939,7 +976,13 @@
       }
     }
 
-    // 2) sobrescreve com amostras existentes (ok/warn/crit/none por gates), escolhendo a melhor por severidade e proximidade
+    // 2) Se houver pontos na série, escolhe o melhor por bin
+    const s = payload?.series || {};
+    const t = s.t_local || s.x_local || payload?.x_local || [];
+
+    const hmDay = Array.isArray(s.hm_day_local) ? s.hm_day_local : null;
+    const hmMin = Array.isArray(s.hm_minute_local) ? s.hm_minute_local : null;
+
     const bestScore = new Map();
 
     for (let i=0; i<t.length; i++){
@@ -959,28 +1002,53 @@
       const ti = Math.floor(Number(minutes) / dtm);
       if (ti < 0 || ti >= nBins) continue;
 
-      const binCenter = ti*dtm + dtm/2;
-      const dist = Math.abs(Number(minutes) - binCenter);
       const key = `${di}|${ti}`;
 
-      const cinfo = pointVisualClass(payload, i);
-      const cls = cinfo.cls || "none";
+      const binCenter = ti*dtm + dtm/2;
+      const dist = Math.abs(Number(minutes) - binCenter);
 
-      const score = classRank(cls)*1_000_000 + (-dist);
+      const hasOper = hasInverterOperative(payload, i);
+
+      // classe do bin:
+      // - se NÃO tem operativos -> mantém CINZA (cls=none), mas guarda idx p/ clique
+      // - se tem operativos -> usa pointClass (com overrides)
+      let cls = "none";
+      let reason = "no_operatives";
+      let cinfo = null;
+      if (hasOper){
+        cinfo = pointClass(payload, i);
+        cls = cinfo.cls || "ok";
+        reason = cinfo.reason || "classified";
+      }
+
+      // score: prefere bins com operativos; dentro disso, prefere maior severidade e mais perto do centro do bin
+      const score = (hasOper ? 10_000_000 : 0) + classRank(cls)*1_000_000 + (-dist);
       const prev = bestScore.get(key);
       if (prev != null && score <= prev) continue;
       bestScore.set(key, score);
 
-      const mm = seriesAt(payload, "mismatch_rel", i);
-      const mmNum = Number(mm);
+      // mismatch / labels etc (se houver)
+      let mm = Number(seriesAt(payload, "mismatch_rel", i));
+      if (!Number.isFinite(mm)){
+        const pr = Number(seriesAt(payload, "p_ac_real_w", i));
+        const pm = Number(seriesAt(payload, "p_ac_model_w", i));
+        if (Number.isFinite(pr) && Number.isFinite(pm) && Math.abs(pm) > 1e-9){
+          mm = (pr - pm) / pm;
+        } else {
+          mm = NaN;
+        }
+      }
+
       const lbl = seriesAt(payload, "label", i);
       const code = seriesAt(payload, "code", i);
 
       cell.set(key, {
-        idx: i,                 // agora existe índice
+        idx: i,
+        has_any: true,
+        has_oper: hasOper,
         cls,
-        reason: cinfo.reason,
-        mm: (Number.isFinite(mmNum) ? mmNum : null),
+        reason,
+        mm: (Number.isFinite(mm) ? mm : null),
         lbl: (lbl == null ? null : String(lbl)),
         code: (code == null ? null : String(code)),
         day: ds,
@@ -993,7 +1061,7 @@
 
   const hmState = {
     payload:null, days:[], nBins:0, dtm:15, cell:new Map(), geo:null,
-    selectedKey: null, selected: null, selectedSnapshot: null
+    selectedKey: null, selectedSnapshot: null
   };
 
   function fitHeatmapToWidth(){
@@ -1007,14 +1075,6 @@
     const scale = Math.min(1, avail / W);
     canvas.style.width = (W * scale) + "px";
     canvas.style.height = (H * scale) + "px";
-  }
-
-  function binTimeStr(mins){
-    const m = Number(mins);
-    if (!Number.isFinite(m)) return "—";
-    const hh = String(Math.floor(m/60)).padStart(2,"0");
-    const mm = String(m%60).padStart(2,"0");
-    return `${hh}:${mm}`;
   }
 
   function drawHeatmapCanvas(){
@@ -1036,11 +1096,11 @@
     const pad = 10;
     const topH = 26;
     const leftW = 78;
-    const cell = 12;
+    const cellSz = 12;
     const gap = 3;
 
-    const W = pad + leftW + (nBins * (cell+gap)) + pad;
-    const H = pad + topH + (days.length * (cell+gap)) + pad;
+    const W = pad + leftW + (nBins * (cellSz+gap)) + pad;
+    const H = pad + topH + (days.length * (cellSz+gap)) + pad;
 
     canvas.width = W;
     canvas.height = H;
@@ -1061,7 +1121,7 @@
       const hh = String(Math.floor(minutes/60)).padStart(2,"0");
       const mm = String(minutes%60).padStart(2,"0");
       const label = `${hh}:${mm}`;
-      const x = pad + leftW + ti*(cell+gap);
+      const x = pad + leftW + ti*(cellSz+gap);
       const y = pad + 12;
       ctx.fillText(label, x, y);
     }
@@ -1071,58 +1131,37 @@
       const ds = days[di];
       const ddmm = ds.length >= 10 ? `${ds.slice(8,10)}/${ds.slice(5,7)}` : ds;
 
-      const y = pad + topH + di*(cell+gap);
+      const y = pad + topH + di*(cellSz+gap);
 
       ctx.fillStyle = "rgba(233,246,255,.88)";
-      ctx.fillText(ddmm, pad, y + cell/2);
+      ctx.fillText(ddmm, pad, y + cellSz/2);
 
       for (let ti=0; ti<nBins; ti++){
         const key = `${di}|${ti}`;
         const obj = hmState.cell.get(key);
         const cls = obj ? obj.cls : "none";
-        const x = pad + leftW + ti*(cell+gap);
+        const x = pad + leftW + ti*(cellSz+gap);
+
         ctx.fillStyle = sevColor(cls);
-        ctx.fillRect(x, y, cell, cell);
+        ctx.fillRect(x, y, cellSz, cellSz);
       }
     }
 
     if (hmState.selectedKey){
       const [diS, tiS] = hmState.selectedKey.split("|").map(Number);
       if (Number.isFinite(diS) && Number.isFinite(tiS)){
-        const x = pad + leftW + tiS*(cell+gap);
-        const y = pad + topH + diS*(cell+gap);
+        const x = pad + leftW + tiS*(cellSz+gap);
+        const y = pad + topH + diS*(cellSz+gap);
         ctx.save();
         ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue("--hm-sel").trim();
         ctx.lineWidth = 2.5;
-        ctx.strokeRect(x-1, y-1, cell+2, cell+2);
+        ctx.strokeRect(x-1, y-1, cellSz+2, cellSz+2);
         ctx.restore();
       }
     }
 
-    hmState.geo = { pad, topH, leftW, cell, gap, W, H, days, nBins, dtm };
+    hmState.geo = { pad, topH, leftW, cell: cellSz, gap, W, H, days, nBins, dtm };
     fitHeatmapToWidth();
-  }
-
-  function syncKpisFromHeatmap(){
-    const totalBins = hmState.days.length * hmState.nBins;
-    let ok=0, warn=0, crit=0, none=0, withIdx=0;
-
-    for (const v of hmState.cell.values()){
-      if (v.idx !== null && v.idx !== undefined) withIdx++;
-      if (v.cls === "ok") ok++;
-      else if (v.cls === "warn") warn++;
-      else if (v.cls === "crit") crit++;
-      else none++;
-    }
-
-    $("kpiPts").textContent = totalBins ? String(totalBins) : "—";
-    $("kpiOk").textContent = totalBins ? String(ok) : "—";
-    $("kpiWarn").textContent = totalBins ? String(warn) : "—";
-    $("kpiCrit").textContent = totalBins ? String(crit) : "—";
-    $("kpiNoData").textContent = totalBins ? String(none) : "—";
-
-    $("hmBadgeTxt").textContent =
-      `normal=${ok} | warn=${warn} | falha=${crit} | sem dados=${none} | bins com registro=${withIdx}`;
   }
 
   function renderHeatmapCanvas(payload){
@@ -1135,12 +1174,30 @@
     hmState.nBins = built.nBins;
     hmState.cell = built.cell;
 
-    if (hmState.selectedKey && !hmState.cell.has(hmState.selectedKey)){
-      clearSelection();
+    let ok=0, warn=0, crit=0, none=0, any=0, oper=0;
+    for (const v of hmState.cell.values()){
+      if (v.has_any) any++;
+      if (v.has_oper) oper++;
+      if (v.cls === "ok") ok++;
+      else if (v.cls === "warn") warn++;
+      else if (v.cls === "crit") crit++;
+      else none++;
     }
 
+    $("hmBadgeTxt").textContent =
+      `normal=${ok} | warn=${warn} | falha=${crit} | cinza=${none} | bins com ponto=${any} | bins com operativos=${oper}`;
+
+    $("kpiNoData").textContent = (hmState.days.length && hmState.nBins) ? String(none) : "—";
+
     drawHeatmapCanvas();
-    syncKpisFromHeatmap();
+  }
+
+  function binTimeStr(mins){
+    const m = Number(mins);
+    if (!Number.isFinite(m)) return "—";
+    const hh = String(Math.floor(m/60)).padStart(2,"0");
+    const mm = String(m%60).padStart(2,"0");
+    return `${hh}:${mm}`;
   }
 
   function pointSnapshot(payload, idx){
@@ -1179,23 +1236,6 @@
     dr.setAttribute("aria-hidden", "true");
   }
 
-  function syntheticDumpForEmptyBin(cellObj){
-    const gGate = Math.max(0, getNum("gpoa_min", 0));
-    const pMin  = Math.max(0, getNum("pmin_w", 0));
-    return {
-      "bin_day": cellObj?.day ?? null,
-      "bin_time": binTimeStr(cellObj?.minute),
-      "class": cellObj?.cls ?? "none",
-      "reason": cellObj?.reason ?? "no_data_bin",
-      "note": "Não há amostra do inversor para este bin (ou não foi possível associar um registro).",
-      "params": {
-        "dt_minutes": hmState.dtm,
-        "gpoa_min": gGate,
-        "pmin_w": pMin,
-      }
-    };
-  }
-
   function renderDetail(payload, cellObj){
     const meta = $("detailMeta");
     const tblAll = $("detailAll");
@@ -1212,28 +1252,39 @@
 
     const ds = cellObj.day;
     const ts = binTimeStr(cellObj.minute);
-    const idx = cellObj.idx;
 
-    // ✅ bin SEM índice: ainda abre drawer e mostra “sem dados”
-    if (idx === null || idx === undefined || idx < 0){
-      meta.textContent = `${ds} ${ts} • idx=— • class=${cellObj.cls} (${cellObj.reason || "—"})`;
-      const dd = syntheticDumpForEmptyBin(cellObj);
+    // Sem ponto algum
+    if (!cellObj.has_any || cellObj.idx < 0){
+      meta.textContent = `${ds} ${ts} • class=none • sem ponto no bin`;
+      const rows = [
+        ["Dia", ds],
+        ["Hora (bin)", ts],
+        ["Bin (min)", String(hmState.dtm)],
+        ["Classe", "none"],
+        ["Motivo", cellObj.reason || "no_point_in_bin"],
+      ];
+      tblAll.innerHTML = rows.map(([k,v]) => (
+        `<tr><td class="k mono">${String(k)}</td><td class="v mono">${fmtAny(v)}</td></tr>`
+      )).join("");
 
-      const items = Object.entries(dd).map(([k,v]) => ({ k, v, label: prettyKeyCompact(k) }));
-      items.sort((a,b) => String(a.label).localeCompare(String(b.label)));
-
-      tblAll.innerHTML = items.map(it => (
-        `<tr><td class="k mono">${String(it.label)}</td><td class="v mono">${fmtAny(it.v)}</td></tr>`
-      )).join("") || `<tr><td class="k mono">—</td><td class="v mono">—</td></tr>`;
-
-      hmState.selectedSnapshot = dd;
-      dump.textContent = JSON.stringify(dd, null, 2);
+      const dumpObj = {
+        day: ds,
+        time_bin: ts,
+        dt_minutes: hmState.dtm,
+        has_any: false,
+        has_oper: false,
+        class: "none",
+        reason: cellObj.reason || "no_point_in_bin",
+      };
+      hmState.selectedSnapshot = dumpObj;
+      dump.textContent = JSON.stringify(dumpObj, null, 2);
       openDetailDrawer();
       return;
     }
 
-    // bin COM índice: mostra snapshot real
-    meta.textContent = `${ds} ${ts} • idx=${idx} • class=${cellObj.cls} (${cellObj.reason || "—"})`;
+    // Tem ponto (mesmo que sem operativos)
+    const idx = cellObj.idx;
+    meta.textContent = `${ds} ${ts} • idx=${idx} • class=${cellObj.cls} • operativos=${cellObj.has_oper ? "sim" : "não"} • reason=${cellObj.reason || "—"}`;
 
     const raw = pointSnapshot(payload, idx);
     const items = Object.entries(raw).map(([k,v]) => ({ k, v, label: prettyKeyCompact(k) }));
@@ -1244,15 +1295,23 @@
     )).join("") || `<tr><td class="k mono">—</td><td class="v mono">—</td></tr>`;
 
     const dumpObj = snapshotVerbose(raw);
+    dumpObj.__heatmap = {
+      day: ds,
+      time_bin: ts,
+      dt_minutes: hmState.dtm,
+      has_any: true,
+      has_oper: !!cellObj.has_oper,
+      class: cellObj.cls,
+      reason: cellObj.reason,
+    };
+
     hmState.selectedSnapshot = dumpObj;
     dump.textContent = JSON.stringify(dumpObj, null, 2);
-
     openDetailDrawer();
   }
 
   function clearSelection(){
     hmState.selectedKey = null;
-    hmState.selected = null;
     hmState.selectedSnapshot = null;
     renderDetail(null, null);
     drawHeatmapCanvas();
@@ -1294,31 +1353,29 @@
 
       const obj = hmState.cell.get(h.key);
       if (!obj){
-        if (tip) tip.textContent = `${h.ds} ${h.ts} • sem dados`;
+        if (tip) tip.textContent = `${h.ds} ${h.ts} • (bin inválido)`;
         return;
       }
 
-      if (obj.idx === null || obj.idx === undefined){
-        if (tip) tip.textContent = `${h.ds} ${h.ts} • class=none • sem dados (bin vazio)`;
+      if (!obj.has_any){
+        if (tip) tip.textContent = `${h.ds} ${h.ts} • sem ponto no bin`;
         return;
       }
 
       const mmTxt = (obj.mm == null) ? "—" : `${fmtN(obj.mm,3)} (${fmtPct(obj.mm,1)})`;
       if (tip) tip.textContent =
-        `${h.ds} ${h.ts} • class=${obj.cls} • reason=${obj.reason ?? "—"} • RCA=${obj.code ?? "—"} • rótulo=${obj.lbl ?? "—"} • mismatch=${mmTxt}`;
+        `${h.ds} ${h.ts} • class=${obj.cls} • operativos=${obj.has_oper ? "sim" : "não"} • reason=${obj.reason ?? "—"} • RCA=${obj.code ?? "—"} • rótulo=${obj.lbl ?? "—"} • mismatch=${mmTxt}`;
     });
 
     canvas.addEventListener("mouseleave", () => { if (tip) tip.textContent = ""; });
 
-    // ✅ clique funciona para TODOS os bins (com e sem idx)
     canvas.addEventListener("click", (ev) => {
       const h = hitTest(ev);
       if (!h) return;
 
       const obj = hmState.cell.get(h.key);
-      if (!obj) return;
-
       hmState.selectedKey = h.key;
+
       drawHeatmapCanvas();
       renderDetail(hmState.payload, obj);
     });
@@ -1391,8 +1448,7 @@
 
       const data = await fetchFddData(apiUrl, payload);
 
-      $("kpiRange").textContent = `${(data?.range?.start || payload.start)} → ${(data?.range?.end || payload.end)}`;
-
+      setKpis(data);
       buildCharts(data);
       renderHeatmapCanvas(data);
       bindHeatmapHoverAndClick();
