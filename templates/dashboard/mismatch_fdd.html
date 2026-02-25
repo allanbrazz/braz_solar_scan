@@ -182,7 +182,7 @@
 
     /* cinza=sem dados operativos do inversor no bin, verde=normal, amarelo=warn, vermelho=falha */
     :root{
-      --hm-none: #a0a2a786; /* << pedido */
+      --hm-none: #a0a2a786;
       --hm-ok:   #46e68c;
       --hm-warn: #ffd25a;
       --hm-crit: #ff5a6e;
@@ -593,6 +593,12 @@
     mismatch_rel: "Mismatch relativo (P_real−P_model)/P_model",
     p_ac_real_w:  "Potência AC (real) [W]",
     p_ac_model_w: "Potência AC (modelo) [W]",
+    p_dc_w:       "Potência DC [W]",
+    v_dc_v:       "Vdc [V]",
+    i_dc_a:       "Idc [A]",
+    v_ac_v:       "Vac [V]",
+    i_ac_a:       "Iac [A]",
+    inv_coverage: "Cobertura inversor",
     anomaly:      "Anomalia (detecção/IV)",
     rca_code:     "Código diagnóstico (RCA)",
     rca_label:    "Rótulo diagnóstico (RCA)",
@@ -600,8 +606,23 @@
     gpoa_used:    "GPOA usado [W/m²]",
     ghi:          "GHI [W/m²]",
     gti:          "GTI [W/m²]",
-    labels:       "Label",
-    flag_inverter_missing: "Flag inversor missing",
+    dni:          "DNI [W/m²]",
+    dhi:          "DHI [W/m²]",
+    temp_air:     "Temp. ar [°C]",
+    wind_speed:   "Vento [m/s]",
+    rh:           "UR [%]",
+    flag_meteo_missing: "Flag meteo missing",
+    flag_inv_missing:   "Flag inversor missing",
+
+    // Mantém se existir no teu backend
+    mppt1_vdc_v: "MPPT1 Vdc [V]",
+    mppt2_vdc_v: "MPPT2 Vdc [V]",
+    mppt3_vdc_v: "MPPT3 Vdc [V]",
+    mppt4_vdc_v: "MPPT4 Vdc [V]",
+    mppt1_idc_a: "MPPT1 Idc [A]",
+    mppt2_idc_a: "MPPT2 Idc [A]",
+    mppt3_idc_a: "MPPT3 Idc [A]",
+    mppt4_idc_a: "MPPT4 Idc [A]",
   };
 
   function humanizeKey(s){
@@ -712,19 +733,18 @@
 
       cls:          ["hm_class","hm_sev","severity","sev","status","class","classification"],
 
-      // potência e irradiância
       p_ac_real_w:  ["p_ac_w","pac_real_w","p_real_w","p_ac_real","pac","pac_w","p_ac"],
       p_ac_model_w: ["p_model_w","p_ac_model","p_ac_modelo_w","p_modelo_w","pac_model_w","pac_modelo_w","p_ac_mod_w"],
 
       g_poa:        ["gpoa","g_poa_used","gpoa_used","gpoa_poa","gpoa_poa_wm2","g_poa_poa","g_poa_wm2","g_poa_w"],
 
-      // flags de missing (se existir no backend, usamos)
       inv_missing:  ["flag_inverter_missing","inverter_missing","inv_missing","missing_inv","flag_inv_missing","flag_oper_missing","oper_missing","device_missing","flag_device_missing"],
 
-      // correntes/tensões típicas (para inferir “tem operativos?”)
       i_ac_a:       ["i_ac_a","iac_a","i_ac_l1","i_ac","iac"],
       v_ac_v:       ["v_ac","vac","v_ac_v","v_ac_l1","vac_l1","v_ll","v_ln"],
       p_dc_w:       ["p_dc_w","pdc_w","p_dc","pdc"],
+      v_dc_v:       ["v_dc_v","vdc_v","vdc","v_string_v"],
+      i_dc_a:       ["i_dc_a","idc_a","idc","i_string_a"],
     };
     const keys = [key, ...((ALIASES[key] || []))];
     for (const k of keys){
@@ -753,14 +773,10 @@
   function normalizeClass(v){
     const s = String(v ?? "").trim().toLowerCase();
     if (!s) return "ok";
-
-    // ✅ "none" agora é CINZA (sem operativos). NÃO pode virar ok.
     if (["none","missing","no_data","nodata","sem dados","na","nan","null","nil"].includes(s)) return "none";
-
     if (["ok","normal","idle","green","pass","clean","clear"].includes(s)) return "ok";
     if (["warn","warning","anom","anomaly","alert","yellow"].includes(s)) return "warn";
     if (["crit","critical","fault","fail","failure","red"].includes(s)) return "crit";
-
     if (/^\d+$/.test(s)){
       const n = Number(s);
       if (n <= 0) return "ok";
@@ -798,11 +814,6 @@
     return "crit";
   }
 
-  // ✅ Decide se existe “dado operativo do inversor” no índice.
-  // Regra:
-  // - se existir flag inv_missing (true) => sem operativos
-  // - senão: se PAC existe como número OU (Iac/Vac/Pdc existe) => tem operativos
-  // - se tudo está ausente (“-”, null, NaN) => sem operativos
   function hasInverterOperative(payload, idx){
     const invMiss = seriesAt(payload, "inv_missing", idx);
     if (invMiss != null && String(invMiss).trim() !== ""){
@@ -821,18 +832,15 @@
     const pdc = Number(seriesAt(payload, "p_dc_w", idx));
     if (Number.isFinite(pdc)) return true;
 
-    // nada confiável => sem operativos
     return false;
   }
 
-  // Override por mismatch/potência (aumenta severidade se necessário)
   function overrideByMismatchOrPower(payload, idx){
     const warnAbs  = Math.max(0, getNum("warn_abs", 0.35));
     const faultAbs = Math.max(0, getNum("fault_abs", 0.90));
     const gpoaMin  = Math.max(0, getNum("gpoa_min", 50));
     const pminW    = Math.max(0, getNum("pmin_w", 0));
 
-    // mismatch (tenta direto; se não existir, calcula via (Pr-Pm)/Pm)
     let mm = Number(seriesAt(payload, "mismatch_rel", idx));
     if (!Number.isFinite(mm)){
       const pr = Number(seriesAt(payload, "p_ac_real_w", idx));
@@ -860,19 +868,16 @@
   }
 
   function pointClass(payload, idx){
-    // 1) classe backend (se existir)
     const rawCls = seriesAt(payload, "cls", idx);
     let base = null;
 
     if (rawCls != null && String(rawCls).trim() !== ""){
       base = { cls: normalizeClass(rawCls), reason: "backend_class", raw: rawCls };
     } else {
-      // 2) rca_code
       const code = seriesAt(payload, "code", idx);
       if (code != null && String(code).trim() !== ""){
         base = { cls: classFromCode(payload, code), reason: "rca_code", code };
       } else {
-        // 3) anomaly/IV
         const an = seriesAt(payload, "anomaly", idx);
         if (isExplicitTrue(an)){
           base = { cls: "warn", reason: "anomaly/IV=true" };
@@ -882,7 +887,6 @@
       }
     }
 
-    // 4) override por mismatch/potência
     const ov = overrideByMismatchOrPower(payload, idx);
     if (ov && classRank(ov.cls) > classRank(base.cls)){
       return { cls: ov.cls, reason: ov.reason, override: true, base: base.cls };
@@ -890,7 +894,6 @@
     return base;
   }
 
-  /* KPIs (por ponto da série) */
   function setKpis(payload){
     const s = payload?.series || {};
     const t = s.t_local || s.x_local || payload?.x_local || [];
@@ -914,7 +917,7 @@
     $("kpiRange").textContent = `${rs} → ${re}`;
   }
 
-  /* Heatmap */
+  /* Heatmap helpers */
   function ymdList(aYmd, bYmd){
     const out = [];
     const mA = String(aYmd||"").match(/^(\d{4})-(\d{2})-(\d{2})$/);
@@ -957,7 +960,6 @@
 
     const cell = new Map();
 
-    // 1) Preenche TODOS os bins como CINZA (sem operativos)
     for (let di=0; di<days.length; di++){
       for (let ti=0; ti<nBins; ti++){
         const key = `${di}|${ti}`;
@@ -976,7 +978,6 @@
       }
     }
 
-    // 2) Se houver pontos na série, escolhe o melhor por bin
     const s = payload?.series || {};
     const t = s.t_local || s.x_local || payload?.x_local || [];
 
@@ -1009,9 +1010,6 @@
 
       const hasOper = hasInverterOperative(payload, i);
 
-      // classe do bin:
-      // - se NÃO tem operativos -> mantém CINZA (cls=none), mas guarda idx p/ clique
-      // - se tem operativos -> usa pointClass (com overrides)
       let cls = "none";
       let reason = "no_operatives";
       let cinfo = null;
@@ -1021,13 +1019,11 @@
         reason = cinfo.reason || "classified";
       }
 
-      // score: prefere bins com operativos; dentro disso, prefere maior severidade e mais perto do centro do bin
       const score = (hasOper ? 10_000_000 : 0) + classRank(cls)*1_000_000 + (-dist);
       const prev = bestScore.get(key);
       if (prev != null && score <= prev) continue;
       bestScore.set(key, score);
 
-      // mismatch / labels etc (se houver)
       let mm = Number(seriesAt(payload, "mismatch_rel", i));
       if (!Number.isFinite(mm)){
         const pr = Number(seriesAt(payload, "p_ac_real_w", i));
@@ -1200,6 +1196,8 @@
     return `${hh}:${mm}`;
   }
 
+  /* ✅ CORREÇÃO 1: pointSnapshot agora devolve as CHAVES mesmo sem idx válido.
+     Isso garante que os nomes das variáveis apareçam mesmo sem registros no bin. */
   function pointSnapshot(payload, idx){
     const s = payload?.series || {};
     const out = {};
@@ -1207,8 +1205,11 @@
     for (const k of keys){
       const arr = s[k];
       if (!Array.isArray(arr)) continue;
-      if (idx < 0 || idx >= arr.length) continue;
-      out[k] = arr[idx];
+      if (idx < 0 || idx >= arr.length){
+        out[k] = null; // mantém o nome com valor "—"
+      } else {
+        out[k] = arr[idx];
+      }
     }
     return out;
   }
@@ -1220,6 +1221,121 @@
       out[prettyKeyVerbose(k)] = raw[k];
     }
     return out;
+  }
+
+  /* ✅ CORREÇÃO 2: MPPT por source só mostra DC (Vdc/Idc/Pdc).
+     Vac/Iac são AC e NÃO podem aparecer “por MPPT”. */
+  function isMpptSourceName(src){
+    return String(src || "").toUpperCase().includes("|MPPT");
+  }
+
+  function mpptTagFromSource(src){
+    const s = String(src || "");
+    const m = s.match(/(?:\||\b)MPPT\s*([0-9]+)/i);
+    return m ? `MPPT${m[1]}` : "MPPT";
+  }
+
+  function mpptSourceList(payload){
+    const fromRange = payload?.range?.selected_sources;
+    if (Array.isArray(fromRange) && fromRange.length){
+      return fromRange.filter(isMpptSourceName);
+    }
+    const fromSources = payload?.sources?.selected_sources;
+    if (Array.isArray(fromSources) && fromSources.length){
+      return fromSources.filter(isMpptSourceName);
+    }
+    const sbs = payload?.series_by_source;
+    if (sbs && typeof sbs === "object"){
+      return Object.keys(sbs).filter(isMpptSourceName);
+    }
+    return [];
+  }
+
+  /* ✅ CORREÇÃO 3: mostrar os NOMES mesmo sem registros/None/0.
+     Portanto: NÃO filtra por isNullishValue; sempre cria as linhas. */
+  function collectMpptItems(payload, idx){
+    const sbs = payload?.series_by_source;
+    if (!sbs || typeof sbs !== "object") return [];
+
+    const out = [];
+    const mpptSrcs = mpptSourceList(payload);
+
+    // SOMENTE DC por MPPT
+    const fields = [
+      { key: "v_dc_v", label: "Vdc [V]" },
+      { key: "i_dc_a", label: "Idc [A]" },
+      { key: "p_dc_w", label: "Pdc [W]" },
+    ];
+
+    for (const src of mpptSrcs){
+      const block = sbs?.[src];
+      const tag = mpptTagFromSource(src);
+
+      // valores (podem ser null; ainda assim mostramos)
+      let vdc = null, idc = null, pdc = null;
+
+      for (const f of fields){
+        const arr = block?.[f.key];
+        let v = null;
+        if (Array.isArray(arr) && idx >= 0 && idx < arr.length) v = arr[idx];
+        // idx inválido => fica null (mantém nome no UI)
+        if (f.key === "v_dc_v") vdc = v;
+        if (f.key === "i_dc_a") idc = v;
+        if (f.key === "p_dc_w") pdc = v;
+
+        out.push({
+          k: `${f.key}@${src}`,
+          v,
+          label: `${tag} — ${f.label}`,
+        });
+      }
+
+      // Pdc estimado (sempre mostra a linha; valor só se der pra calcular)
+      const vdcN = Number(vdc), idcN = Number(idc);
+      const pEst = (Number.isFinite(vdcN) && Number.isFinite(idcN)) ? (vdcN * idcN) : null;
+      out.push({
+        k: `p_dc_est_w@${src}`,
+        v: pEst,
+        label: `${tag} — Pdc est [W] (Vdc×Idc)`,
+      });
+    }
+    return out;
+  }
+
+  function collectMpptDump(payload, idx){
+    const sbs = payload?.series_by_source;
+    if (!sbs || typeof sbs !== "object") return null;
+
+    const mpptSrcs = mpptSourceList(payload);
+
+    const out = {};
+    for (const src of mpptSrcs){
+      const block = sbs?.[src];
+      const tag = mpptTagFromSource(src);
+
+      const getAt = (key) => {
+        const arr = block?.[key];
+        if (Array.isArray(arr) && idx >= 0 && idx < arr.length) return arr[idx];
+        return null;
+      };
+
+      const vdc = getAt("v_dc_v");
+      const idc = getAt("i_dc_a");
+      const pdc = getAt("p_dc_w");
+
+      const vdcN = Number(vdc), idcN = Number(idc);
+      const pEst = (Number.isFinite(vdcN) && Number.isFinite(idcN)) ? (vdcN * idcN) : null;
+
+      out[tag] = {
+        source: src,
+        v_dc_v: vdc,
+        i_dc_a: idc,
+        p_dc_w: pdc,
+        p_dc_est_w: pEst,
+      };
+    }
+
+    return Object.keys(out).length ? out : null;
   }
 
   function openDetailDrawer(){
@@ -1253,55 +1369,55 @@
     const ds = cellObj.day;
     const ts = binTimeStr(cellObj.minute);
 
-    // Sem ponto algum
-    if (!cellObj.has_any || cellObj.idx < 0){
-      meta.textContent = `${ds} ${ts} • class=none • sem ponto no bin`;
-      const rows = [
-        ["Dia", ds],
-        ["Hora (bin)", ts],
-        ["Bin (min)", String(hmState.dtm)],
-        ["Classe", "none"],
-        ["Motivo", cellObj.reason || "no_point_in_bin"],
-      ];
-      tblAll.innerHTML = rows.map(([k,v]) => (
-        `<tr><td class="k mono">${String(k)}</td><td class="v mono">${fmtAny(v)}</td></tr>`
-      )).join("");
+    // Meta
+    const metaRows = [
+      { k: "__meta_day",  label: "Dia", v: ds },
+      { k: "__meta_time", label: "Hora (bin)", v: ts },
+      { k: "__meta_bin",  label: "Bin (min)", v: String(hmState.dtm) },
+      { k: "__meta_cls",  label: "Classe", v: cellObj.cls || "none" },
+      { k: "__meta_reason", label: "Motivo", v: cellObj.reason || "—" },
+      { k: "__meta_has_any", label: "Tem ponto no bin?", v: !!cellObj.has_any },
+      { k: "__meta_has_oper", label: "Tem operativos?", v: !!cellObj.has_oper },
+    ];
 
-      const dumpObj = {
-        day: ds,
-        time_bin: ts,
-        dt_minutes: hmState.dtm,
-        has_any: false,
-        has_oper: false,
-        class: "none",
-        reason: cellObj.reason || "no_point_in_bin",
-      };
-      hmState.selectedSnapshot = dumpObj;
-      dump.textContent = JSON.stringify(dumpObj, null, 2);
-      openDetailDrawer();
-      return;
-    }
+    // ✅ Mesmo sem ponto (idx < 0), queremos mostrar os NOMES das variáveis.
+    const idx = (cellObj.has_any && cellObj.idx >= 0) ? cellObj.idx : -1;
 
-    // Tem ponto (mesmo que sem operativos)
-    const idx = cellObj.idx;
-    meta.textContent = `${ds} ${ts} • idx=${idx} • class=${cellObj.cls} • operativos=${cellObj.has_oper ? "sim" : "não"} • reason=${cellObj.reason || "—"}`;
+    const clsTxt = (cellObj.has_any && cellObj.idx >= 0) ? cellObj.cls : "none";
+    meta.textContent = `${ds} ${ts} • idx=${(idx >= 0 ? idx : "—")} • class=${clsTxt} • operativos=${cellObj.has_oper ? "sim" : "não"} • reason=${cellObj.reason || "—"}`;
 
+    // snapshot base (com chaves mesmo quando idx=-1)
     const raw = pointSnapshot(payload, idx);
-    const items = Object.entries(raw).map(([k,v]) => ({ k, v, label: prettyKeyCompact(k) }));
+
+    // MPPT por source (DC only; com linhas mesmo sem valor)
+    const mpptItems = collectMpptItems(payload, idx);
+
+    const baseItems = Object.entries(raw).map(([k,v]) => ({ k, v, label: prettyKeyCompact(k) }));
+
+    // Para evitar “sumiço” de nomes: NÃO filtramos nada.
+    // Ordenação: deixa metas no topo; o resto ordena por label/k.
+    const items = baseItems.concat(mpptItems);
     items.sort((a,b) => (String(a.label).localeCompare(String(b.label)) || String(a.k).localeCompare(String(b.k))));
 
-    tblAll.innerHTML = items.map(it => (
-      `<tr><td class="k mono">${String(it.label)}</td><td class="v mono">${fmtAny(it.v)}</td></tr>`
-    )).join("") || `<tr><td class="k mono">—</td><td class="v mono">—</td></tr>`;
+    const renderRow = (it) =>
+      `<tr><td class="k mono">${String(it.label)}</td><td class="v mono">${fmtAny(it.v)}</td></tr>`;
+
+    tblAll.innerHTML =
+      metaRows.map(renderRow).join("") +
+      (items.map(renderRow).join("") || `<tr><td class="k mono">—</td><td class="v mono">—</td></tr>`);
 
     const dumpObj = snapshotVerbose(raw);
+    const mpptDump = collectMpptDump(payload, idx);
+    if (mpptDump) dumpObj.__mppt_by_source = mpptDump;
+
     dumpObj.__heatmap = {
       day: ds,
       time_bin: ts,
       dt_minutes: hmState.dtm,
-      has_any: true,
+      has_any: !!cellObj.has_any,
+      idx: (idx >= 0 ? idx : null),
       has_oper: !!cellObj.has_oper,
-      class: cellObj.cls,
+      class: clsTxt,
       reason: cellObj.reason,
     };
 

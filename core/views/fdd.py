@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import logging
 import inspect
+import math
 
 from zoneinfo import ZoneInfo
 from django.db.models import Count
@@ -35,35 +36,69 @@ logger = logging.getLogger(__name__)
 
 
 # ----------------------------
+# helpers source (MPPT vs AGG)
+# ----------------------------
+def _is_mppt_source(src: str) -> bool:
+    u = (src or "").upper()
+    return "|MPPT" in u
+
+
+def _is_agg_source(src: str) -> bool:
+    """
+    AGG:
+      - sem "|" (ex: SHINEMONITOR)
+      - OU termina com |AGG
+    """
+    s = (src or "").strip()
+    if not s:
+        return False
+    u = s.upper()
+    if "|" not in u:
+        return True
+    if u.endswith("|AGG"):
+        return True
+    return False
+
+
+# ----------------------------
 # JSON strict/robusto
 # ----------------------------
+def _json_sanitize(x: Any) -> Any:
+    """Converte NaN/Inf -> None recursivamente (para allow_nan=False)."""
+    if x is None:
+        return None
+    if isinstance(x, float):
+        return x if math.isfinite(x) else None
+    if isinstance(x, (datetime, date)):
+        return x.isoformat()
+    if isinstance(x, dict):
+        return {str(k): _json_sanitize(v) for k, v in x.items()}
+    if isinstance(x, (list, tuple)):
+        return [_json_sanitize(v) for v in x]
+    try:
+        import numpy as np  # type: ignore
+        if isinstance(x, np.generic):
+            v = x.item()
+            if isinstance(v, float) and (not math.isfinite(v)):
+                return None
+            return _json_sanitize(v)
+        if isinstance(x, np.ndarray):
+            return [_json_sanitize(v) for v in x.tolist()]
+    except Exception:
+        pass
+    if is_dataclass(x):
+        return _json_sanitize(asdict(x))
+    return x
+
+
 def _json_response_strict(payload: Any, *, status: int = 200) -> JsonResponse:
-    """JsonResponse com serializer robusto (datetime, date, numpy, etc.)."""
-
-    def _default(o: Any):
-        if isinstance(o, (datetime, date)):
-            return o.isoformat()
-
-        try:
-            import numpy as np  # type: ignore
-            if isinstance(o, np.generic):
-                return o.item()
-            if isinstance(o, np.ndarray):
-                return o.tolist()
-        except Exception:
-            pass
-
-        if is_dataclass(o):
-            return asdict(o)
-
-        return str(o)
-
     safe = isinstance(payload, dict)
+    payload = _json_sanitize(payload)
     return JsonResponse(
         payload,
         status=status,
         safe=safe,
-        json_dumps_params={"ensure_ascii": False, "default": _default},
+        json_dumps_params={"ensure_ascii": False, "allow_nan": False},
     )
 
 
@@ -82,7 +117,7 @@ def _as_float(x: Any) -> Optional[float]:
         if x is None:
             return None
         v = float(x)
-        if v != v:  # NaN
+        if not math.isfinite(v):
             return None
         return v
     except Exception:
@@ -111,11 +146,7 @@ def _mean_none(xs: List[Optional[float]]) -> Optional[float]:
     return (acc / n) if n else None
 
 
-def _pick_best_sources(
-    plant_id: int,
-    dt0_utc: datetime,
-    dt1_utc: datetime
-) -> Tuple[Optional[str], Optional[str]]:
+def _pick_best_sources(plant_id: int, dt0_utc: datetime, dt1_utc: datetime) -> Tuple[Optional[str], Optional[str]]:
     """Escolhe (source_oper, source_meteo) com maior n no range."""
     row = (
         PVPlantMergedRecord15m.objects.filter(
@@ -148,9 +179,9 @@ def _upsert_diag15m(
 ) -> Dict[str, Any]:
     """
     Upsert em PlantDiagnostic15m para o range.
-    FIX importante:
-      - bulk_create/bulk_update NÃO disparam auto_now/auto_now_add.
-      - Portanto, setamos updated_at (e created_at se existir) manualmente.
+    FIX:
+      - bulk_create/bulk_update NÃO disparam auto_now/auto_now_add
+      - setamos updated_at/created_at manualmente.
     """
     assert (
         len(times_utc)
@@ -236,20 +267,18 @@ def mismatch_fdd_view(request: HttpRequest):
     d_end = date.today()
     d_start = d_end - timedelta(days=7)
 
-    # tenta preselect via querystring; fallback: primeira planta
     plant_id = request.GET.get("plant_id") or request.GET.get("pk") or request.GET.get("plant_pk")
     if not plant_id and plants:
         plant_id = str(plants[0].id)
 
     return render(
         request,
-        "dashboard/mismatch_fdd.html",  # <<< FIX: template path coerente com o arquivo que você mandou
+        "dashboard/mismatch_fdd.html",  # ✅ alinhado com o template que você mandou
         {
             "plants": plants,
             "plant_id": plant_id,
             "start": request.GET.get("start") or d_start.isoformat(),
             "end": request.GET.get("end") or d_end.isoformat(),
-            # defaults de UI
             "dt_minutes": int(float(request.GET.get("dt_minutes") or 15)),
             "warn_abs": float((request.GET.get("warn_abs") or 0.35)),
             "fault_abs": float((request.GET.get("fault_abs") or 0.90)),
@@ -310,6 +339,7 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
     if not src_meteo:
         return _json_response_strict({"ok": False, "error": "Sem registros no range (PVPlantMergedRecord15m)."}, status=404)
 
+    # available source_oper no range (para dropdown)
     src_oper_rows = (
         PVPlantMergedRecord15m.objects.filter(
             plant_id=plant_id,
@@ -333,6 +363,46 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
             return _json_response_strict({"ok": False, "error": f"source_oper '{src_oper_raw}' não existe no range."}, status=404)
         selected_sources = [src_oper_raw]
 
+    # ----------------------------
+    # Query merged_15m (values dinâmico — não quebra se campo não existir)
+    # ----------------------------
+    field_names = {ff.name for ff in PVPlantMergedRecord15m._meta.get_fields() if hasattr(ff, "name")}
+
+    base_values = [
+        "ts_utc",
+        "source_oper",
+        "p_ac_w",
+        "p_dc_w",
+        "e_ac_wh_15",
+        "v_dc_v",
+        "i_dc_a",
+        "v_ac_v",
+        "i_ac_a",
+        "inv_coverage",
+        "flag_inv_missing",
+        "gti",
+        "ghi",
+        "dni",
+        "dhi",
+        "temp_air",
+        "wind_speed",
+        "rh",
+        "flag_meteo_missing",
+    ]
+
+    optional_values = [
+        # MPPT (se existirem no model)
+        "mppt1_vdc_v", "mppt2_vdc_v", "mppt3_vdc_v", "mppt4_vdc_v",
+        "mppt1_idc_a", "mppt2_idc_a", "mppt3_idc_a", "mppt4_idc_a",
+        # alarmes (se existirem)
+        "alarm_code", "alarm_sev",
+    ]
+
+    values_fields = list(base_values)
+    for k in optional_values:
+        if k in field_names:
+            values_fields.append(k)
+
     qs = (
         PVPlantMergedRecord15m.objects.filter(
             plant_id=plant_id,
@@ -341,28 +411,8 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
             ts_utc__gte=dt0_utc,
             ts_utc__lt=dt1_utc,
         )
-        .order_by("ts_utc")
-        .values(
-            "ts_utc",
-            "source_oper",
-            "p_ac_w",
-            "p_dc_w",
-            "e_ac_wh_15",
-            "v_dc_v",
-            "i_dc_a",
-            "v_ac_v",
-            "i_ac_a",
-            "inv_coverage",
-            "flag_inv_missing",
-            "gti",
-            "ghi",
-            "dni",
-            "dhi",
-            "temp_air",
-            "wind_speed",
-            "rh",
-            "flag_meteo_missing",
-        )
+        .order_by("ts_utc", "source_oper")
+        .values(*values_fields)
     )
     rows = list(qs)
     if not rows:
@@ -374,6 +424,8 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
     per_ts: Dict[datetime, Dict[str, Dict[str, Any]]] = {}
     for r in rows:
         ts = r["ts_utc"]
+        if isinstance(ts, str):
+            ts = datetime.fromisoformat(ts.replace("Z", "+00:00"))
         if ts.tzinfo is None:
             ts = ts.replace(tzinfo=dt_tz.utc)
         src = r.get("source_oper") or ""
@@ -383,8 +435,12 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
 
     times_utc = sorted(per_ts.keys())
     n = len(times_utc)
+    if n == 0:
+        return _json_response_strict({"ok": False, "error": "Sem timestamps válidos no range."}, status=404)
 
-    # agregados (somatório/mean)
+    # ----------------------------
+    # Séries agregadas (POLICY: prefer ΣMPPT, fallback AGG)
+    # ----------------------------
     p_ac_w: List[Optional[float]] = [None] * n
     p_dc_w: List[Optional[float]] = [None] * n
     e_ac_wh_15: List[Optional[float]] = [None] * n
@@ -393,7 +449,10 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
     v_ac_v: List[Optional[float]] = [None] * n
     i_ac_a: List[Optional[float]] = [None] * n
     inv_cov: List[Optional[float]] = [None] * n
-    flag_inv_missing: List[bool] = [False] * n
+
+    # ✅ flags: "all missing" e "partial missing" (evita cinza indevido)
+    flag_inv_missing_all: List[bool] = [False] * n
+    flag_inv_missing_partial: List[bool] = [False] * n
 
     # meteo (um row por ts)
     gti: List[Optional[float]] = [None] * n
@@ -405,8 +464,13 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
     rh: List[Optional[float]] = [None] * n
     flag_meteo_missing: List[bool] = [False] * n
 
-    # por source
-    series_by_source: Dict[str, Dict[str, List[Optional[float]]]] = {
+    # comparativos (debug / UX)
+    p_ac_mppt_sum_w: List[Optional[float]] = [None] * n
+    p_ac_agg_w: List[Optional[float]] = [None] * n
+    policy_used: List[str] = [""] * n
+
+    # por source (inclui MPPT + alarmes)
+    series_by_source: Dict[str, Dict[str, List[Any]]] = {
         src: {
             "p_ac_w": [None] * n,
             "p_dc_w": [None] * n,
@@ -415,6 +479,15 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
             "i_dc_a": [None] * n,
             "v_ac_v": [None] * n,
             "i_ac_a": [None] * n,
+
+            "mppt1_vdc_v": [None] * n, "mppt2_vdc_v": [None] * n, "mppt3_vdc_v": [None] * n, "mppt4_vdc_v": [None] * n,
+            "mppt1_idc_a": [None] * n, "mppt2_idc_a": [None] * n, "mppt3_idc_a": [None] * n, "mppt4_idc_a": [None] * n,
+
+            "alarm_code": [None] * n,
+            "alarm_sev": [None] * n,
+
+            "inv_coverage": [None] * n,
+            "flag_inv_missing": [None] * n,
         }
         for src in selected_sources
     }
@@ -422,63 +495,29 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
     for i, ts in enumerate(times_utc):
         by_src = per_ts.get(ts, {})
 
-        pac_l: List[Optional[float]] = []
-        pdc_l: List[Optional[float]] = []
-        e15_l: List[Optional[float]] = []
-        vdc_l: List[Optional[float]] = []
-        idc_l: List[Optional[float]] = []
-        vac_l: List[Optional[float]] = []
-        iac_l: List[Optional[float]] = []
-        cov_l: List[Optional[float]] = []
+        present = [s for s in selected_sources if s in by_src]
+        present_mppt = [s for s in present if _is_mppt_source(s)]
+        present_agg = [s for s in present if _is_agg_source(s)]
 
-        inv_missing_any = False
+        if present_mppt:
+            chosen = present_mppt
+            policy = "mppt_sum"
+        elif present_agg:
+            chosen = present_agg
+            policy = "agg_fallback"
+        else:
+            chosen = present
+            policy = "any_fallback"
+
+        policy_used[i] = policy
+
+        # meteo: usa qualquer row do timestamp (primeiro válido)
         first_row: Optional[Dict[str, Any]] = None
-
-        for src in selected_sources:
-            r = by_src.get(src)
-            if r is None:
-                continue
-            if first_row is None:
-                first_row = r
-
-            pac = _as_float(r.get("p_ac_w"))
-            pdc = _as_float(r.get("p_dc_w"))
-            e15 = _as_float(r.get("e_ac_wh_15"))
-            vdc = _as_float(r.get("v_dc_v"))
-            idc = _as_float(r.get("i_dc_a"))
-            vac = _as_float(r.get("v_ac_v"))
-            iac = _as_float(r.get("i_ac_a"))
-            cov = _as_float(r.get("inv_coverage"))
-            inv_missing_any = inv_missing_any or bool(r.get("flag_inv_missing") or False)
-
-            pac_l.append(pac)
-            pdc_l.append(pdc)
-            e15_l.append(e15)
-            vdc_l.append(vdc)
-            idc_l.append(idc)
-            vac_l.append(vac)
-            iac_l.append(iac)
-            cov_l.append(cov)
-
-            sb = series_by_source.get(src)
-            if sb is not None:
-                sb["p_ac_w"][i] = pac
-                sb["p_dc_w"][i] = pdc
-                sb["e_ac_wh_15"][i] = e15
-                sb["v_dc_v"][i] = vdc
-                sb["i_dc_a"][i] = idc
-                sb["v_ac_v"][i] = vac
-                sb["i_ac_a"][i] = iac
-
-        p_ac_w[i] = _sum_none(pac_l)
-        p_dc_w[i] = _sum_none(pdc_l)
-        e_ac_wh_15[i] = _sum_none(e15_l)
-        v_dc_v[i] = _mean_none(vdc_l)
-        i_dc_a[i] = _sum_none(idc_l)
-        v_ac_v[i] = _mean_none(vac_l)
-        i_ac_a[i] = _sum_none(iac_l)
-        inv_cov[i] = _mean_none(cov_l)
-        flag_inv_missing[i] = inv_missing_any
+        for s0 in present:
+            rr = by_src.get(s0)
+            if rr is not None:
+                first_row = rr
+                break
 
         if first_row is not None:
             gti[i] = _as_float(first_row.get("gti"))
@@ -490,6 +529,84 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
             rh[i] = _as_float(first_row.get("rh"))
             flag_meteo_missing[i] = bool(first_row.get("flag_meteo_missing") or False)
 
+        # preenche series_by_source
+        for src in present:
+            r = by_src.get(src)
+            if r is None:
+                continue
+
+            pac = _as_float(r.get("p_ac_w"))
+            pdc = _as_float(r.get("p_dc_w"))
+            e15 = _as_float(r.get("e_ac_wh_15"))
+            vdc = _as_float(r.get("v_dc_v"))
+            idc = _as_float(r.get("i_dc_a"))
+            vac = _as_float(r.get("v_ac_v"))
+            iac = _as_float(r.get("i_ac_a"))
+            cov = _as_float(r.get("inv_coverage"))
+            inv_miss = bool(r.get("flag_inv_missing") or False)
+
+            sb = series_by_source.get(src)
+            if sb is not None:
+                sb["p_ac_w"][i] = pac
+                sb["p_dc_w"][i] = pdc
+                sb["e_ac_wh_15"][i] = e15
+                sb["v_dc_v"][i] = vdc
+                sb["i_dc_a"][i] = idc
+                sb["v_ac_v"][i] = vac
+                sb["i_ac_a"][i] = iac
+                sb["inv_coverage"][i] = cov
+                sb["flag_inv_missing"][i] = inv_miss
+
+                if "mppt1_vdc_v" in values_fields:
+                    sb["mppt1_vdc_v"][i] = _as_float(r.get("mppt1_vdc_v"))
+                    sb["mppt2_vdc_v"][i] = _as_float(r.get("mppt2_vdc_v"))
+                    sb["mppt3_vdc_v"][i] = _as_float(r.get("mppt3_vdc_v"))
+                    sb["mppt4_vdc_v"][i] = _as_float(r.get("mppt4_vdc_v"))
+                    sb["mppt1_idc_a"][i] = _as_float(r.get("mppt1_idc_a"))
+                    sb["mppt2_idc_a"][i] = _as_float(r.get("mppt2_idc_a"))
+                    sb["mppt3_idc_a"][i] = _as_float(r.get("mppt3_idc_a"))
+                    sb["mppt4_idc_a"][i] = _as_float(r.get("mppt4_idc_a"))
+
+                if "alarm_code" in values_fields:
+                    sb["alarm_code"][i] = r.get("alarm_code")
+                    sb["alarm_sev"][i] = r.get("alarm_sev")
+
+        # agregados de comparação
+        pac_mppt = _sum_none([_as_float(by_src[s].get("p_ac_w")) for s in present_mppt]) if present_mppt else None
+        pac_agg = _sum_none([_as_float(by_src[s].get("p_ac_w")) for s in present_agg]) if present_agg else None
+        p_ac_mppt_sum_w[i] = pac_mppt
+        p_ac_agg_w[i] = pac_agg
+
+        # agregação principal (chosen)
+        pac_l = [_as_float(by_src[s].get("p_ac_w")) for s in chosen] if chosen else []
+        pdc_l = [_as_float(by_src[s].get("p_dc_w")) for s in chosen] if chosen else []
+        e15_l = [_as_float(by_src[s].get("e_ac_wh_15")) for s in chosen] if chosen else []
+        vdc_l = [_as_float(by_src[s].get("v_dc_v")) for s in chosen] if chosen else []
+        idc_l = [_as_float(by_src[s].get("i_dc_a")) for s in chosen] if chosen else []
+        vac_l = [_as_float(by_src[s].get("v_ac_v")) for s in chosen] if chosen else []
+        iac_l = [_as_float(by_src[s].get("i_ac_a")) for s in chosen] if chosen else []
+        cov_l = [_as_float(by_src[s].get("inv_coverage")) for s in chosen] if chosen else []
+
+        miss_flags = [bool(by_src[s].get("flag_inv_missing") or False) for s in chosen] if chosen else []
+
+        p_ac_w[i] = _sum_none(pac_l)
+        p_dc_w[i] = _sum_none(pdc_l)
+        e_ac_wh_15[i] = _sum_none(e15_l)
+        v_dc_v[i] = _mean_none(vdc_l)
+        i_dc_a[i] = _sum_none(idc_l)
+        v_ac_v[i] = _mean_none(vac_l)
+        i_ac_a[i] = _sum_none(iac_l)
+        inv_cov[i] = _mean_none(cov_l)
+
+        if not miss_flags:
+            flag_inv_missing_all[i] = True
+            flag_inv_missing_partial[i] = False
+        else:
+            all_miss = all(miss_flags)
+            any_miss = any(miss_flags)
+            flag_inv_missing_all[i] = bool(all_miss)
+            flag_inv_missing_partial[i] = bool(any_miss and (not all_miss))
+
     # timestamps locais/utc (strings)
     x_local_dt = [t.astimezone(tz) for t in times_utc]
     x_local = [t.isoformat() for t in x_local_dt]
@@ -498,9 +615,9 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
     hm_day_local = [t.date().isoformat() for t in x_local_dt]
     hm_minute_local = [t.hour * 60 + t.minute for t in x_local_dt]
 
-    # POA final (GTI se existir; senão transposição; fallback: GHI)
-    g_poa_used: List[Optional[float]] = [None] * n
-
+    # ----------------------------
+    # thresholds (UI)
+    # ----------------------------
     def _gf(key: str, default: float) -> float:
         raw = (data.get(key) or "").strip()
         if not raw:
@@ -519,7 +636,6 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
         except Exception:
             return int(default)
 
-    # >>> UI manda gpoa_min/pmin_w; aceitamos também gpoa_gate como alias “técnico”
     gpoa_gate = _gf("gpoa_gate", _gf("gpoa_min", 50.0))
     pmin_w = _gf("pmin_w", 0.0)
 
@@ -550,7 +666,6 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
 
     # ----------------------------
     # power_model: P_expected + mismatch + valid + (tcell)
-    # e construção de g_poa_used coerente
     # ----------------------------
     try:
         import numpy as np
@@ -597,16 +712,16 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
         dni_arg = dni_np if np.isfinite(dni_np).any() else None
         dhi_arg = dhi_np if np.isfinite(dhi_np).any() else None
 
-        # tenta POA transposto
+        # transposição (condicional por assinatura)
         g_poa_transpo = None
-        if (ghi_arg is not None) and (times_utc is not None):
+        if ghi_arg is not None:
             lat = getattr(pl, "lat_deg", None)
             lon = getattr(pl, "lon_deg", None)
             tilt = getattr(pl, "tilt_deg", None)
             azs = getattr(pl, "azimuth_deg", None)
             if None not in (lat, lon, tilt, azs):
-                shift_min = float(getattr(pl, "meteo_time_shift_minutes", 0.0) or 0.0)
-                trans = transpose_ghi_to_poa_isotropic(
+                trans_sig = inspect.signature(transpose_ghi_to_poa_isotropic)
+                trans_kwargs = dict(
                     ghi=ghi_arg,
                     dhi=dhi_arg,
                     dni=dni_arg,
@@ -616,11 +731,13 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
                     tilt_deg=float(tilt),
                     azimuth_deg=float(azs),
                     albedo=float(getattr(pl, "albedo", 0.20) or 0.20),
-                    times_shift_minutes=shift_min,
                 )
+                if "times_shift_minutes" in trans_sig.parameters:
+                    trans_kwargs["times_shift_minutes"] = float(getattr(pl, "meteo_time_shift_minutes", 0.0) or 0.0)
+
+                trans = transpose_ghi_to_poa_isotropic(**trans_kwargs)
                 g_poa_transpo = np.asarray(trans.get("g_poa"), dtype=float)
 
-        # POA final usado p/ gating/persistência/payload
         if has_any_gti:
             if g_poa_transpo is not None and g_poa_transpo.size == gti_np.size:
                 g_poa_used_np = np.where(mask_gti, gti_np, g_poa_transpo)
@@ -639,11 +756,8 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
 
         sig = inspect.signature(expected_and_mismatch)
 
-        # se não há GTI, deixa o model transpor (quando suportado)
-        g_poa_for_model = None if (not has_any_gti) else g_poa_used_np
-
         kwargs: Dict[str, Any] = dict(
-            g_poa=g_poa_for_model,
+            g_poa=g_poa_used_np,  # ✅ sempre passa POA usado
             tamb_c=tamb_np,
             pac_real_w=pac_real_np,
             module=mod,
@@ -653,23 +767,8 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
             eps_w=50.0,
         )
 
-        if not has_any_gti:
-            if "ghi" in sig.parameters:
-                kwargs["ghi"] = ghi_arg
-            if "dni" in sig.parameters:
-                kwargs["dni"] = dni_arg
-            if "dhi" in sig.parameters:
-                kwargs["dhi"] = dhi_arg
-            if "times_utc" in sig.parameters:
-                kwargs["times_utc"] = times_utc
-            if "use_transposition_if_needed" in sig.parameters:
-                kwargs["use_transposition_if_needed"] = True
-        else:
-            if "use_transposition_if_needed" in sig.parameters:
-                kwargs["use_transposition_if_needed"] = False
-            if "times_utc" in sig.parameters:
-                kwargs["times_utc"] = times_utc
-
+        if "times_utc" in sig.parameters:
+            kwargs["times_utc"] = times_utc
         if "dt_minutes" in sig.parameters:
             kwargs["dt_minutes"] = 15.0
         if "window_minutes" in sig.parameters:
@@ -714,11 +813,11 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
         return _json_response_strict({"ok": False, "error": f"{type(e).__name__}: {e}"}, status=500)
 
     # ----------------------------
-    # PIPELINE: Detecção (EWMA/CUSUM) + RCA
+    # PIPELINE: Detecção + RCA
     # ----------------------------
     use_legacy = (data.get("legacy") or data.get("use_legacy") or "").strip().lower() in ("1", "true", "yes", "on")
 
-    # gating base adicional (UI)
+    # ✅ gate usa flag_inv_missing_all (não “any”), para não matar pontos parcialmente disponíveis
     base_gate: List[bool] = []
     for i in range(n):
         gp = g_poa_used[i]
@@ -727,7 +826,7 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
         ok = ok and (gp is not None) and (float(gp) >= float(gpoa_gate))
         ok = ok and (pr is not None) and (float(pr) >= float(pmin_w))
         ok = ok and (not bool(flag_meteo_missing[i]))
-        ok = ok and (not bool(flag_inv_missing[i]))
+        ok = ok and (not bool(flag_inv_missing_all[i]))
         base_gate.append(ok)
 
     if use_legacy:
@@ -735,7 +834,7 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
             times_utc=times_utc,
             mismatch_rel=mismatch_rel,
             g_poa_wm2=g_poa_used,
-            valid=base_gate,  # aplica gate para reduzir falso positivo também no legado
+            valid=base_gate,
             thresholds=thr,
         )
         codes = [int(c) for c in out_cls["codes"]]
@@ -772,9 +871,9 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
         det = detect_anomalies(
             mismatch_rel=mismatch_rel,
             g_poa_wm2=g_poa_used,
-            valid_model=base_gate,  # gate base + flags
+            valid_model=base_gate,
             flag_meteo_missing=flag_meteo_missing,
-            flag_inv_missing=flag_inv_missing,
+            flag_inv_missing=flag_inv_missing_all,  # ✅ all-missing
             inv_coverage=inv_cov,
             params=det_params,
         ) or {}
@@ -789,7 +888,6 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
             "baseline": det.get("baseline"),
         }
 
-        # tenta cap do inversor p/ clipping (opcional)
         pac_cap_w = None
         try:
             inv_obj = getattr(details, "inverter", None)
@@ -816,7 +914,7 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
             i_dc_a=i_dc_a,
             pac_real_w=p_ac_w,
             pac_model_w=pac_model_w,
-            flag_inv_missing=flag_inv_missing,
+            flag_inv_missing=flag_inv_missing_all,  # ✅ all-missing
             flag_meteo_missing=flag_meteo_missing,
             inv_coverage=inv_cov,
             pac_cap_w=pac_cap_w,
@@ -860,7 +958,7 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
             times_utc=times_utc,
             codes=codes,
             labels=labels,
-            valid=valid_period,  # <<< FIX: salva só o que foi "avaliado" (gate + céu estável)
+            valid=valid_period,
             g_poa=g_poa_used,
             tcell_c=tcell_c,
             pac_real_w=p_ac_w,
@@ -869,22 +967,26 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
         )
 
     # ----------------------------
-    # DUMP por tkey (mantido)
+    # DUMP por tkey (usa dump_by_tkey no template)
     # ----------------------------
     dump_fields = [
         "p_ac_w", "p_dc_w", "e_ac_wh_15", "v_dc_v", "i_dc_a", "v_ac_v", "i_ac_a",
+        "mppt1_vdc_v", "mppt2_vdc_v", "mppt3_vdc_v", "mppt4_vdc_v",
+        "mppt1_idc_a", "mppt2_idc_a", "mppt3_idc_a", "mppt4_idc_a",
+        "alarm_code", "alarm_sev",
         "inv_coverage", "flag_inv_missing",
         "gti", "ghi", "dni", "dhi", "temp_air", "wind_speed", "rh", "flag_meteo_missing",
     ]
 
     dump_by_tkey: Dict[str, Any] = {}
-    for ts_utc in times_utc:
+    for i, ts_utc in enumerate(times_utc):
         tloc = ts_utc.astimezone(tz)
         tkey = tloc.strftime("%Y-%m-%dT%H:%M")
 
         by_src = per_ts.get(ts_utc, {})
-        src_dump: Dict[str, Any] = {}
+
         meteo_dump: Dict[str, Any] = {}
+        src_dump: Dict[str, Any] = {}
 
         any_row = None
         for sname in selected_sources:
@@ -909,6 +1011,19 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
                 "i_dc_a": rr.get("i_dc_a"),
                 "v_ac_v": rr.get("v_ac_v"),
                 "i_ac_a": rr.get("i_ac_a"),
+
+                "mppt1_vdc_v": rr.get("mppt1_vdc_v"),
+                "mppt2_vdc_v": rr.get("mppt2_vdc_v"),
+                "mppt3_vdc_v": rr.get("mppt3_vdc_v"),
+                "mppt4_vdc_v": rr.get("mppt4_vdc_v"),
+                "mppt1_idc_a": rr.get("mppt1_idc_a"),
+                "mppt2_idc_a": rr.get("mppt2_idc_a"),
+                "mppt3_idc_a": rr.get("mppt3_idc_a"),
+                "mppt4_idc_a": rr.get("mppt4_idc_a"),
+
+                "alarm_code": rr.get("alarm_code"),
+                "alarm_sev": rr.get("alarm_sev"),
+
                 "inv_coverage": rr.get("inv_coverage"),
                 "flag_inv_missing": rr.get("flag_inv_missing"),
             }
@@ -917,27 +1032,35 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
             "ts_local": tloc.isoformat(),
             "ts_utc": ts_utc.astimezone(dt_tz.utc).isoformat(),
             "source_meteo": src_meteo,
+            "policy": policy_used[i],
+            "chosen_total": {
+                "p_ac_w": p_ac_w[i],
+                "p_ac_mppt_sum_w": p_ac_mppt_sum_w[i],
+                "p_ac_agg_w": p_ac_agg_w[i],
+                "inv_coverage": inv_cov[i],
+                "flag_inv_missing_all": flag_inv_missing_all[i],
+                "flag_inv_missing_partial": flag_inv_missing_partial[i],
+            },
             "sources": src_dump,
             "meteo": meteo_dump,
         }
 
-    # mapa opcional (front usa)
+    # severidade (para heatmap)
     rca_code_to_sev = {
         str(CODE_INVALID): "none",
         "0": "ok",
-        "1": "ok",
-        "2": "anom",
+        "1": "warn",
+        "2": "warn",
         "3": "crit",
         "4": "crit",
     }
 
-    # resumo simples
-    sev_counts = {"none": 0, "ok": 0, "anom": 0, "crit": 0}
+    sev_counts = {"none": 0, "ok": 0, "warn": 0, "crit": 0}
     for c, v in zip(codes, valid_period):
         if not v or int(c) == int(CODE_INVALID):
             sev_counts["none"] += 1
             continue
-        sev = rca_code_to_sev.get(str(int(c)), "anom")
+        sev = rca_code_to_sev.get(str(int(c)), "warn")
         sev_counts[sev] = sev_counts.get(sev, 0) + 1
 
     payload = {
@@ -954,8 +1077,9 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
         },
         "sources": {
             "source_meteo": src_meteo,
-            "source_oper_list": source_oper_list,
-            "selected_sources": selected_sources,
+            "source_oper_list": source_oper_list,   # ✅ disponíveis
+            "selected_sources": selected_sources,   # ✅ selecionadas
+            "total_policy": "prefer_mppt_sum",
         },
         "x_local": x_local,
         "x_utc": x_utc,
@@ -978,7 +1102,7 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
             "rh": rh,
             "flag_meteo_missing": flag_meteo_missing,
 
-            # oper
+            # oper (TOTAL sem dupla contagem)
             "p_ac_w": p_ac_w,
             "p_ac_real_w": p_ac_w,
             "p_dc_w": p_dc_w,
@@ -988,7 +1112,16 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
             "v_ac_v": v_ac_v,
             "i_ac_a": i_ac_a,
             "inv_coverage": inv_cov,
-            "flag_inv_missing": flag_inv_missing,
+
+            # ✅ flags ajustadas
+            "flag_inv_missing": flag_inv_missing_all,
+            "flag_inv_missing_all": flag_inv_missing_all,
+            "flag_inv_missing_partial": flag_inv_missing_partial,
+
+            # comparação
+            "p_ac_mppt_sum_w": p_ac_mppt_sum_w,
+            "p_ac_agg_w": p_ac_agg_w,
+            "policy_used": policy_used,
 
             # model
             "p_ac_model_w": pac_model_w,
@@ -998,7 +1131,7 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
             # detecção + validade
             "valid_model": valid_model,
             "valid_period": valid_period,
-            "valid": valid_period,  # <<< front usa "valid"
+            "valid": valid_period,
             "stable_sky": stable_sky,
             "anomaly": anomaly,
 

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
-from typing import Sequence, Dict, Any, Optional, Tuple, List, Literal
+from datetime import datetime, timedelta
+from typing import Sequence, Dict, Any, Literal, Tuple, List
 
 import math
 import pandas as pd
@@ -27,9 +27,9 @@ class FetchConfig:
       - extrai métricas canônicas do payload
       - opcional: corrige possível ts_utc errado comparando com Data E Hora do payload
 
-    IMPORTANTE (caso Renovigi/ShineMonitor):
-      - Seu teste mostrou que payload["Data E Hora"] está em UTC-naive (shift 0 quando interpretado como UTC).
-      - Portanto o modo correto é "utc" (ou "auto", que vai detectar).
+    IMPORTANTE (Renovigi/ShineMonitor):
+      - payload["Data E Hora"] costuma vir UTC-naive em muitos cenários (sem offset).
+      - Portanto, o modo correto geralmente é "utc" (ou "auto" para detectar).
     """
 
     # ---- MeteoRecord -> DataFrame
@@ -56,7 +56,7 @@ class FetchConfig:
     # Como interpretar "Data E Hora" quando vier SEM TZ no payload:
     # - "utc": tratar como UTC-naive
     # - "plant_local": tratar como local-naive da planta
-    # - "auto": tenta ambos e escolhe o que minimiza |shift|
+    # - "auto": tenta ambos e escolhe o que minimiza |shift| mediano
     inv_payload_time_mode: Literal["auto", "utc", "plant_local"] = "auto"
 
     # Buffer para busca no banco antes de corrigir timestamp (em horas)
@@ -74,9 +74,6 @@ def _to_utc_series(s: pd.Series) -> pd.Series:
 
 
 def _get_plant_tz(plant: PVPlant) -> str:
-    """
-    Obtém timezone IANA da planta.
-    """
     v = getattr(plant, "timezone", None)
     if isinstance(v, str) and v:
         return v
@@ -103,6 +100,7 @@ def _parse_float(v: Any) -> float:
         if not s or s in ("-", ".", ","):
             return float("nan")
 
+        # pt_BR: 1.234,56  | en_US: 1234.56
         if "," in s and "." in s:
             if s.rfind(",") > s.rfind("."):
                 s = s.replace(".", "").replace(",", ".")
@@ -160,10 +158,10 @@ def _weighted_vdc(mppt_v: List[float], mppt_i: List[float]) -> Tuple[float, floa
 def _extract_renovigi(payload: Dict[str, Any]) -> Dict[str, float]:
     """
     Extrai métricas canônicas do payload RENOVIGI (chaves PT-BR).
-    Ajuste as chaves aqui se seu payload variar.
+    Inclui MPPT1..MPPT4: V/I e Pdc estimado (V*I) por MPPT.
     """
     pac = _parse_float(payload.get("potência ativa total") or payload.get("Potência ativa total"))
-    pdc = _parse_float(payload.get("Potência de saída CC") or payload.get("Potência de saída CC "))
+    pdc_total = _parse_float(payload.get("Potência de saída CC") or payload.get("Potência de saída CC "))
 
     mppt_v = [
         _parse_float(payload.get("Tensão CC MPPT1")),
@@ -177,7 +175,17 @@ def _extract_renovigi(payload: Dict[str, Any]) -> Dict[str, float]:
         _parse_float(payload.get("Corrente CC MPPT3")),
         _parse_float(payload.get("Corrente CC MPPT4")),
     ]
+
+    # Agregado total
     vdc, idc = _weighted_vdc(mppt_v, mppt_i)
+
+    # Pdc por MPPT = V*I (se ambos finitos e I>0)
+    mppt_p = []
+    for v, i in zip(mppt_v, mppt_i):
+        if isinstance(v, (int, float)) and isinstance(i, (int, float)) and math.isfinite(v) and math.isfinite(i) and i > 0:
+            mppt_p.append(float(v * i))
+        else:
+            mppt_p.append(float("nan"))
 
     v_ph = [
         _parse_float(payload.get("Tensão de fase R")),
@@ -194,22 +202,43 @@ def _extract_renovigi(payload: Dict[str, Any]) -> Dict[str, float]:
 
     return {
         "p_ac_w": pac,
-        "p_dc_w": pdc,
+        "p_dc_w": pdc_total,  # total do payload (se existir)
+
         "v_dc_v": vdc,
         "i_dc_a": idc,
         "v_ac_v": vac,
         "i_ac_a": iac,
+
+        # MPPTs (V/I) + Pdc estimado
+        "mppt1_v_dc_v": mppt_v[0],
+        "mppt2_v_dc_v": mppt_v[1],
+        "mppt3_v_dc_v": mppt_v[2],
+        "mppt4_v_dc_v": mppt_v[3],
+
+        "mppt1_i_dc_a": mppt_i[0],
+        "mppt2_i_dc_a": mppt_i[1],
+        "mppt3_i_dc_a": mppt_i[2],
+        "mppt4_i_dc_a": mppt_i[3],
+
+        "mppt1_p_dc_w": mppt_p[0],
+        "mppt2_p_dc_w": mppt_p[1],
+        "mppt3_p_dc_w": mppt_p[2],
+        "mppt4_p_dc_w": mppt_p[3],
     }
 
 
 def _extract_generic(payload: Dict[str, Any]) -> Dict[str, float]:
+    nan = float("nan")
     return {
-        "p_ac_w": float("nan"),
-        "p_dc_w": float("nan"),
-        "v_dc_v": float("nan"),
-        "i_dc_a": float("nan"),
-        "v_ac_v": float("nan"),
-        "i_ac_a": float("nan"),
+        "p_ac_w": nan,
+        "p_dc_w": nan,
+        "v_dc_v": nan,
+        "i_dc_a": nan,
+        "v_ac_v": nan,
+        "i_ac_a": nan,
+        "mppt1_v_dc_v": nan, "mppt2_v_dc_v": nan, "mppt3_v_dc_v": nan, "mppt4_v_dc_v": nan,
+        "mppt1_i_dc_a": nan, "mppt2_i_dc_a": nan, "mppt3_i_dc_a": nan, "mppt4_i_dc_a": nan,
+        "mppt1_p_dc_w": nan, "mppt2_p_dc_w": nan, "mppt3_p_dc_w": nan, "mppt4_p_dc_w": nan,
     }
 
 
@@ -236,8 +265,7 @@ def _localize_payload_time_to_utc(
       - se naive:
           * mode="utc": localiza como UTC
           * mode="plant_local": localiza como plant_tz e converte pra UTC
-          * mode="auto": testa ambos e escolhe o que dá menor |shift| mediano (calculado fora)
-            Aqui apenas retornamos ambos candidatos; a escolha é feita no fetch.
+          * mode="auto": retorna naive; a escolha será feita no fetch (comparando shifts)
     """
     dt = pd.to_datetime(s_payload, errors="coerce")
 
@@ -256,7 +284,7 @@ def _localize_payload_time_to_utc(
         out = dt.dt.tz_localize(plant_tz, ambiguous="NaT", nonexistent="NaT").dt.tz_convert("UTC")
         return out, "plant_local"
 
-    # auto: devolve naive, escolha será feita fora
+    # auto
     return dt, "auto"
 
 
@@ -336,8 +364,16 @@ def fetch_inverter_df(
     qs = Model.objects.filter(**filters).values(*raw_fields).order_by(cfg.inv_ts_field)
     rows = list(qs)
 
+    base_cols = [
+        "ts_utc",
+        "p_dc_w", "p_ac_w", "v_dc_v", "i_dc_a", "v_ac_v", "i_ac_a",
+        "mppt1_v_dc_v","mppt2_v_dc_v","mppt3_v_dc_v","mppt4_v_dc_v",
+        "mppt1_i_dc_a","mppt2_i_dc_a","mppt3_i_dc_a","mppt4_i_dc_a",
+        "mppt1_p_dc_w","mppt2_p_dc_w","mppt3_p_dc_w","mppt4_p_dc_w",
+    ]
+
     if not rows:
-        out = pd.DataFrame(columns=["ts_utc", "p_dc_w", "p_ac_w", "v_dc_v", "i_dc_a", "v_ac_v", "i_ac_a"])
+        out = pd.DataFrame(columns=base_cols)
         out.attrs["meta"] = {
             "plant_tz": plant_tz,
             "inv_rows_raw": 0,
@@ -377,7 +413,6 @@ def fetch_inverter_df(
     payload_time_mode_used = ""
 
     if s_payload.notna().any():
-        # Primeiro: ver se payload já vem tz-aware; se sim, usa direto.
         s_payload_utc, mode0 = _localize_payload_time_to_utc(
             s_payload, plant_tz=plant_tz, mode=cfg.inv_payload_time_mode
         )
@@ -394,7 +429,6 @@ def fetch_inverter_df(
 
         else:
             # AUTO: testa UTC-naive vs LOCAL-naive e escolhe o que minimiza |shift| mediano.
-            # (Seu caso: UTC-naive -> 0h; local-naive -> +3h)
             cand_utc = s_payload.dt.tz_localize("UTC", ambiguous="NaT", nonexistent="NaT")
             cand_local = s_payload.dt.tz_localize(plant_tz, ambiguous="NaT", nonexistent="NaT").dt.tz_convert("UTC")
 
@@ -404,7 +438,6 @@ def fetch_inverter_df(
             dh_utc_valid = dh_utc.dropna()
             dh_local_valid = dh_local.dropna()
 
-            # fallback seguro
             if dh_utc_valid.empty and dh_local_valid.empty:
                 dh = pd.Series([], dtype="float64")
                 payload_time_mode_used = "auto:none"
@@ -417,7 +450,6 @@ def fetch_inverter_df(
             else:
                 med_abs_utc = float(dh_utc_valid.abs().median())
                 med_abs_local = float(dh_local_valid.abs().median())
-
                 if med_abs_utc <= med_abs_local:
                     dh = dh_utc
                     payload_time_mode_used = "utc"
@@ -446,8 +478,10 @@ def fetch_inverter_df(
     df = df[(df["ts_utc"] >= dt_start_utc) & (df["ts_utc"] < dt_end_utc)].copy()
     inv_rows_in_window = int(len(df))
 
-    # numéricos
-    for c in ("p_dc_w", "p_ac_w", "v_dc_v", "i_dc_a", "v_ac_v", "i_ac_a"):
+    # numéricos (inclui MPPTs)
+    for c in base_cols:
+        if c == "ts_utc":
+            continue
         if c not in df.columns:
             df[c] = float("nan")
         df[c] = pd.to_numeric(df[c], errors="coerce")

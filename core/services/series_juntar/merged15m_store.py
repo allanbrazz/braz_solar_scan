@@ -1,9 +1,7 @@
-# core/services/merged15m_store.py
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Sequence, Tuple
-
+from typing import Any, List, Optional
+import math
 import pandas as pd
 from django.db import transaction
 
@@ -19,6 +17,8 @@ MERGED_COLS = (
     "flag_meteo_missing", "flag_inv_missing",
 )
 
+MPPT_KS = (1, 2, 3, 4)
+
 
 def _to_float(v: Any) -> Optional[float]:
     try:
@@ -26,7 +26,17 @@ def _to_float(v: Any) -> Optional[float]:
             return None
         if pd.isna(v):
             return None
-        return float(v)
+        x = float(v)
+        return x if math.isfinite(x) else None
+    except Exception:
+        return None
+
+
+def _to_int(v: Any) -> Optional[int]:
+    try:
+        if v is None or pd.isna(v):
+            return None
+        return int(v)
     except Exception:
         return None
 
@@ -44,6 +54,20 @@ def _to_bool(v: Any) -> bool:
         return False
 
 
+def _row_getf(row, key: str) -> Optional[float]:
+    try:
+        return _to_float(row.get(key))
+    except Exception:
+        return None
+
+
+def _has_any_mppt_cols(df: pd.DataFrame) -> bool:
+    want = []
+    for k in MPPT_KS:
+        want += [f"mppt{k}_p_dc_w", f"mppt{k}_v_dc_v", f"mppt{k}_i_dc_a"]
+    return any(c in df.columns for c in want)
+
+
 @transaction.atomic
 def upsert_merged_15m_df(
     *,
@@ -56,7 +80,15 @@ def upsert_merged_15m_df(
 ) -> int:
     """
     Persiste df15 (index ts_15) em PVPlantMergedRecord15m.
-    df15 precisa estar com índice tz-aware (UTC recomendado).
+
+    NOVO:
+      - Se existirem colunas MPPT (mppt1..4_*), grava 4 linhas por timestamp:
+          source_oper = f"{source_oper}|MPPT{k}"
+        e aloca p_ac_w / e_ac_wh_15 por share DC (Pdc_mppt / sum Pdc_mppt).
+      - Remove rows antigos "TOTAL" (source_oper puro) no intervalo gravado
+        para evitar dupla contagem no dashboard.
+
+    df15 precisa estar indexado por DatetimeIndex tz-aware (UTC recomendado).
     """
     if df15 is None or df15.empty:
         return 0
@@ -64,48 +96,130 @@ def upsert_merged_15m_df(
     if not isinstance(df15.index, pd.DatetimeIndex) or df15.index.tz is None:
         raise ValueError("df15 deve estar indexado por DatetimeIndex tz-aware (ex.: UTC).")
 
-    # Converte índice para UTC e usa como ts_utc
     idx_utc = df15.index.tz_convert("UTC")
+    has_mppt = _has_any_mppt_cols(df15)
+
+    # Se vamos gravar MPPT, remova rows "TOTAL" existentes no intervalo (evita soma duplicada)
+    if has_mppt:
+        ts_min = idx_utc.min().to_pydatetime()
+        ts_max = idx_utc.max().to_pydatetime()
+        PVPlantMergedRecord15m.objects.filter(
+            plant=plant,
+            source_oper=str(source_oper),
+            source_meteo=str(source_meteo),
+            interval_min=int(interval_min),
+            ts_utc__gte=ts_min,
+            ts_utc__lte=ts_max,
+        ).delete()
 
     objs: List[PVPlantMergedRecord15m] = []
 
     for i, ts in enumerate(idx_utc):
         row = df15.iloc[i]
 
-        obj = PVPlantMergedRecord15m(
-            plant=plant,
-            source_oper=source_oper,
-            source_meteo=source_meteo,
-            interval_min=int(interval_min),
-            ts_utc=ts.to_pydatetime(),
+        # Meteo (replicado)
+        met = {
+            "ghi": _to_float(row.get("ghi")),
+            "dni": _to_float(row.get("dni")),
+            "dhi": _to_float(row.get("dhi")),
+            "gti": _to_float(row.get("gti")),
+            "temp_air": _to_float(row.get("temp_air")),
+            "wind_speed": _to_float(row.get("wind_speed")),
+            "rh": _to_float(row.get("rh")),
+            "pressure": _to_float(row.get("pressure")),
+            "flag_meteo_missing": _to_bool(row.get("flag_meteo_missing")),
+        }
 
-            p_dc_w=_to_float(row.get("p_dc_w")),
-            p_ac_w=_to_float(row.get("p_ac_w")),
-            v_dc_v=_to_float(row.get("v_dc_v")),
-            i_dc_a=_to_float(row.get("i_dc_a")),
-            v_ac_v=_to_float(row.get("v_ac_v")),
-            i_ac_a=_to_float(row.get("i_ac_a")),
+        # Qualidade inversor (replicado)
+        inv_n = _to_int(row.get("inv_n"))
+        inv_cov = _to_float(row.get("inv_coverage"))
+        flags = {
+            "inv_n": inv_n,
+            "inv_coverage": inv_cov,
+            "flag_low_coverage": _to_bool(row.get("flag_low_coverage")),
+            "flag_inv_missing": _to_bool(row.get("flag_inv_missing")),
+        }
 
-            e_ac_wh_15=_to_float(row.get("e_ac_wh_15")),
+        pac_total = _to_float(row.get("p_ac_w"))
+        e_total = _to_float(row.get("e_ac_wh_15"))
+        vac = _to_float(row.get("v_ac_v"))
+        iac = _to_float(row.get("i_ac_a"))
 
-            inv_n=int(row.get("inv_n")) if pd.notna(row.get("inv_n")) else None,
-            inv_coverage=_to_float(row.get("inv_coverage")),
-            flag_low_coverage=_to_bool(row.get("flag_low_coverage")),
+        if has_mppt:
+            pdc_k = []
+            vdc_k = []
+            idc_k = []
+            for k in MPPT_KS:
+                pdc_k.append(_row_getf(row, f"mppt{k}_p_dc_w"))
+                vdc_k.append(_row_getf(row, f"mppt{k}_v_dc_v"))
+                idc_k.append(_row_getf(row, f"mppt{k}_i_dc_a"))
 
-            ghi=_to_float(row.get("ghi")),
-            dni=_to_float(row.get("dni")),
-            dhi=_to_float(row.get("dhi")),
-            gti=_to_float(row.get("gti")),
+            pdc_sum = 0.0
+            valid_any = False
+            for p in pdc_k:
+                if p is not None and p > 0:
+                    pdc_sum += float(p)
+                    valid_any = True
 
-            temp_air=_to_float(row.get("temp_air")),
-            wind_speed=_to_float(row.get("wind_speed")),
-            rh=_to_float(row.get("rh")),
-            pressure=_to_float(row.get("pressure")),
+            if valid_any and pdc_sum > 0:
+                for idx_k, k in enumerate(MPPT_KS):
+                    pdc = pdc_k[idx_k]
+                    vdc = vdc_k[idx_k]
+                    idc = idc_k[idx_k]
 
-            flag_meteo_missing=_to_bool(row.get("flag_meteo_missing")),
-            flag_inv_missing=_to_bool(row.get("flag_inv_missing")),
+                    share = (float(pdc) / pdc_sum) if (pdc is not None and pdc > 0) else 0.0
+
+                    pac = (float(pac_total) * share) if (pac_total is not None and share > 0) else None
+                    e15 = (float(e_total) * share) if (e_total is not None and share > 0) else None
+
+                    objs.append(
+                        PVPlantMergedRecord15m(
+                            plant=plant,
+                            source_oper=f"{str(source_oper)}|MPPT{k}",
+                            source_meteo=str(source_meteo),
+                            interval_min=int(interval_min),
+                            ts_utc=ts.to_pydatetime(),
+
+                            # por MPPT
+                            p_dc_w=pdc,
+                            p_ac_w=pac,
+                            v_dc_v=vdc,
+                            i_dc_a=idc,
+
+                            # AC (não é por MPPT, mas útil)
+                            v_ac_v=vac,
+                            i_ac_a=iac,
+
+                            e_ac_wh_15=e15,
+
+                            **flags,
+                            **met,
+                        )
+                    )
+                continue  # não grava TOTAL
+
+        # Fallback: grava 1 linha total (como antes)
+        objs.append(
+            PVPlantMergedRecord15m(
+                plant=plant,
+                source_oper=str(source_oper),
+                source_meteo=str(source_meteo),
+                interval_min=int(interval_min),
+                ts_utc=ts.to_pydatetime(),
+
+                p_dc_w=_to_float(row.get("p_dc_w")),
+                p_ac_w=_to_float(row.get("p_ac_w")),
+                v_dc_v=_to_float(row.get("v_dc_v")),
+                i_dc_a=_to_float(row.get("i_dc_a")),
+                v_ac_v=vac,
+                i_ac_a=iac,
+
+                e_ac_wh_15=e_total,
+
+                **flags,
+                **met,
+            )
         )
-        objs.append(obj)
 
     # Upsert
     try:
@@ -118,6 +232,5 @@ def upsert_merged_15m_df(
         )
         return len(objs)
     except TypeError:
-        # fallback: sem update_conflicts
         PVPlantMergedRecord15m.objects.bulk_create(objs, batch_size=batch_size, ignore_conflicts=True)
         return len(objs)

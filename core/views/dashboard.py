@@ -1,11 +1,15 @@
 # core/views/dashboard.py
 from __future__ import annotations
 
-from core.views._imports import *
+from core.views._imports import *  # mantém seu padrão (HttpRequest, JsonResponse, render, login_required, require_GET etc.)
 from zoneinfo import ZoneInfo
 from datetime import datetime, timedelta, date, time, timezone as dt_timezone
 from typing import Any, Dict, List, Optional
 from django.apps import apps
+
+import logging
+import math
+
 
 # Models
 from core.models import (
@@ -13,13 +17,13 @@ from core.models import (
     PVPlantMergedRecord15m,
 )
 
-# ---------------------------
-# ---------------------------  D A S H B O A R D
-# ---------------------------
-
 UTC = dt_timezone.utc
+logger = logging.getLogger(__name__)
 
 
+# ---------------------------
+# TZ helpers
+# ---------------------------
 def _safe_zoneinfo(tz_name: str) -> ZoneInfo:
     try:
         return ZoneInfo(tz_name or "UTC")
@@ -38,100 +42,17 @@ def _local_dates_to_utc_range(start_date: date, end_date: date, tz_name: str) ->
     return start_local.astimezone(UTC), end_local_excl.astimezone(UTC)
 
 
-def _to_local_iso(ts_utc: datetime, tz: ZoneInfo) -> str:
-    if ts_utc.tzinfo is None:
-        ts_utc = ts_utc.replace(tzinfo=UTC)
-    return ts_utc.astimezone(tz).isoformat()
-
-
-def _to_local_label(ts_utc: datetime, tz: ZoneInfo) -> str:
-    if ts_utc.tzinfo is None:
-        ts_utc = ts_utc.replace(tzinfo=UTC)
-    dt_local = ts_utc.astimezone(tz)
-    return dt_local.strftime("%d/%m %H:%M")
-
-
 def _float_or_none(v: Any) -> Optional[float]:
     if v is None:
         return None
     try:
-        return float(v)
+        x = float(v)
+        return x if math.isfinite(x) else None
     except Exception:
         return None
 
 
-def _pick_sources_for_plant_in_range(
-    plant: PVPlant,
-    dt0_utc: datetime,
-    dt1_utc: datetime,
-    *,
-    interval_min: int = 15,
-) -> tuple[Optional[str], Optional[str]]:
-    """
-    Escolhe source_oper/source_meteo baseado no registro MAIS RECENTE DENTRO DO INTERVALO.
-    Se não houver registro no intervalo, retorna (None, None).
-    """
-    last = (
-        PVPlantMergedRecord15m.objects
-        .filter(plant=plant, interval_min=interval_min, ts_utc__gte=dt0_utc, ts_utc__lt=dt1_utc)
-        .order_by("-ts_utc")
-        .values("source_oper", "source_meteo")
-        .first()
-    )
-    if not last:
-        return None, None
-    return last.get("source_oper"), last.get("source_meteo")
-
-
-def _pick_sources_for_plant_global(
-    plant: PVPlant,
-    *,
-    interval_min: int = 15,
-) -> tuple[Optional[str], Optional[str]]:
-    """
-    Fallback: escolhe source_oper/source_meteo baseado no último registro global.
-    """
-    last = (
-        PVPlantMergedRecord15m.objects
-        .filter(plant=plant, interval_min=interval_min)
-        .order_by("-ts_utc")
-        .values("source_oper", "source_meteo")
-        .first()
-    )
-    if not last:
-        return None, None
-    return last.get("source_oper"), last.get("source_meteo")
-
-
-def _available_source_pairs_in_range(
-    plant: PVPlant,
-    dt0_utc: datetime,
-    dt1_utc: datetime,
-    *,
-    interval_min: int = 15,
-    limit: int = 20,
-) -> List[Dict[str, str]]:
-    """
-    Lista combinações existentes no intervalo, para debug/UX.
-    """
-    pairs = (
-        PVPlantMergedRecord15m.objects
-        .filter(plant=plant, interval_min=interval_min, ts_utc__gte=dt0_utc, ts_utc__lt=dt1_utc)
-        .values("source_oper", "source_meteo")
-        .distinct()
-        .order_by("source_oper", "source_meteo")[:limit]
-    )
-    out = []
-    for p in pairs:
-        so = p.get("source_oper")
-        sm = p.get("source_meteo")
-        if so and sm:
-            out.append({"source_oper": so, "source_meteo": sm})
-    return out
-
-
 def _get_merged15m_model():
-    # Ajuste "core" se o app_label for outro
     return apps.get_model("core", "PVPlantMergedRecord15m")
 
 
@@ -156,11 +77,6 @@ def _pick_latest_sources_for_plant(plant: PVPlant) -> tuple[Optional[str], Optio
     return last.get("source_oper"), last.get("source_meteo")
 
 
-# ---------------------------
-# Views
-# ---------------------------
-logger = logging.getLogger(__name__)
-
 # ----------------------------
 # JSON estrito (evita NaN/Inf)
 # ----------------------------
@@ -171,17 +87,9 @@ except Exception:
 
 
 def _json_safe(x: Any) -> Any:
-    """
-    Converte payload para JSON estrito:
-      - NaN/Inf -> None (null)
-      - numpy types -> python types
-      - ndarray -> list
-      - datetime/date -> isoformat
-    """
     if x is None:
         return None
 
-    # numpy
     if np is not None:
         if isinstance(x, (np.floating,)):
             xf = float(x)
@@ -193,15 +101,12 @@ def _json_safe(x: Any) -> Any:
         if isinstance(x, (np.ndarray,)):
             return [_json_safe(v) for v in x.tolist()]
 
-    # python float
     if isinstance(x, float):
         return x if math.isfinite(x) else None
 
-    # datetime/date
     if isinstance(x, (datetime, date)):
         return x.isoformat()
 
-    # containers
     if isinstance(x, dict):
         return {str(k): _json_safe(v) for k, v in x.items()}
     if isinstance(x, (list, tuple)):
@@ -217,6 +122,31 @@ def _json_response_strict(payload: Dict[str, Any], *, status: int = 200) -> Json
         status=status,
         json_dumps_params={"ensure_ascii": False, "allow_nan": False},
     )
+
+
+# ---------------------------
+# Source classification (MPPT vs AGG)
+# ---------------------------
+def _is_mppt_source(src: str) -> bool:
+    u = (src or "").upper()
+    return "|MPPT" in u
+
+
+def _is_agg_source(src: str) -> bool:
+    """
+    Considera AGG:
+      - sem separador "|" (ex: SHINEMONITOR)
+      - OU termina com |AGG
+    """
+    s = (src or "").strip()
+    if not s:
+        return False
+    u = s.upper()
+    if "|" not in u:
+        return True
+    if u.endswith("|AGG"):
+        return True
+    return False
 
 
 # ---------------------------
@@ -253,38 +183,24 @@ def pv_dashboard_view(request: HttpRequest) -> HttpResponse:
 @login_required
 def pv_dashboard_timeseries_api(request: HttpRequest) -> JsonResponse:
     """
-    Retorna JSON com séries e KPIs (eixo X em horário local),
-    baseado em PVPlantMergedRecord15m.
+    Retorna JSON com séries e KPIs (eixo X em horário local), baseado em PVPlantMergedRecord15m.
 
-    - Agrega TODAS as sources operativas disponíveis no intervalo (ou as escolhidas),
-      e também retorna `series_by_source`.
-
-    IMPORTANTE:
-    - JSON estrito (sem NaN/Inf).
-    - Esta view NÃO referencia fuzzy (não importa nem chama).
-      Se o power_model retornar rca_label/valid, apenas repassa.
+    ✅ Política anti-dupla-contagem:
+      - Se existir MPPT no timestamp -> TOTAL = Σ(MPPTs) e ignora AGG no total.
+      - Se não existir MPPT -> TOTAL = AGG (fallback).
+    Mantém:
+      - series_by_source com todas as curvas (MPPTs + AGG).
+      - series.p_ac_agg_w / p_dc_agg_w / e_ac_wh_15_agg para comparação visual.
+      - sources.available_oper para popular dropdown sem “sumir opções”.
     """
-    import math
     import inspect
     from collections import OrderedDict
-    from typing import Any, Dict, List, Optional
-
-    # use UTC do datetime (não django.utils.timezone)
-    UTC_LOCAL = dt_timezone.utc
 
     # ----------------------------
     # Helpers locais
     # ----------------------------
     def f(v: Any) -> Optional[float]:
-        if v is None:
-            return None
-        try:
-            x = float(v)
-        except Exception:
-            return None
-        if not math.isfinite(x):
-            return None
-        return x
+        return _float_or_none(v)
 
     def s_or_none(v: Any) -> Optional[str]:
         if v is None:
@@ -301,13 +217,7 @@ def pv_dashboard_timeseries_api(request: HttpRequest) -> JsonResponse:
             return None
 
     def _safe_float(v: Any) -> Optional[float]:
-        try:
-            if v is None:
-                return None
-            x = float(v)
-            return x if math.isfinite(x) else None
-        except Exception:
-            return None
+        return _float_or_none(v)
 
     def _mean_none(vals: List[Optional[float]]) -> Optional[float]:
         xs = [x for x in vals if x is not None and math.isfinite(x)]
@@ -415,6 +325,7 @@ def pv_dashboard_timeseries_api(request: HttpRequest) -> JsonResponse:
         src_oper=None,
         src_oper_list=None,
         src_meteo=None,
+        available_oper=None,
         message: str = "",
     ):
         plant_info = {}
@@ -439,7 +350,11 @@ def pv_dashboard_timeseries_api(request: HttpRequest) -> JsonResponse:
             "sources": {
                 "source_oper": src_oper,
                 "source_oper_list": src_oper_list or [],
+                "available_oper": available_oper or [],
                 "source_meteo": src_meteo,
+                "total_policy": "prefer_mppt_sum",
+                "mppt_sources": [],
+                "agg_sources": [],
             },
             "x": [],
             "x_label": [],
@@ -505,19 +420,21 @@ def pv_dashboard_timeseries_api(request: HttpRequest) -> JsonResponse:
     src_oper_raw = (request.GET.get("source_oper") or "").strip() or None
     src_meteo = (request.GET.get("source_meteo") or "").strip() or None
 
-    if not src_oper_raw or not src_meteo:
-        auto_oper, auto_meteo = _pick_latest_sources_for_plant(plant)
+    if (not src_oper_raw) or (not src_meteo):
+        _, auto_meteo = _pick_latest_sources_for_plant(plant)
         src_meteo = src_meteo or auto_meteo
 
     if not src_meteo:
-        payload = _empty_payload(
-            plant=plant, tz_name=tz_name, start_s=start_s, end_s=end_s,
-            dt0_utc=dt0_utc, dt1_utc=dt1_utc,
-            src_oper=None, src_oper_list=[], src_meteo=src_meteo,
-            message="Não há dados merged_15m para esta planta ainda (source_meteo ausente).",
+        return _json_response_strict(
+            _empty_payload(
+                plant=plant, tz_name=tz_name, start_s=start_s, end_s=end_s,
+                dt0_utc=dt0_utc, dt1_utc=dt1_utc,
+                src_oper=None, src_oper_list=[], src_meteo=None, available_oper=[],
+                message="Não há dados merged_15m para esta planta ainda (source_meteo ausente).",
+            )
         )
-        return _json_response_strict(payload)
 
+    # disponíveis (para dropdown)
     avail_oper = list(
         PVPlantMergedRecord15m.objects.filter(
             plant=plant,
@@ -527,6 +444,7 @@ def pv_dashboard_timeseries_api(request: HttpRequest) -> JsonResponse:
             ts_utc__lt=dt1_utc,
         ).values_list("source_oper", flat=True).distinct()
     )
+    avail_oper = [s for s in avail_oper if s]  # remove None/''
 
     if not avail_oper:
         avail_oper = list(
@@ -537,7 +455,9 @@ def pv_dashboard_timeseries_api(request: HttpRequest) -> JsonResponse:
                 ts_utc__lt=dt1_utc,
             ).values_list("source_oper", flat=True).distinct()
         )
+        avail_oper = [s for s in avail_oper if s]
 
+    # seleção
     src_oper_list: List[str] = []
     if src_oper_raw:
         if src_oper_raw.strip().upper() == "ALL":
@@ -552,19 +472,46 @@ def pv_dashboard_timeseries_api(request: HttpRequest) -> JsonResponse:
         src_oper_list = [s for s in src_oper_list if s in avail_set]
 
     if not src_oper_list:
-        payload = _empty_payload(
-            plant=plant, tz_name=tz_name, start_s=start_s, end_s=end_s,
-            dt0_utc=dt0_utc, dt1_utc=dt1_utc,
-            src_oper=src_oper_raw, src_oper_list=[], src_meteo=src_meteo,
-            message="Sem dados merged_15m no intervalo para as fontes operativas selecionadas.",
+        return _json_response_strict(
+            _empty_payload(
+                plant=plant, tz_name=tz_name, start_s=start_s, end_s=end_s,
+                dt0_utc=dt0_utc, dt1_utc=dt1_utc,
+                src_oper=src_oper_raw, src_oper_list=[], src_meteo=src_meteo, available_oper=avail_oper,
+                message="Sem dados merged_15m no intervalo para as fontes operativas selecionadas.",
+            )
         )
-        return _json_response_strict(payload)
 
     src_oper = src_oper_list[0] if src_oper_list else None
 
     # ----------------------------
-    # Query merged_15m (source_oper__in)
+    # Query merged_15m (values dinâmico: não quebra se campo não existir)
     # ----------------------------
+    field_names = {ff.name for ff in PVPlantMergedRecord15m._meta.get_fields() if hasattr(ff, "name")}
+
+    base_values = [
+        "ts_utc",
+        "source_oper",
+        "p_ac_w", "p_dc_w", "e_ac_wh_15",
+        "v_dc_v", "i_dc_a", "v_ac_v", "i_ac_a",
+        "ghi", "gti", "dni", "dhi",
+        "temp_air", "wind_speed", "rh",
+        "inv_coverage",
+        "flag_meteo_missing", "flag_inv_missing",
+    ]
+
+    optional_values = [
+        # MPPT fields (se existirem no model)
+        "mppt1_vdc_v", "mppt2_vdc_v", "mppt3_vdc_v", "mppt4_vdc_v",
+        "mppt1_idc_a", "mppt2_idc_a", "mppt3_idc_a", "mppt4_idc_a",
+        # alarmes (se existirem no model)
+        "alarm_code", "alarm_sev",
+    ]
+
+    values_fields = list(base_values)
+    for k in optional_values:
+        if k in field_names:
+            values_fields.append(k)
+
     qs = (
         PVPlantMergedRecord15m.objects.filter(
             plant=plant,
@@ -575,30 +522,22 @@ def pv_dashboard_timeseries_api(request: HttpRequest) -> JsonResponse:
             ts_utc__lt=dt1_utc,
         )
         .order_by("ts_utc", "source_oper")
-        .values(
-            "ts_utc",
-            "source_oper",
-            "p_ac_w", "p_dc_w", "e_ac_wh_15",
-            "v_dc_v", "i_dc_a", "v_ac_v", "i_ac_a",
-            "ghi", "gti", "dni", "dhi",
-            "temp_air", "wind_speed", "rh",
-            "inv_coverage",
-            "flag_meteo_missing", "flag_inv_missing",
-        )
+        .values(*values_fields)
     )
 
     rows = list(qs)
     if not rows:
-        payload = _empty_payload(
-            plant=plant, tz_name=tz_name, start_s=start_s, end_s=end_s,
-            dt0_utc=dt0_utc, dt1_utc=dt1_utc,
-            src_oper=src_oper, src_oper_list=src_oper_list, src_meteo=src_meteo,
-            message="Sem pontos no intervalo selecionado.",
+        return _json_response_strict(
+            _empty_payload(
+                plant=plant, tz_name=tz_name, start_s=start_s, end_s=end_s,
+                dt0_utc=dt0_utc, dt1_utc=dt1_utc,
+                src_oper=src_oper, src_oper_list=src_oper_list, src_meteo=src_meteo, available_oper=avail_oper,
+                message="Sem pontos no intervalo selecionado.",
+            )
         )
-        return _json_response_strict(payload)
 
     # ----------------------------
-    # Pivô por timestamp
+    # Pivot por timestamp
     # ----------------------------
     rec_by_ts: "OrderedDict[datetime, Dict[str, Dict[str, Any]]]" = OrderedDict()
     sources_set = set()
@@ -610,36 +549,46 @@ def pv_dashboard_timeseries_api(request: HttpRequest) -> JsonResponse:
         if ts_utc is None:
             continue
         if ts_utc.tzinfo is None:
-            ts_utc = ts_utc.replace(tzinfo=UTC_LOCAL)
+            ts_utc = ts_utc.replace(tzinfo=UTC)
 
         src = (r.get("source_oper") or "").strip() or "unknown"
         sources_set.add(src)
         rec_by_ts.setdefault(ts_utc, {})[src] = r
 
     if not rec_by_ts:
-        payload = _empty_payload(
-            plant=plant, tz_name=tz_name, start_s=start_s, end_s=end_s,
-            dt0_utc=dt0_utc, dt1_utc=dt1_utc,
-            src_oper=src_oper, src_oper_list=src_oper_list, src_meteo=src_meteo,
-            message="Sem timestamps válidos no intervalo (ts_utc ausente/inválido).",
+        return _json_response_strict(
+            _empty_payload(
+                plant=plant, tz_name=tz_name, start_s=start_s, end_s=end_s,
+                dt0_utc=dt0_utc, dt1_utc=dt1_utc,
+                src_oper=src_oper, src_oper_list=src_oper_list, src_meteo=src_meteo, available_oper=avail_oper,
+                message="Sem timestamps válidos no intervalo (ts_utc ausente/inválido).",
+            )
         )
-        return _json_response_strict(payload)
 
     sources = sorted(sources_set)
+    mppt_sources = [s for s in sources if _is_mppt_source(s)]
+    agg_sources = [s for s in sources if _is_agg_source(s)]
 
     # ----------------------------
-    # Séries (agregadas + por source)
+    # Séries (TOTAL sem dupla contagem + AGG separado + por source)
     # ----------------------------
     x_iso: List[str] = []
     x_label: List[str] = []
     t_utc: List[datetime] = []
 
+    # TOTAL (prefer ΣMPPT)
     p_ac: List[Optional[float]] = []
     p_dc: List[Optional[float]] = []
+    e15_wh: List[Optional[float]] = []  # para debug (opcional)
     v_dc: List[Optional[float]] = []
     i_dc: List[Optional[float]] = []
     v_ac: List[Optional[float]] = []
     i_ac: List[Optional[float]] = []
+
+    # AGG (medido) — comparação
+    p_ac_agg: List[Optional[float]] = []
+    p_dc_agg: List[Optional[float]] = []
+    e15_wh_agg: List[Optional[float]] = []
 
     ghi: List[Optional[float]] = []
     gti: List[Optional[float]] = []
@@ -653,22 +602,33 @@ def pv_dashboard_timeseries_api(request: HttpRequest) -> JsonResponse:
     p_ac_max = None
     ghi_max = None
 
-    inv_cov_vals: List[float] = []
+    # KPIs — agora por timestamp (não por “ponto fonte”)
+    inv_cov_ts: List[Optional[float]] = []
     met_missing_ts = 0
-    inv_missing_count = 0
-    inv_total_points = 0
+    inv_missing_ts_all = 0
+    inv_missing_ts_partial = 0
 
-    series_by_source: Dict[str, Dict[str, List[Optional[float]]]] = {}
+    # series_by_source
+    series_by_source: Dict[str, Dict[str, List[Any]]] = {}
     for src in sources:
         series_by_source[src] = {
             "p_ac_w": [],
             "p_dc_w": [],
+            "e_ac_wh_15": [],
             "v_dc_v": [],
             "i_dc_a": [],
             "v_ac_v": [],
             "i_ac_a": [],
             "inv_coverage": [],
             "flag_inv_missing": [],
+
+            # MPPT (se vierem no values)
+            "mppt1_vdc_v": [], "mppt2_vdc_v": [], "mppt3_vdc_v": [], "mppt4_vdc_v": [],
+            "mppt1_idc_a": [], "mppt2_idc_a": [], "mppt3_idc_a": [], "mppt4_idc_a": [],
+
+            # alarmes
+            "alarm_code": [],
+            "alarm_sev": [],
         }
 
     for ts_utc, per_src in rec_by_ts.items():
@@ -678,17 +638,10 @@ def pv_dashboard_timeseries_api(request: HttpRequest) -> JsonResponse:
         x_iso.append(ts_local.isoformat())
         x_label.append(ts_local.strftime("%d/%m %H:%M"))
 
-        pac_vals: List[Optional[float]] = []
-        pdc_vals: List[Optional[float]] = []
-        e15_vals: List[Optional[float]] = []
-        vdc_vals: List[Optional[float]] = []
-        idc_vals: List[Optional[float]] = []
-        vac_vals: List[Optional[float]] = []
-        iac_vals: List[Optional[float]] = []
-        cov_vals: List[Optional[float]] = []
-
+        # meteo: usa qualquer row do timestamp (primeiro)
         first_row = None
         if per_src:
+            # tenta ser determinístico: pega o primeiro pela ordem sources
             for s0 in sources:
                 if s0 in per_src:
                     first_row = per_src[s0]
@@ -718,6 +671,7 @@ def pv_dashboard_timeseries_api(request: HttpRequest) -> JsonResponse:
         if first_row and bool(first_row.get("flag_meteo_missing")):
             met_missing_ts += 1
 
+        # -------- preenche series_by_source --------
         for src in sources:
             r = per_src.get(src)
 
@@ -725,73 +679,134 @@ def pv_dashboard_timeseries_api(request: HttpRequest) -> JsonResponse:
             pdc = f(r.get("p_dc_w")) if r else None
             e15 = f(r.get("e_ac_wh_15")) if r else None
             vdc = f(r.get("v_dc_v")) if r else None
-            idc = f(r.get("i_dc_a")) if r else None
+            idc_ = f(r.get("i_dc_a")) if r else None
             vac = f(r.get("v_ac_v")) if r else None
             iac = f(r.get("i_ac_a")) if r else None
             cov = f(r.get("inv_coverage")) if r else None
-
             flag_inv_missing = bool(r.get("flag_inv_missing")) if r else True
 
-            series_by_source[src]["p_ac_w"].append(pac)
-            series_by_source[src]["p_dc_w"].append(pdc)
-            series_by_source[src]["v_dc_v"].append(vdc)
-            series_by_source[src]["i_dc_a"].append(idc)
-            series_by_source[src]["v_ac_v"].append(vac)
-            series_by_source[src]["i_ac_a"].append(iac)
-            series_by_source[src]["inv_coverage"].append(cov)
-            series_by_source[src]["flag_inv_missing"].append(bool(flag_inv_missing))
+            mppt1_v = f(r.get("mppt1_vdc_v")) if r else None
+            mppt2_v = f(r.get("mppt2_vdc_v")) if r else None
+            mppt3_v = f(r.get("mppt3_vdc_v")) if r else None
+            mppt4_v = f(r.get("mppt4_vdc_v")) if r else None
 
-            pac_vals.append(pac)
-            pdc_vals.append(pdc)
-            e15_vals.append(e15)
-            vdc_vals.append(vdc)
-            idc_vals.append(idc)
-            vac_vals.append(vac)
-            iac_vals.append(iac)
-            cov_vals.append(cov)
+            mppt1_i = f(r.get("mppt1_idc_a")) if r else None
+            mppt2_i = f(r.get("mppt2_idc_a")) if r else None
+            mppt3_i = f(r.get("mppt3_idc_a")) if r else None
+            mppt4_i = f(r.get("mppt4_idc_a")) if r else None
 
-            if cov is not None:
-                inv_cov_vals.append(float(cov))
+            a_code = _safe_int(r.get("alarm_code")) if r else None
+            a_sev = _safe_int(r.get("alarm_sev")) if r else None
 
-            inv_total_points += 1
-            if flag_inv_missing:
-                inv_missing_count += 1
+            sb = series_by_source[src]
+            sb["p_ac_w"].append(pac)
+            sb["p_dc_w"].append(pdc)
+            sb["e_ac_wh_15"].append(e15)
+            sb["v_dc_v"].append(vdc)
+            sb["i_dc_a"].append(idc_)
+            sb["v_ac_v"].append(vac)
+            sb["i_ac_a"].append(iac)
+            sb["inv_coverage"].append(cov)
+            sb["flag_inv_missing"].append(bool(flag_inv_missing))
+
+            sb["mppt1_vdc_v"].append(mppt1_v)
+            sb["mppt2_vdc_v"].append(mppt2_v)
+            sb["mppt3_vdc_v"].append(mppt3_v)
+            sb["mppt4_vdc_v"].append(mppt4_v)
+            sb["mppt1_idc_a"].append(mppt1_i)
+            sb["mppt2_idc_a"].append(mppt2_i)
+            sb["mppt3_idc_a"].append(mppt3_i)
+            sb["mppt4_idc_a"].append(mppt4_i)
+
+            sb["alarm_code"].append(a_code)
+            sb["alarm_sev"].append(a_sev)
+
+        # -------- TOTAL (prefer ΣMPPT; senão AGG) --------
+        mppt_keys_ts = [k for k in per_src.keys() if _is_mppt_source(k)]
+        agg_keys_ts = [k for k in per_src.keys() if _is_agg_source(k)]
+
+        if mppt_keys_ts:
+            chosen_keys = mppt_keys_ts
+            total_mode = "mppt_sum"
+        else:
+            chosen_keys = agg_keys_ts if agg_keys_ts else list(per_src.keys())
+            total_mode = "agg_fallback" if agg_keys_ts else "any_fallback"
+
+        # TOTAL
+        pac_vals = [f(per_src[k].get("p_ac_w")) for k in chosen_keys if per_src.get(k)]
+        pdc_vals = [f(per_src[k].get("p_dc_w")) for k in chosen_keys if per_src.get(k)]
+        e15_vals = [f(per_src[k].get("e_ac_wh_15")) for k in chosen_keys if per_src.get(k)]
+        vdc_vals = [f(per_src[k].get("v_dc_v")) for k in chosen_keys if per_src.get(k)]
+        idc_vals = [f(per_src[k].get("i_dc_a")) for k in chosen_keys if per_src.get(k)]
+        vac_vals = [f(per_src[k].get("v_ac_v")) for k in chosen_keys if per_src.get(k)]
+        iac_vals = [f(per_src[k].get("i_ac_a")) for k in chosen_keys if per_src.get(k)]
+        cov_vals = [f(per_src[k].get("inv_coverage")) for k in chosen_keys if per_src.get(k)]
 
         pac_total = _sum_none(pac_vals)
         pdc_total = _sum_none(pdc_vals)
-
+        e15_total = _sum_none(e15_vals)
         vdc_agg = _mean_none(vdc_vals)
-        idc_agg = _sum_none(idc_vals)  # multi-fontes: soma
-
+        idc_agg = _sum_none(idc_vals)
         vac_agg = _mean_none(vac_vals)
         iac_agg = _sum_none(iac_vals)
+        cov_agg = _mean_none(cov_vals)
 
         p_ac.append(pac_total)
         p_dc.append(pdc_total)
+        e15_wh.append(e15_total)
         v_dc.append(vdc_agg)
         i_dc.append(idc_agg)
         v_ac.append(vac_agg)
         i_ac.append(iac_agg)
 
+        inv_cov_ts.append(cov_agg)
+
         if pac_total is not None:
             p_ac_max = pac_total if (p_ac_max is None or pac_total > p_ac_max) else p_ac_max
 
-        e15_total = _sum_none(e15_vals)
         if e15_total is not None:
             e_wh_total += float(e15_total)
 
+        # AGG separado (comparação) — soma se houver mais de um agg no ts
+        pac_agg_vals = [f(per_src[k].get("p_ac_w")) for k in agg_keys_ts if per_src.get(k)]
+        pdc_agg_vals = [f(per_src[k].get("p_dc_w")) for k in agg_keys_ts if per_src.get(k)]
+        e15_agg_vals = [f(per_src[k].get("e_ac_wh_15")) for k in agg_keys_ts if per_src.get(k)]
+
+        p_ac_agg.append(_sum_none(pac_agg_vals) if agg_keys_ts else None)
+        p_dc_agg.append(_sum_none(pdc_agg_vals) if agg_keys_ts else None)
+        e15_wh_agg.append(_sum_none(e15_agg_vals) if agg_keys_ts else None)
+
+        # Missing por timestamp (não por fonte)
+        chosen_flags = []
+        for k in chosen_keys:
+            rr = per_src.get(k)
+            if rr is None:
+                continue
+            chosen_flags.append(bool(rr.get("flag_inv_missing") or False))
+
+        if not chosen_flags:
+            inv_missing_ts_all += 1
+        else:
+            all_missing = all(chosen_flags)
+            any_missing = any(chosen_flags)
+            if all_missing:
+                inv_missing_ts_all += 1
+            elif any_missing and (len(chosen_flags) > 1):
+                inv_missing_ts_partial += 1
+
     n = len(x_iso)
     if n == 0:
-        payload = _empty_payload(
-            plant=plant, tz_name=tz_name, start_s=start_s, end_s=end_s,
-            dt0_utc=dt0_utc, dt1_utc=dt1_utc,
-            src_oper=src_oper, src_oper_list=src_oper_list, src_meteo=src_meteo,
-            message="Sem pontos válidos após agregação por timestamp.",
+        return _json_response_strict(
+            _empty_payload(
+                plant=plant, tz_name=tz_name, start_s=start_s, end_s=end_s,
+                dt0_utc=dt0_utc, dt1_utc=dt1_utc,
+                src_oper=src_oper, src_oper_list=src_oper_list, src_meteo=src_meteo, available_oper=avail_oper,
+                message="Sem pontos válidos após agregação por timestamp.",
+            )
         )
-        return _json_response_strict(payload)
 
     # ----------------------------
-    # MODELO: power_model.py (sem fuzzy)
+    # MODELO: power_model.py + charts
     # ----------------------------
     dt_minutes = 15.0
     persist_minutes = 60.0
@@ -856,10 +871,9 @@ def pv_dashboard_timeseries_api(request: HttpRequest) -> JsonResponse:
             a = _np.asarray(a, dtype=bool)
             return [bool(v) for v in a.tolist()]
 
-        # charts builder (se existir)
+        # charts builder
         build_dashboard_payload = None
         try:
-            # ✅ caminho correto do módulo (sem "dashboard/" no meio)
             from core.services.dashboard.dashboard_charts import build_dashboard_payload as _build
             build_dashboard_payload = _build
         except Exception:
@@ -869,14 +883,11 @@ def pv_dashboard_timeseries_api(request: HttpRequest) -> JsonResponse:
 
         if details and getattr(details, "module_id", None):
             n_mod = int(getattr(details, "modules_total", 0) or 0)
-
             if n_mod > 0:
                 mod = module_from_pvmodule(details.module)
                 inv = getattr(details, "inverter", None)
-
                 pl = plant_from_details(details, inverter=inv, use_inverter_eff=True)
 
-                # fallback de geometria via PVPlant (se necessário)
                 pld = asdict(pl)
                 if pld.get("lat_deg") is None:
                     pld["lat_deg"] = _safe_float(getattr(plant, "latitude", None) or getattr(plant, "latitude_deg", None) or getattr(plant, "lat_deg", None))
@@ -929,7 +940,6 @@ def pv_dashboard_timeseries_api(request: HttpRequest) -> JsonResponse:
 
                 tamb_np = list_to_np_nan(temp_air)
                 pac_real_np = list_to_np_nan(p_ac)
-
                 vdc_np = list_to_np_nan(v_dc)
                 idc_np = list_to_np_nan(i_dc)
 
@@ -971,7 +981,6 @@ def pv_dashboard_timeseries_api(request: HttpRequest) -> JsonResponse:
                 pac_exp = out_model.get("pac_expected_w")
                 if pac_exp is not None:
                     p_ac_model_w = np_to_list_none(pac_exp)
-
                     dt_h = dt_minutes / 60.0
                     pac_exp_np = _np.asarray(pac_exp, dtype=float)
                     e_model_kwh = float(_np.nansum(_np.clip(pac_exp_np, 0.0, None)) * dt_h / 1000.0)
@@ -1023,11 +1032,12 @@ def pv_dashboard_timeseries_api(request: HttpRequest) -> JsonResponse:
     # ----------------------------
     # KPIs + payload
     # ----------------------------
-    inv_cov_mean = (sum(inv_cov_vals) / len(inv_cov_vals)) if inv_cov_vals else None
     e_kwh = e_wh_total / 1000.0
 
+    inv_cov_mean = _mean_none(inv_cov_ts)
     met_missing_frac = round(met_missing_ts / n, 3) if n else 0.0
-    inv_missing_frac = round(inv_missing_count / inv_total_points, 3) if inv_total_points else 0.0
+    inv_missing_frac = round(inv_missing_ts_all / n, 3) if n else 0.0
+    inv_partial_missing_frac = round(inv_missing_ts_partial / n, 3) if n else 0.0
 
     payload: Dict[str, Any] = {
         "ok": True,
@@ -1042,15 +1052,32 @@ def pv_dashboard_timeseries_api(request: HttpRequest) -> JsonResponse:
         },
         "sources": {
             "source_oper": src_oper,
-            "source_oper_list": src_oper_list,
+            "source_oper_list": src_oper_list,     # selecionadas
+            "available_oper": avail_oper,          # disponíveis p/ dropdown
             "source_meteo": src_meteo,
+            "total_policy": "prefer_mppt_sum",
+            "mppt_sources": mppt_sources,
+            "agg_sources": agg_sources,
         },
         "x": x_iso,
         "x_label": x_label,
         "charts": charts,
         "series": {
+            # TOTAL (sem dupla contagem; prefer ΣMPPT)
             "p_ac_w": p_ac,
             "p_dc_w": p_dc,
+            "v_dc_v": v_dc,
+            "i_dc_a": i_dc,
+            "v_ac_v": v_ac,
+            "i_ac_a": i_ac,
+            "e_ac_wh_15": e15_wh,  # opcional
+
+            # AGG (medido) para comparar com ΣMPPT
+            "p_ac_agg_w": p_ac_agg,
+            "p_dc_agg_w": p_dc_agg,
+            "e_ac_wh_15_agg": e15_wh_agg,
+
+            # meteo
             "ghi": ghi,
             "gti": gti,
             "dni": dni,
@@ -1058,10 +1085,6 @@ def pv_dashboard_timeseries_api(request: HttpRequest) -> JsonResponse:
             "temp_air": temp_air,
             "wind_speed": wind,
             "rh": rh,
-            "v_dc_v": v_dc,
-            "i_dc_a": i_dc,
-            "v_ac_v": v_ac,
-            "i_ac_a": i_ac,
 
             # modelo
             "p_ac_model_w": p_ac_model_w,
@@ -1080,7 +1103,7 @@ def pv_dashboard_timeseries_api(request: HttpRequest) -> JsonResponse:
             "k_cs": k_cs,
             "g_poa_used": g_poa_used,
 
-            # repasse (sem fuzzy)
+            # repasse
             "valid_model": valid_model,
             "rca_label": rca_label,
         },
@@ -1093,15 +1116,21 @@ def pv_dashboard_timeseries_api(request: HttpRequest) -> JsonResponse:
             "inv_coverage_mean": None if inv_cov_mean is None else round(inv_cov_mean, 3),
             "meteo_missing_frac": met_missing_frac,
             "inv_missing_frac": inv_missing_frac,
+            "inv_partial_missing_frac": inv_partial_missing_frac,
             "points": n,
             "sources_oper_qty": len(src_oper_list),
+            "mppt_sources_qty": len(mppt_sources),
+            "agg_sources_qty": len(agg_sources),
             "meteo_reliability_score": (charts.get("gauge") or {}).get("score") if isinstance(charts, dict) else None,
             "meteo_reliability_label": (charts.get("gauge") or {}).get("label") if isinstance(charts, dict) else None,
         },
         "audit": audit,
         "debug": {
             "len_x": len(x_iso),
-            "len_sources": len(src_oper_list),
+            "len_sources_selected": len(src_oper_list),
+            "len_sources_in_payload": len(sources),
+            "mppt_sources": mppt_sources,
+            "agg_sources": agg_sources,
             "has_model": bool(audit.get("model_ok")) and (p_ac_model_w is not None),
             "model_error": audit.get("model_error"),
         },

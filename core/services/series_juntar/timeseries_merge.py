@@ -1,4 +1,3 @@
-# core/services/timeseries_merge.py
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -13,6 +12,9 @@ DEFAULT_TZ = "UTC"
 # =========================
 DEFAULT_INV_MEAN_COLS = (
     "p_dc_w", "p_ac_w", "v_dc_v", "i_dc_a", "v_ac_v", "i_ac_a",
+    "mppt1_v_dc_v","mppt2_v_dc_v","mppt3_v_dc_v","mppt4_v_dc_v",
+    "mppt1_i_dc_a","mppt2_i_dc_a","mppt3_i_dc_a","mppt4_i_dc_a",
+    "mppt1_p_dc_w","mppt2_p_dc_w","mppt3_p_dc_w","mppt4_p_dc_w",
 )
 
 DEFAULT_METEO_COLS = (
@@ -29,7 +31,7 @@ class InverterAggregationConfig:
     ts_col: str = "ts_utc"
     freq: str = "15min"
 
-    # **PASSO 2**: agregação por MÉDIA (p_ac, vdc, idc, etc.)
+    # agregação por MÉDIA
     mean_cols: Sequence[str] = DEFAULT_INV_MEAN_COLS
 
     # energia (Wh) calculada a partir de p_ac_w
@@ -54,7 +56,6 @@ class MeteoPreparationConfig:
     value_cols: Sequence[str] = DEFAULT_METEO_COLS
 
     # Open-Meteo costuma usar timestamps como "period_start".
-    # Se seus timestamps forem period_end, ajuste aqui.
     meteo_time_label: Literal["period_start", "period_end", "midpoint"] = "period_start"
     duplicate_agg: Literal["mean", "median", "first"] = "mean"
 
@@ -68,7 +69,6 @@ def _ensure_datetime_tz(
     assume_tz_if_naive: str = DEFAULT_TZ,
 ) -> pd.Series:
     dt = pd.to_datetime(s, errors="coerce")
-    # dt é Series datetime64; dt.dt.tz retorna tzinfo (ou None)
     if dt.dt.tz is None:
         dt = dt.dt.tz_localize(assume_tz_if_naive)
     return dt.dt.tz_convert(tz_work)
@@ -80,10 +80,7 @@ def _floor_bucket(dt: pd.Series, freq: str) -> pd.Series:
 
 def _shift_meteo_label(dt: pd.Series, freq: str, label: str) -> pd.Series:
     """
-    Ajusta o timestamp meteo para representar o início do bucket ("period_start").
-    - period_start: retorna dt (default)
-    - period_end:   assume dt marca o final do período -> desloca para trás 1 bucket
-    - midpoint:     assume dt marca o meio -> desloca para trás 1/2 bucket
+    Ajusta timestamp meteo para representar o início do bucket ("period_start").
     """
     delta = pd.Timedelta(freq)
     if label == "period_end":
@@ -111,11 +108,11 @@ def aggregate_inverter_to_15min(
 ) -> pd.DataFrame:
     """
     Agrega amostras do inversor (tipicamente 5 min) para buckets de 15 min:
-      - mean_cols: média por bucket (inclui v_dc_v e i_dc_a)
+      - mean_cols: média por bucket (inclui MPPTs se presentes)
       - e_ac_wh_15: soma da energia por amostra no bucket
       - inv_n: número de amostras no bucket
       - inv_coverage: inv_n/expected (clamp 1.0)
-      - flags: flag_inv_missing (sempre False aqui, pois só existem buckets com dados),
+      - flags: flag_inv_missing (False aqui),
                flag_low_coverage (inv_n>0 e coverage<threshold)
     """
     if df_inv is None or df_inv.empty:
@@ -125,9 +122,7 @@ def aggregate_inverter_to_15min(
     if cfg.ts_col not in df.columns:
         raise ValueError(f"df_inv precisa conter a coluna de timestamp '{cfg.ts_col}'")
 
-    df[cfg.ts_col] = _ensure_datetime_tz(
-        df[cfg.ts_col], tz_work=tz_work, assume_tz_if_naive=assume_tz_if_naive
-    )
+    df[cfg.ts_col] = _ensure_datetime_tz(df[cfg.ts_col], tz_work=tz_work, assume_tz_if_naive=assume_tz_if_naive)
     df = df.dropna(subset=[cfg.ts_col]).sort_values(cfg.ts_col)
 
     df["ts_15"] = _floor_bucket(df[cfg.ts_col], cfg.freq)
@@ -143,16 +138,12 @@ def aggregate_inverter_to_15min(
         if cfg.energy_dt_mode == "fixed":
             dt_h = float(cfg.sampling_minutes) / 60.0
             df["_e_ac_wh_sample"] = pac * dt_h
-
         else:
-            # dt baseado no próximo sample (clamp em max_dt_minutes)
             df = df.sort_values(cfg.ts_col)
             idx = df[cfg.ts_col]
-
             dt_next_h = (idx.shift(-1) - idx).dt.total_seconds() / 3600.0
             dt_next_h = pd.to_numeric(dt_next_h, errors="coerce")
 
-            # preenche o último dt com a mediana (ou sampling_minutes)
             med = dt_next_h.dropna()
             fill = float(med.median()) if not med.empty else (float(cfg.sampling_minutes) / 60.0)
             if len(dt_next_h) > 0:
@@ -160,7 +151,6 @@ def aggregate_inverter_to_15min(
 
             max_h = float(cfg.max_dt_minutes) / 60.0
             dt_next_h = dt_next_h.clip(lower=0.0, upper=max_h)
-
             df["_e_ac_wh_sample"] = pac * dt_next_h
     else:
         df["_e_ac_wh_sample"] = pd.NA
@@ -176,7 +166,7 @@ def aggregate_inverter_to_15min(
     expected = _expected_samples(cfg)
     out["inv_coverage"] = (out["inv_n"] / expected).clip(upper=1.0)
 
-    # Flags (bucket sem inversor será tratado em densify_15min_grid)
+    # Flags
     out["flag_inv_missing"] = False
     out["flag_low_coverage"] = (
         (out["inv_n"] > 0)
@@ -204,9 +194,7 @@ def prepare_meteo_15min(
     if cfg.ts_col not in df.columns:
         raise ValueError(f"df_met precisa conter a coluna de timestamp '{cfg.ts_col}'")
 
-    df[cfg.ts_col] = _ensure_datetime_tz(
-        df[cfg.ts_col], tz_work=tz_work, assume_tz_if_naive=assume_tz_if_naive
-    )
+    df[cfg.ts_col] = _ensure_datetime_tz(df[cfg.ts_col], tz_work=tz_work, assume_tz_if_naive=assume_tz_if_naive)
     df = df.dropna(subset=[cfg.ts_col]).sort_values(cfg.ts_col)
 
     df["_ts_adj"] = _shift_meteo_label(df[cfg.ts_col], cfg.freq, cfg.meteo_time_label)
@@ -217,12 +205,7 @@ def prepare_meteo_15min(
         df[c] = pd.to_numeric(df[c], errors="coerce")
 
     if not cols:
-        out = (
-            df[["ts_15"]]
-            .drop_duplicates(subset=["ts_15"])
-            .set_index("ts_15")
-            .sort_index()
-        )
+        out = df[["ts_15"]].drop_duplicates(subset=["ts_15"]).set_index("ts_15").sort_index()
         out.index.name = "ts_15"
         return out
 
@@ -308,16 +291,7 @@ def densify_15min_grid(
     coverage_threshold: float = 0.7,
     meteo_missing_cols: Optional[Sequence[str]] = None,
 ) -> pd.DataFrame:
-    """
-    Reindexa df15 para a grade completa [start_utc, end_utc) com passo freq.
-
-    Decisões:
-    - buckets sem inversor: inv_n=0, flag_inv_missing=True, inv_coverage=NA, flag_low_coverage=False
-    - flag_low_coverage só vale quando inv_n > 0
-    - flag_meteo_missing baseado nas colunas meteo disponíveis
-    """
     if df15 is None or df15.empty:
-        # monta grade vazia mesmo assim
         start = pd.Timestamp(start_utc)
         end = pd.Timestamp(end_utc)
 
@@ -342,7 +316,6 @@ def densify_15min_grid(
         return out
 
     out = df15.copy()
-
     if not isinstance(out.index, pd.DatetimeIndex):
         raise ValueError("densify_15min_grid exige df indexado por DatetimeIndex.")
     out.index = out.index.tz_localize("UTC") if out.index.tz is None else out.index.tz_convert("UTC")
@@ -363,7 +336,6 @@ def densify_15min_grid(
     out = out.reindex(full_idx)
     out.index.name = "ts_15"
 
-    # inverter fields
     if "inv_n" in out.columns:
         out["inv_n"] = pd.to_numeric(out["inv_n"], errors="coerce").fillna(0).astype("int64")
     else:
@@ -376,15 +348,12 @@ def densify_15min_grid(
     else:
         out["inv_coverage"] = pd.NA
 
-    # buckets sem inversor -> coverage NA (não polui média)
     out.loc[out["flag_inv_missing"], "inv_coverage"] = pd.NA
 
-    # low coverage só quando inv_n > 0
     cov = pd.to_numeric(out["inv_coverage"], errors="coerce")
     out["flag_low_coverage"] = (out["inv_n"] > 0) & (cov < float(coverage_threshold))
     out["flag_low_coverage"] = out["flag_low_coverage"].fillna(False).astype(bool)
 
-    # meteo missing
     if meteo_missing_cols is None:
         meteo_missing_cols = [c for c in DEFAULT_METEO_COLS if c in out.columns]
     else:
@@ -410,12 +379,8 @@ def build_merged_15min(
     assume_tz_if_naive: str = DEFAULT_TZ,
     how: Literal["left", "inner", "right", "outer"] = "left",
 ) -> pd.DataFrame:
-    inv15 = aggregate_inverter_to_15min(
-        df_inv, cfg=inv_cfg, tz_work=tz_work, assume_tz_if_naive=assume_tz_if_naive
-    )
-    met15 = prepare_meteo_15min(
-        df_met, cfg=met_cfg, tz_work=tz_work, assume_tz_if_naive=assume_tz_if_naive
-    )
+    inv15 = aggregate_inverter_to_15min(df_inv, cfg=inv_cfg, tz_work=tz_work, assume_tz_if_naive=assume_tz_if_naive)
+    met15 = prepare_meteo_15min(df_met, cfg=met_cfg, tz_work=tz_work, assume_tz_if_naive=assume_tz_if_naive)
     return join_inverter_meteo_15min(inv15, met15, how=how)
 
 

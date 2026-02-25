@@ -715,6 +715,25 @@ class PVPlantMergedRecord15m(models.Model):
     v_ac_v = models.FloatField(null=True, blank=True)
     i_ac_a = models.FloatField(null=True, blank=True)
 
+    # -------- MPPT-level (para features internas / GNN) --------
+    mppt1_vdc_v = models.FloatField(null=True, blank=True)
+    mppt2_vdc_v = models.FloatField(null=True, blank=True)
+    mppt3_vdc_v = models.FloatField(null=True, blank=True)
+    mppt4_vdc_v = models.FloatField(null=True, blank=True)
+
+    mppt1_idc_a = models.FloatField(null=True, blank=True)
+    mppt2_idc_a = models.FloatField(null=True, blank=True)
+    mppt3_idc_a = models.FloatField(null=True, blank=True)
+    mppt4_idc_a = models.FloatField(null=True, blank=True)
+
+    # -------- Alarmes (weak labels / features) --------
+    alarm_code = models.IntegerField(null=True, blank=True, help_text="Código do alarme/falha (se disponível).")
+    alarm_sev = models.PositiveSmallIntegerField(
+        null=True, blank=True,
+        validators=[MinValueValidator(0), MaxValueValidator(10)],
+        help_text="Severidade agregada no bucket (MVP: 0 OK, 2 fault).",
+    )
+
     # Energia do inversor no bucket (Wh/15min)
     e_ac_wh_15 = models.FloatField(null=True, blank=True)
 
@@ -752,26 +771,19 @@ class PVPlantMergedRecord15m(models.Model):
 
     class Meta:
         constraints = [
-            # unicidade do bucket por fonte
             models.UniqueConstraint(
                 fields=["plant", "source_oper", "source_meteo", "interval_min", "ts_utc"],
                 name="uniq_merged15m_plant_sources_interval_tsutc",
             ),
-
-            # (DB-level) garante que esta tabela é realmente 15 min
             models.CheckConstraint(
                 condition=Q(interval_min=15),
                 name="chk_merged15m_interval_is_15",
             ),
-
-            # (DB-level) inv_coverage entre 0 e 1 quando não nulo
             models.CheckConstraint(
                 condition=Q(inv_coverage__isnull=True)
                 | (Q(inv_coverage__gte=0.0) & Q(inv_coverage__lte=1.0)),
                 name="chk_merged15m_inv_coverage_0_1",
             ),
-
-            # (DB-level) energia não-negativa quando não nula
             models.CheckConstraint(
                 condition=Q(e_ac_wh_15__isnull=True) | Q(e_ac_wh_15__gte=0.0),
                 name="chk_merged15m_e_ac_wh_15_nonneg",
@@ -783,12 +795,8 @@ class PVPlantMergedRecord15m(models.Model):
         ]
 
     def __str__(self) -> str:
-        # evita depender do nome do campo (alguns projetos usam "name" em vez de "nome")
         plant_label = getattr(self.plant, "nome", None) or getattr(self.plant, "name", None) or str(self.plant_id)
         return f"{plant_label} merged15m {self.ts_utc.isoformat()}"
-
-
-
 
 # ---------------------------
 # F A L H A S
