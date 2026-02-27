@@ -895,3 +895,55 @@ class PlantDiagnostic15m(models.Model):
         ts = self.ts_utc.isoformat() if self.ts_utc else "n/a"
         return f"{self.plant_id} {ts} {self.rca_label}"
 
+# ---------------------------
+# MPPT-level FDD predictions (GNN/GRU)
+# ---------------------------
+
+class MPPTDiagnostic15m(models.Model):
+    """
+    Um registro por (planta, inversor/source_oper, mppt, timestamp_utc).
+
+    Guarda predição por MPPT (nó do grafo) para ser consumida no drawer/heatmap.
+    """
+    plant = models.ForeignKey(
+        "core.PVPlant",
+        on_delete=models.CASCADE,
+        related_name="mppt_diagnostics_15m",
+        db_index=True,
+    )
+
+    source_oper = models.CharField(max_length=30, db_index=True)
+    mppt = models.PositiveSmallIntegerField(validators=[MinValueValidator(1), MaxValueValidator(16)])
+
+    ts_utc = models.DateTimeField("Timestamp (UTC)", db_index=True)
+
+    model_version = models.CharField(max_length=64, default="mppt_gnn_v1", blank=True)
+
+    pred_code = models.SmallIntegerField(default=0)   # 0 normal, 1 disconnected (por enquanto)
+    pred_label = models.CharField(max_length=40, default="normal", blank=True)
+    pred_pmax = models.FloatField(null=True, blank=True, validators=[MinValueValidator(0.0), MaxValueValidator(1.0)])
+
+    proba = models.JSONField(null=True, blank=True)   # opcional: {"normal":0.9,"disconnected":0.1}
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Diagnóstico MPPT 15 min"
+        verbose_name_plural = "Diagnósticos MPPT 15 min"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["plant", "source_oper", "mppt", "ts_utc"],
+                name="uniq_mpptdiag_plant_src_mppt_ts",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["plant", "ts_utc"], name="idx_mpptdiag_plant_ts"),
+            models.Index(fields=["plant", "source_oper", "ts_utc"], name="idx_mpptdiag_src_ts"),
+            models.Index(fields=["plant", "source_oper", "mppt", "ts_utc"], name="idx_mpptdiag_src_mppt_ts"),
+        ]
+        ordering = ["plant_id", "source_oper", "mppt", "ts_utc"]
+
+    def __str__(self) -> str:
+        ts = self.ts_utc.isoformat() if self.ts_utc else "n/a"
+        return f"{self.plant_id} {self.source_oper} mppt{self.mppt} {ts} {self.pred_label}"

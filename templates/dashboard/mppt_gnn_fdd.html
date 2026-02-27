@@ -1,0 +1,1062 @@
+{# templates/dashboard/mppt_gnn_fdd.html #}
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}FDD — MPPT (GNN){% endblock %}
+
+{% block extra_head %}
+  <style>
+    .dash, .dash *{ box-sizing: border-box; }
+    .dash{
+      display:grid;
+      grid-template-columns: repeat(12, minmax(0, 1fr));
+      gap: 1rem;
+      align-items:start;
+      align-content:start;
+      grid-auto-rows: min-content;
+    }
+    .span-12{ grid-column: span 12; }
+    @media (max-width: 1100px){
+      .span-6, .span-4, .span-3{ grid-column: span 12; }
+    }
+
+    .page-head{
+      display:flex; gap: 1rem; align-items:flex-start; justify-content:space-between;
+      flex-wrap: wrap;
+    }
+    .page-head h1{ margin:0; font-size: 1.25rem; }
+    .page-head .sub{ margin:.15rem 0 0; opacity:.8; line-height:1.35; }
+
+    .ctl-row{
+      display:flex; flex-wrap:wrap; gap:.8rem; align-items:flex-end;
+      width:100%;
+    }
+    .ctl{ display:flex; flex-direction:column; gap:.35rem; min-width: 220px; }
+    .ctl.sm{ min-width: 160px; }
+    .ctl label{ font-size:.85rem; opacity:.85 }
+    .ctl select, .ctl input[type="date"], .ctl input[type="text"], .ctl input[type="number"]{
+      padding:.55rem .7rem;
+      border-radius:12px;
+      background: rgba(10,20,40,.35);
+      border:1px solid rgba(255,255,255,.18);
+      color:#e9f6ff;
+      outline:none;
+      backdrop-filter: blur(6px);
+    }
+    .ctl select option{ color:#111; }
+
+    .mono{ font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+
+    .btn-glow{
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      gap:.55rem;
+      padding: .70rem .95rem;
+      border-radius: 14px;
+      border: 1px solid rgba(110,210,255,.35);
+      background: linear-gradient(180deg, rgba(110,210,255,.22), rgba(90,200,255,.08));
+      color: rgba(233,246,255,.96);
+      text-decoration:none;
+      font-weight: 750;
+      letter-spacing: .2px;
+      box-shadow: 0 10px 24px rgba(0,0,0,.22);
+      transition: transform .12s ease, box-shadow .12s ease, border-color .12s ease, background .12s ease;
+      cursor: pointer;
+      appearance: none;
+      -webkit-appearance: none;
+      outline: none;
+      user-select:none;
+      white-space: nowrap;
+    }
+    .btn-glow:hover{
+      transform: translateY(-1px);
+      border-color: rgba(110,210,255,.55);
+      box-shadow: 0 14px 34px rgba(0,0,0,.28);
+      background: linear-gradient(180deg, rgba(110,210,255,.28), rgba(90,200,255,.10));
+    }
+    .btn-glow:disabled{
+      opacity: .65;
+      cursor: not-allowed;
+      transform: none;
+      box-shadow: 0 8px 18px rgba(0,0,0,.18);
+    }
+    .btn-glow.secondary{
+      border-color: rgba(255,255,255,.18);
+      background: rgba(255,255,255,.06);
+      box-shadow: 0 10px 24px rgba(0,0,0,.18);
+    }
+    .btn-glow.secondary:hover{
+      border-color: rgba(255,255,255,.28);
+      background: rgba(255,255,255,.10);
+      box-shadow: 0 14px 34px rgba(0,0,0,.22);
+    }
+    .btn-glow.danger{
+      border-color: rgba(255,110,140,.35);
+      background: linear-gradient(180deg, rgba(255,110,140,.20), rgba(255,110,140,.06));
+    }
+    .btn-glow.danger:hover{
+      border-color: rgba(255,110,140,.55);
+      background: linear-gradient(180deg, rgba(255,110,140,.26), rgba(255,110,140,.08));
+    }
+    .btn-glow .icon{ width:18px; height:18px; opacity:.95; }
+    .btn-glow .label{ line-height: 1; }
+
+    .ctl-actions{
+      display:flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items:center;
+    }
+    .ctl-actions .btn-glow{ padding: .62rem .85rem; border-radius: 14px; }
+
+    .kpi{
+      display:grid; grid-template-columns: repeat(6, minmax(0, 1fr));
+      gap: .75rem;
+    }
+    .kpi .tile{
+      padding: .85rem .9rem;
+      border-radius: 16px;
+      border: 1px solid rgba(255,255,255,.12);
+      background: rgba(255,255,255,.05);
+      min-width:0;
+    }
+    .kpi .t{ font-size:.82rem; opacity:.78; margin:0 0 .15rem; }
+    .kpi .v{ font-size: 1.15rem; font-weight: 900; margin:0; }
+    .kpi .s{ margin:.2rem 0 0; font-size:.82rem; opacity:.78; overflow-wrap:anywhere; }
+    @media (max-width: 1100px){
+      .kpi{ grid-template-columns: repeat(2, minmax(0,1fr)); }
+    }
+
+    .hm-wrap{
+      width:100%;
+      border: 1px solid rgba(255,255,255,.12);
+      border-radius: 16px;
+      padding: 10px;
+      margin-top:.8rem;
+      background: rgba(255,255,255,.03);
+      overflow-x: hidden;
+      overflow-y: auto;
+      display:flex;
+      justify-content:center;
+      align-items:flex-start;
+    }
+    .hm-canvas{
+      display:block;
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,.10);
+      background: rgba(10,20,40,.22);
+      cursor: pointer;
+      max-width: 100%;
+      height: auto;
+    }
+    .hm-head{ display:flex; align-items:flex-start; justify-content:space-between; gap: 12px; width:100%; }
+    .hm-sub{ margin:.2rem 0 0; opacity:.78; line-height:1.35; }
+    .hm-tip{ margin-top:.55rem; min-height: 1.2em; opacity:.85; }
+
+    .legend{ display:flex; gap:.6rem; flex-wrap:wrap; align-items:center; justify-content:flex-end; }
+    .badge{
+      display:inline-flex; align-items:center; gap:.5rem;
+      padding:.28rem .65rem; border-radius: 999px;
+      border:1px solid rgba(255,255,255,.16); background: rgba(255,255,255,.06);
+      font-size:.90rem; white-space: nowrap; user-select:none;
+    }
+    .dot{ width:11px; height:11px; border-radius:99px; box-shadow: 0 0 0 1px rgba(0,0,0,.18) inset; }
+
+    :root{
+      --hm-none: #a0a2a786;
+      --hm-ok:   #46e68c;
+      --hm-crit: #ff5a6e;
+      --hm-sel:  rgba(90,200,255,.95);
+    }
+
+    .status{
+      display:flex; align-items:center; gap:.6rem; flex-wrap:wrap;
+      padding:.55rem .7rem;
+      border:1px solid rgba(255,255,255,.14);
+      background: rgba(255,255,255,.06);
+      border-radius: 14px;
+      color: rgba(233,246,255,.9);
+    }
+    .spin{
+      width: 14px; height: 14px; border-radius: 999px;
+      border: 2px solid rgba(255,255,255,.25);
+      border-top-color: rgba(233,246,255,.9);
+      animation: sp 1s linear infinite;
+    }
+    @keyframes sp{ to{ transform: rotate(360deg); } }
+
+    .detail-drawer{
+      position: fixed;
+      top: 0; right: 0;
+      height: 100vh;
+      width: 440px;
+      max-width: 92vw;
+      z-index: 50;
+      border-left: 1px solid rgba(255,255,255,.12);
+      background: rgba(12,18,32,.96);
+      box-shadow: -24px 0 48px rgba(0,0,0,.38);
+      transform: translateX(110%);
+      transition: transform .18s ease;
+      display:flex;
+      flex-direction: column;
+      pointer-events: none;
+    }
+    .detail-drawer.open{ transform: translateX(0%); pointer-events: auto; }
+
+    .detail-drawer .hd{
+      padding: 14px 14px 12px;
+      border-bottom: 1px solid rgba(255,255,255,.10);
+      display:flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .detail-drawer .title{ margin:0; font-size: 1.02rem; font-weight: 800; }
+    .detail-drawer .meta{
+      margin:.25rem 0 0;
+      opacity:.82;
+      line-height:1.35;
+      font-size: .88rem;
+      overflow-wrap:anywhere;
+    }
+    .detail-drawer .actions{
+      display:flex;
+      gap: 10px;
+      align-items:center;
+      justify-content:flex-end;
+      flex-wrap: wrap;
+      width: 100%;
+    }
+    .detail-drawer .actions .btn-glow{ padding: .60rem .82rem; }
+
+    .detail-drawer .body{ padding: 12px 14px 14px; overflow: auto; flex: 1 1 auto; }
+
+    table.kv{
+      width:100%;
+      border-collapse: collapse;
+      border-radius: 14px;
+      overflow:hidden;
+      border:1px solid rgba(255,255,255,.12);
+      background: rgba(255,255,255,.03);
+    }
+    table.kv td{
+      padding: .55rem .65rem;
+      border-bottom:1px solid rgba(255,255,255,.08);
+      vertical-align: top;
+      overflow-wrap:anywhere;
+    }
+    table.kv tr:last-child td{ border-bottom: 0; }
+    td.k{ width: 52%; opacity:.85; }
+    td.v{ font-weight: 800; }
+
+    pre.dump{
+      margin:0;
+      padding:.75rem;
+      border-radius: 14px;
+      border:1px solid rgba(255,255,255,.12);
+      background: rgba(10,20,40,.25);
+      max-height: 46vh;
+      overflow:auto;
+      color: rgba(233,246,255,.92);
+      font-size: .88rem;
+      line-height: 1.35;
+      white-space: pre;
+    }
+  </style>
+{% endblock %}
+
+{% block content %}
+<div id="mpptPage" class="dash"
+     data-api="{{ api_url|default:'' }}"
+     data-dump="{{ dump_url|default:'' }}"
+     data-actions="{{ actions_url|default:'' }}">
+
+  <div class="card glass span-12">
+    <div class="page-head">
+      <div style="min-width:0;">
+        <h1>FDD — MPPT (GNN)</h1>
+        <div class="sub">
+          Heatmap usa predições em <span class="mono">MPPTDiagnostic15m</span>.
+          Clique num bin para carregar o dump via API.
+        </div>
+      </div>
+
+      <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+        <a class="btn-glow secondary" href="{% url 'pv_dashboard' %}" title="Voltar ao Dashboard PV">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M10 6H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"
+                  stroke="rgba(233,246,255,.92)" stroke-width="2" stroke-linecap="round"/>
+            <path d="M14 4h6v6" stroke="rgba(233,246,255,.92)" stroke-width="2" stroke-linecap="round"/>
+            <path d="M20 4 10 14" stroke="rgba(233,246,255,.92)" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+          <span class="label">Dashboard PV</span>
+        </a>
+      </div>
+    </div>
+
+    <div style="height:.8rem"></div>
+
+    <div class="ctl-row">
+      <div class="ctl">
+        <label>Planta</label>
+        <select id="plant_id">
+          {% for p in plants %}
+            <option value="{{ p.id }}"
+              {% if plant_id and plant_id|stringformat:"s" == p.id|stringformat:"s" %}selected{% endif %}>
+              {% firstof p.nome p.name %} (#{{ p.id }})
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="ctl sm">
+        <label for="start">Início</label>
+        <input id="start" type="date" value="{{ start|default:'' }}">
+      </div>
+
+      <div class="ctl sm">
+        <label for="end">Fim</label>
+        <input id="end" type="date" value="{{ end|default:'' }}">
+      </div>
+
+      <div class="ctl sm">
+        <label for="dt_minutes">Bin (min)</label>
+        <select id="dt_minutes">
+          {% for m in dt_options %}
+            <option value="{{ m }}" {% if dt_minutes == m %}selected{% endif %}>{{ m }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="ctl sm">
+        <label for="mppt">MPPT</label>
+        <select id="mppt">
+          {% for k in mppt_options %}
+            <option value="{{ k }}" {% if mppt == k %}selected{% endif %}>MPPT {{ k }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="ctl sm">
+        <label for="model_version">model_version</label>
+        <input id="model_version" type="text" value="{{ model_version|default:'gnn_v1' }}">
+      </div>
+
+      <div class="ctl" style="min-width: 260px;">
+        <label for="source_oper">source_oper</label>
+        <input id="source_oper" type="text" value="{{ source_oper|default:'MPPT_GNN' }}" placeholder="ex: MPPT_GNN">
+      </div>
+
+      <div class="ctl" style="min-width: 520px;">
+        <label>&nbsp;</label>
+        <div class="ctl-actions">
+          <button class="btn-glow" id="btnRefresh" type="button" title="Atualizar heatmap">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M8 5v14l11-7-11-7Z" fill="rgba(233,246,255,.92)"/>
+            </svg>
+            <span class="label">Atualizar</span>
+          </button>
+
+          <button class="btn-glow secondary" id="btnTrain" type="button" title="Treinar modelo (salva em media/mppt_gnn_models/<model_version>)">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M4 20V8" stroke="rgba(233,246,255,.92)" stroke-width="2" stroke-linecap="round"/>
+              <path d="M8 20V4" stroke="rgba(233,246,255,.92)" stroke-width="2" stroke-linecap="round"/>
+              <path d="M12 20v-6" stroke="rgba(233,246,255,.92)" stroke-width="2" stroke-linecap="round"/>
+              <path d="M16 20v-10" stroke="rgba(233,246,255,.92)" stroke-width="2" stroke-linecap="round"/>
+              <path d="M20 20v-8" stroke="rgba(233,246,255,.92)" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+            <span class="label">Treinar</span>
+          </button>
+
+          <button class="btn-glow secondary" id="btnInfer" type="button" title="Rodar inferência no range e gravar no banco">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M12 2v10" stroke="rgba(233,246,255,.92)" stroke-width="2" stroke-linecap="round"/>
+              <path d="M8 6l4-4 4 4" stroke="rgba(233,246,255,.92)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M4 14v6a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-6" stroke="rgba(233,246,255,.92)" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+            <span class="label">Inferir</span>
+          </button>
+
+          <button class="btn-glow danger" id="btnReset" type="button" title="Limpar heatmap/seleção">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M21 12a9 9 0 1 1-2.64-6.36" stroke="rgba(233,246,255,.92)" stroke-width="2" stroke-linecap="round"/>
+              <path d="M21 4v6h-6" stroke="rgba(233,246,255,.92)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <span class="label">Reset</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div style="height:.8rem"></div>
+
+    <div class="status" id="statusBox" style="display:none;">
+      <span class="spin" aria-hidden="true"></span>
+      <span id="statusTxt">Carregando…</span>
+    </div>
+  </div>
+
+  <div class="card glass span-12">
+    <div class="kpi">
+      <div class="tile"><p class="t">pred_count</p><p class="v" id="kpiPred">—</p><p class="s">registros (consulta)</p></div>
+      <div class="tile"><p class="t">Normal (bins)</p><p class="v" id="kpiOk">—</p><p class="s">verde</p></div>
+      <div class="tile"><p class="t">Falha (bins)</p><p class="v" id="kpiFault">—</p><p class="s">vermelho</p></div>
+      <div class="tile"><p class="t">None (bins)</p><p class="v" id="kpiNone">—</p><p class="s">cinza</p></div>
+      <div class="tile"><p class="t">Model</p><p class="v" id="kpiModel">—</p><p class="s">model_version</p></div>
+      <div class="tile"><p class="t">Intervalo</p><p class="v" id="kpiRange">—</p><p class="s">start → end</p></div>
+    </div>
+  </div>
+
+  <div class="card glass span-12">
+    <div class="hm-head">
+      <div style="min-width:0;">
+        <h3 style="margin-top:0">Heatmap — dia × bin (canvas)</h3>
+        <div class="hm-sub">
+          Linhas = dias • Colunas = bins de <b id="hmBinLbl">15</b> min •
+          cinza=none, verde=normal, vermelho=falha (qualquer classe ≠ normal).
+        </div>
+      </div>
+
+      <div class="legend">
+        <span class="badge"><span class="dot" style="background:var(--hm-none)"></span>none</span>
+        <span class="badge"><span class="dot" style="background:var(--hm-ok)"></span>normal</span>
+        <span class="badge"><span class="dot" style="background:var(--hm-crit)"></span>falha</span>
+        <span class="badge"><span class="mono" id="hmBadgeTxt">—</span></span>
+      </div>
+    </div>
+
+    <div class="hm-wrap" id="hmWrap">
+      <canvas id="hmCanvas" class="hm-canvas" width="800" height="420" title="Clique para selecionar um bin"></canvas>
+    </div>
+    <div id="hmTip" class="hm-tip"></div>
+  </div>
+</div>
+
+<aside id="detailDrawer" class="detail-drawer" aria-hidden="true">
+  <div class="hd">
+    <div style="min-width:0;">
+      <h3 class="title">Detalhe do ponto selecionado</h3>
+      <div class="meta" id="detailMeta">—</div>
+    </div>
+
+    <div class="actions">
+      <button class="btn-glow secondary" type="button" id="btnCopySel" title="Copiar JSON do ponto">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M9 9h11v12H9V9Z" stroke="rgba(233,246,255,.92)" stroke-width="2" />
+          <path d="M4 15H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1h11a1 1 0 0 1 1 1v1"
+                stroke="rgba(233,246,255,.92)" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+        <span class="label">Copiar</span>
+      </button>
+
+      <button class="btn-glow secondary" type="button" id="btnClearSel" title="Limpar seleção">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M6 6l12 12M18 6 6 18" stroke="rgba(233,246,255,.92)" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+        <span class="label">Limpar</span>
+      </button>
+
+      <button class="btn-glow danger" type="button" id="btnCloseDetail" title="Fechar aba lateral">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M6 6l12 12M18 6 6 18" stroke="rgba(233,246,255,.92)" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+        <span class="label">Fechar</span>
+      </button>
+    </div>
+  </div>
+
+  <div class="body">
+    <h4 style="margin:.2rem 0 .6rem;">Principais variáveis</h4>
+    <table class="kv" id="detailAll"></table>
+
+    <div style="height:.8rem"></div>
+
+    <h4 style="margin:.2rem 0 .6rem;">Dump</h4>
+    <pre class="dump" id="detailDump">{}</pre>
+  </div>
+</aside>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+
+  function setStatus(on, txt){
+    const box = $("statusBox");
+    const t = $("statusTxt");
+    if (!box || !t) return;
+    if (!on){
+      box.style.display = "none";
+      t.textContent = "";
+      return;
+    }
+    box.style.display = "";
+    t.textContent = txt || "Carregando…";
+  }
+
+  function setBtnLoading(btn, isLoading, labelIdle, labelLoading){
+    if (!btn) return;
+    btn.disabled = !!isLoading;
+    const lbl = btn.querySelector(".label");
+    if (lbl){
+      lbl.textContent = isLoading ? (labelLoading || "Carregando...") : (labelIdle || lbl.textContent);
+    }
+  }
+
+  function fmtAny(v){
+    if (v === null || v === undefined) return "—";
+    if (typeof v === "number"){
+      if (!Number.isFinite(v)) return "—";
+      return Number.isInteger(v) ? String(v) : String(v.toFixed(6)).replace(/\.?0+$/,'');
+    }
+    if (typeof v === "boolean") return v ? "true" : "false";
+    if (typeof v === "string") return v === "" ? "—" : v;
+    try{ return JSON.stringify(v); }catch(_e){ return String(v); }
+  }
+
+  function buildQuery(payload){
+    const qs = new URLSearchParams();
+    for (const [k,v] of Object.entries(payload)){
+      if (v === undefined || v === null || v === "") continue;
+      qs.set(k, String(v));
+    }
+    if (payload.plant_id != null){
+      qs.set("plant_pk", String(payload.plant_id));
+      qs.set("pk", String(payload.plant_id));
+    }
+    return qs.toString();
+  }
+
+  async function fetchJson(url, opts={}){
+    const res = await fetch(url, opts);
+    const txt = await res.text();
+    let data = null;
+    try{ data = JSON.parse(txt); }catch(_e){}
+    if (!res.ok){
+      const msg = (data && (data.error || data.detail)) ? (data.error || data.detail) : txt.slice(0, 600);
+      throw new Error(`HTTP ${res.status}: ${msg}`);
+    }
+    if (!data || data.ok !== true){
+      const msg = (data && data.error) ? data.error : "Resposta inválida";
+      throw new Error(msg);
+    }
+    return data;
+  }
+
+  async function fetchApi(apiUrl, payload){
+    const url = apiUrl + "?" + buildQuery(payload);
+    return await fetchJson(url, { method: "GET", headers: { "Accept": "application/json" } });
+  }
+
+  async function postAction(actionsUrl, body){
+    return await fetchJson(actionsUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Accept": "application/json" },
+      body: JSON.stringify(body || {})
+    });
+  }
+
+  function sevColor(cls){
+    const cs = getComputedStyle(document.documentElement);
+    if (cls === "crit") return cs.getPropertyValue("--hm-crit").trim();
+    if (cls === "ok")   return cs.getPropertyValue("--hm-ok").trim();
+    return cs.getPropertyValue("--hm-none").trim();
+  }
+
+  function stateToClass(state){
+    if (state === 2) return "crit";
+    if (state === 1) return "ok";
+    return "none";
+  }
+
+  const hmState = {
+    payload: null,
+    selectedKey: null,
+    geo: null,
+    selectedDump: null,
+    selectedTkey: null,
+  };
+
+  function fitHeatmapToWidth(){
+    const wrap = $("hmWrap");
+    const canvas = $("hmCanvas");
+    if (!wrap || !canvas) return;
+    const W = canvas.width, H = canvas.height;
+    if (!W || !H) return;
+    const avail = Math.max(0, wrap.clientWidth - 2);
+    if (!avail) return;
+    const scale = Math.min(1, avail / W);
+    canvas.style.width = (W * scale) + "px";
+    canvas.style.height = (H * scale) + "px";
+  }
+
+  function drawHeatmapCanvas(payload){
+    const canvas = $("hmCanvas");
+    const tip = $("hmTip");
+    if (!canvas || !payload) return;
+
+    const ctx = canvas.getContext("2d");
+    const days = payload.days || [];
+    const grid = payload.grid || [];
+    const tkeys = payload.tkeys || [];
+    const bpd = Number(payload.bins_per_day || 96);
+    const dtm = Number(payload.dt_minutes || 15);
+
+    $("hmBinLbl").textContent = String(dtm);
+
+    if (!days.length || !bpd){
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      if (tip) tip.textContent = "Sem dados suficientes para heatmap.";
+      return;
+    }
+
+    const pad = 10;
+    const topH = 26;
+    const leftW = 78;
+    const cellSz = 12;
+    const gap = 3;
+
+    const W = pad + leftW + (bpd * (cellSz+gap)) + pad;
+    const H = pad + topH + (days.length * (cellSz+gap)) + pad;
+
+    canvas.width = W;
+    canvas.height = H;
+
+    ctx.clearRect(0,0,W,H);
+    ctx.fillStyle = "rgba(10,20,40,.10)";
+    ctx.fillRect(0,0,W,H);
+
+    ctx.fillStyle = "rgba(233,246,255,.85)";
+    ctx.font = "bold 11px ui-monospace, Menlo, Consolas, monospace";
+    ctx.textBaseline = "middle";
+
+    const binsPerHour = Math.max(1, Math.floor(60 / dtm));
+    for (let ti=0; ti<bpd; ti++){
+      if (ti % binsPerHour !== 0) continue;
+      const minutes = ti * dtm;
+      const hh = String(Math.floor(minutes/60)).padStart(2,"0");
+      const mm = String(minutes%60).padStart(2,"0");
+      const label = `${hh}:${mm}`;
+      const x = pad + leftW + ti*(cellSz+gap);
+      const y = pad + 12;
+      ctx.fillText(label, x, y);
+    }
+
+    ctx.font = "12px ui-monospace, Menlo, Consolas, monospace";
+    for (let di=0; di<days.length; di++){
+      const ds = days[di];
+      const ddmm = ds.length >= 10 ? `${ds.slice(8,10)}/${ds.slice(5,7)}` : ds;
+
+      const y = pad + topH + di*(cellSz+gap);
+
+      ctx.fillStyle = "rgba(233,246,255,.88)";
+      ctx.fillText(ddmm, pad, y + cellSz/2);
+
+      for (let ti=0; ti<bpd; ti++){
+        const state = (grid[di] && grid[di][ti] !== undefined) ? grid[di][ti] : 0;
+        const cls = stateToClass(state);
+        const x = pad + leftW + ti*(cellSz+gap);
+
+        ctx.fillStyle = sevColor(cls);
+        ctx.fillRect(x, y, cellSz, cellSz);
+      }
+    }
+
+    if (hmState.selectedKey){
+      const [diS, tiS] = hmState.selectedKey.split("|").map(Number);
+      if (Number.isFinite(diS) && Number.isFinite(tiS)){
+        const x = pad + leftW + tiS*(cellSz+gap);
+        const y = pad + topH + diS*(cellSz+gap);
+        ctx.save();
+        ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue("--hm-sel").trim();
+        ctx.lineWidth = 2.5;
+        ctx.strokeRect(x-1, y-1, cellSz+2, cellSz+2);
+        ctx.restore();
+      }
+    }
+
+    let ok=0, crit=0, none=0;
+    for (let di=0; di<days.length; di++){
+      for (let ti=0; ti<bpd; ti++){
+        const state = (grid[di] && grid[di][ti] !== undefined) ? grid[di][ti] : 0;
+        if (state === 2) crit++;
+        else if (state === 1) ok++;
+        else none++;
+      }
+    }
+    $("hmBadgeTxt").textContent = `normal=${ok} | falha=${crit} | none=${none}`;
+    $("kpiOk").textContent = String(ok);
+    $("kpiFault").textContent = String(crit);
+    $("kpiNone").textContent = String(none);
+
+    hmState.geo = { pad, topH, leftW, cell: cellSz, gap, days, bpd, dtm, grid, tkeys };
+    fitHeatmapToWidth();
+  }
+
+  function binTimeStr(mins){
+    const m = Number(mins);
+    if (!Number.isFinite(m)) return "—";
+    const hh = String(Math.floor(m/60)).padStart(2,"0");
+    const mm = String(m%60).padStart(2,"0");
+    return `${hh}:${mm}`;
+  }
+
+  function openDetailDrawer(){
+    const dr = $("detailDrawer");
+    if (!dr) return;
+    dr.classList.add("open");
+    dr.setAttribute("aria-hidden", "false");
+  }
+  function closeDetailDrawer(){
+    const dr = $("detailDrawer");
+    if (!dr) return;
+    dr.classList.remove("open");
+    dr.setAttribute("aria-hidden", "true");
+  }
+
+  function renderKvTable(tbl, obj){
+    if (!tbl) return;
+    const entries = Object.entries(obj || {});
+    const renderRow = ([k,v]) => `<tr><td class="k mono">${String(k)}</td><td class="v mono">${fmtAny(v)}</td></tr>`;
+    tbl.innerHTML = entries.map(renderRow).join("");
+  }
+
+  function clearSelection(){
+    hmState.selectedKey = null;
+    hmState.selectedDump = null;
+    hmState.selectedTkey = null;
+    $("detailMeta").textContent = "—";
+    $("detailAll").innerHTML = "";
+    $("detailDump").textContent = "{}";
+    closeDetailDrawer();
+  }
+
+  function currentPayloadBase(){
+    const plantId = $("plant_id")?.value;
+    const start = $("start")?.value;
+    const end   = $("end")?.value;
+
+    if (!plantId){ throw new Error("Informe plant_id"); }
+    if (!start || !end){ throw new Error("Informe start e end"); }
+
+    const dtm = Number($("dt_minutes")?.value || 15);
+    const mppt = Number($("mppt")?.value || 1);
+    const model_version = String($("model_version")?.value || "").trim();
+    const source_oper = String($("source_oper")?.value || "").trim();
+
+    const payload = {
+      plant_id: Number(plantId),
+      start,
+      end,
+      dt_minutes: Number.isFinite(dtm) ? dtm : 15,
+      mppt: Number.isFinite(mppt) ? mppt : 1,
+      model_version: model_version || "gnn_v1",
+      source_oper: source_oper || "MPPT_GNN",
+    };
+    return payload;
+  }
+
+  async function refreshHeatmap(){
+    const page = $("mpptPage");
+    const apiUrl = page ? page.dataset.api : null;
+    if (!apiUrl){ alert("API URL não configurada."); return; }
+
+    const btn = $("btnRefresh");
+    try{
+      const payload = currentPayloadBase();
+
+      setBtnLoading(btn, true, "Atualizar", "Carregando...");
+      setStatus(true, "Carregando heatmap…");
+
+      const data = await fetchApi(apiUrl, payload);
+      hmState.payload = data;
+
+      $("kpiPred").textContent = String(data.pred_count ?? "—");
+      $("kpiModel").textContent = payload.model_version || "—";
+      $("kpiRange").textContent = `${payload.start} → ${payload.end}`;
+
+      if ((data.pred_count ?? 0) === 0){
+        const hint = data.hint || "Sem predições para os filtros atuais.";
+        $("hmTip").textContent = hint;
+        setStatus(true, hint);
+      } else {
+        $("hmTip").textContent = "";
+        setStatus(false);
+      }
+
+      drawHeatmapCanvas(data);
+      bindHeatmapHoverAndClick();
+    }catch(err){
+      console.error(err);
+      setStatus(true, `Erro: ${String(err.message || err)}`);
+    }finally{
+      setBtnLoading(btn, false, "Atualizar", "Carregando...");
+    }
+  }
+
+  async function loadDumpForTkey(tkey){
+    const page = $("mpptPage");
+    const dumpUrl = page ? page.dataset.dump : null;
+    if (!dumpUrl){ alert("Dump URL não configurada."); return; }
+
+    const payload = currentPayloadBase();
+    const q = {
+      plant_id: payload.plant_id,
+      mppt: payload.mppt,
+      model_version: payload.model_version,
+      source_oper: payload.source_oper,
+      tkey: tkey || ""
+    };
+    const url = dumpUrl + "?" + buildQuery(q);
+    const data = await fetchJson(url, { method:"GET", headers:{ "Accept":"application/json" } });
+
+    const meta = $("detailMeta");
+    const tbl = $("detailAll");
+    const dumpEl = $("detailDump");
+
+    if (!data.found){
+      meta.textContent = `tkey=${tkey} • sem registro`;
+      renderKvTable(tbl, { hint: data.hint || "Sem dump" });
+      hmState.selectedDump = data;
+      dumpEl.textContent = JSON.stringify(data, null, 2);
+      openDetailDrawer();
+      return;
+    }
+
+    const d = data.dump || {};
+    const pred = d.pred || {};
+    const vg = d.vars_global || {};
+    const vm = d.vars_mppt || {};
+
+    meta.textContent = `${d.ts_local || "—"} • mppt=${d.mppt ?? "—"} • label=${pred.pred_label || "—"} • pmax=${fmtAny(pred.pred_pmax)}`;
+
+    renderKvTable(tbl, {
+      pred_code: pred.pred_code,
+      pred_label: pred.pred_label,
+      pred_pmax: pred.pred_pmax,
+      model_version: d.model_version,
+      source_oper: d.source_oper,
+
+      pac_w: vg.pac_w,
+      pac_model_w: vg.pac_model_w,
+      mismatch: vg.mismatch,
+      vdc_total_v: vg.vdc_total_v,
+      iac_a: vg.iac_a,
+      g_wm2: vg.g_wm2,
+      t_air_c: vg.t_air_c,
+
+      mppt_vdc_v: vm.mppt_vdc_v,
+      mppt_idc_a: vm.mppt_idc_a,
+      mppt_pdc_est_w: vm.mppt_pdc_est_w,
+    });
+
+    hmState.selectedDump = d;
+    dumpEl.textContent = JSON.stringify(d, null, 2);
+    openDetailDrawer();
+  }
+
+  function bindHeatmapHoverAndClick(){
+    const canvas = $("hmCanvas");
+    const tip = $("hmTip");
+    if (!canvas || canvas.__bound) return;
+    canvas.__bound = true;
+
+    const hitTest = (ev) => {
+      const g = hmState.geo;
+      if (!g) return null;
+
+      const r = canvas.getBoundingClientRect();
+      const sx = canvas.width / Math.max(1, r.width);
+      const sy = canvas.height / Math.max(1, r.height);
+      const x = (ev.clientX - r.left) * sx;
+      const y = (ev.clientY - r.top)  * sy;
+
+      const { pad, topH, leftW, cell, gap, days, bpd, dtm } = g;
+      const gx = x - (pad + leftW);
+      const gy = y - (pad + topH);
+
+      const stride = (cell + gap);
+      const ti = Math.floor(gx / stride);
+      const di = Math.floor(gy / stride);
+
+      if (ti < 0 || ti >= bpd || di < 0 || di >= days.length) return null;
+      const tkey = (g.tkeys[di] && g.tkeys[di][ti]) ? g.tkeys[di][ti] : null;
+      return { di, ti, day: days[di], ts: binTimeStr(ti*dtm), tkey };
+    };
+
+    canvas.addEventListener("mousemove", (ev) => {
+      const h = hitTest(ev);
+      if (!h){ if (tip) tip.textContent = ""; return; }
+      const g = hmState.geo;
+      const state = (g.grid[h.di] && g.grid[h.di][h.ti] !== undefined) ? g.grid[h.di][h.ti] : 0;
+      const cls = stateToClass(state);
+      if (tip) tip.textContent = `${h.day} ${h.ts} • state=${state} • class=${cls} • tkey=${h.tkey || "—"}`;
+    });
+
+    canvas.addEventListener("mouseleave", () => { if (tip) tip.textContent = ""; });
+
+    canvas.addEventListener("click", async (ev) => {
+      const h = hitTest(ev);
+      if (!h) return;
+
+      hmState.selectedKey = `${h.di}|${h.ti}`;
+      hmState.selectedTkey = h.tkey;
+
+      drawHeatmapCanvas(hmState.payload);
+
+      if (!h.tkey){
+        $("detailMeta").textContent = `${h.day} ${h.ts} • sem tkey`;
+        renderKvTable($("detailAll"), { hint: "Bin sem ponto (tkey=null)" });
+        hmState.selectedDump = { day: h.day, ts: h.ts, tkey: null };
+        $("detailDump").textContent = JSON.stringify(hmState.selectedDump, null, 2);
+        openDetailDrawer();
+        return;
+      }
+
+      try{
+        setStatus(true, "Carregando dump…");
+        await loadDumpForTkey(h.tkey);
+        setStatus(false);
+      }catch(err){
+        console.error(err);
+        setStatus(true, `Erro dump: ${String(err.message || err)}`);
+      }
+    });
+  }
+
+  async function runTrain(){
+    const page = $("mpptPage");
+    const actionsUrl = page ? page.dataset.actions : null;
+    if (!actionsUrl){ alert("Actions URL não configurada."); return; }
+
+    const btn = $("btnTrain");
+    try{
+      const payload = currentPayloadBase();
+      const body = {
+        action: "train",
+        plant_id: payload.plant_id,
+        start: payload.start,
+        end: payload.end,
+        model_version: payload.model_version
+      };
+
+      setBtnLoading(btn, true, "Treinar", "Treinando...");
+      setStatus(true, "Treinando modelo (pode demorar)…");
+
+      const out = await postAction(actionsUrl, body);
+      setStatus(true, `Treino OK. Modelo salvo em media/mppt_gnn_models/${payload.model_version}/. Agora clique "Inferir".`);
+      console.log(out);
+    }catch(err){
+      console.error(err);
+      setStatus(true, `Erro train: ${String(err.message || err)}`);
+    }finally{
+      setBtnLoading(btn, false, "Treinar", "Treinando...");
+    }
+  }
+
+  async function runInfer(){
+    const page = $("mpptPage");
+    const actionsUrl = page ? page.dataset.actions : null;
+    if (!actionsUrl){ alert("Actions URL não configurada."); return; }
+
+    const btn = $("btnInfer");
+    try{
+      const payload = currentPayloadBase();
+      const body = {
+        action: "infer",
+        plant_id: payload.plant_id,
+        start: payload.start,
+        end: payload.end,
+        model_version: payload.model_version,
+        source_oper: payload.source_oper,
+        delete_existing: 1
+      };
+
+      setBtnLoading(btn, true, "Inferir", "Inferindo...");
+      setStatus(true, "Executando inferência e gravando no banco…");
+
+      const out = await postAction(actionsUrl, body);
+      console.log(out);
+
+      setStatus(true, `Inferência OK (dias=${out.days || "?"}). Atualizando heatmap…`);
+      await refreshHeatmap();
+      setStatus(false);
+
+    }catch(err){
+      console.error(err);
+      const msg = String(err.message || err);
+      if (msg.toLowerCase().includes("modelo não encontrado") || msg.toLowerCase().includes("model not found")){
+        setStatus(true, `Erro infer: ${msg} • Você precisa TREINAR primeiro (clique "Treinar").`);
+      } else {
+        setStatus(true, `Erro infer: ${msg}`);
+      }
+    }finally{
+      setBtnLoading(btn, false, "Inferir", "Inferindo...");
+    }
+  }
+
+  function resetUi(){
+    hmState.payload = null;
+    clearSelection();
+    const c = $("hmCanvas");
+    if (c){
+      const ctx = c.getContext("2d");
+      ctx.clearRect(0,0,c.width,c.height);
+    }
+    $("hmTip").textContent = "";
+    $("hmBadgeTxt").textContent = "—";
+    $("kpiPred").textContent = "—";
+    $("kpiOk").textContent = "—";
+    $("kpiFault").textContent = "—";
+    $("kpiNone").textContent = "—";
+    $("kpiModel").textContent = "—";
+    $("kpiRange").textContent = "—";
+    setStatus(false);
+    closeDetailDrawer();
+  }
+
+  function bindDetailButtons(){
+    $("btnClearSel")?.addEventListener("click", () => clearSelection());
+    $("btnCloseDetail")?.addEventListener("click", () => closeDetailDrawer());
+    $("btnCopySel")?.addEventListener("click", async () => {
+      const snap = hmState.selectedDump;
+      if (!snap){ alert("Nenhum ponto selecionado."); return; }
+      try{
+        await navigator.clipboard.writeText(JSON.stringify(snap, null, 2));
+      }catch(_e){
+        alert("Não foi possível copiar (permissão). Selecione o texto do dump e copie manualmente.");
+      }
+    });
+  }
+
+  function bindHeatmapFit(){
+    const wrap = $("hmWrap");
+    if (!wrap) return;
+    try{
+      const ro = new ResizeObserver(() => fitHeatmapToWidth());
+      ro.observe(wrap);
+    }catch(_e){
+      window.addEventListener("resize", fitHeatmapToWidth);
+    }
+  }
+
+  document.addEventListener("DOMContentLoaded", () => {
+    $("btnRefresh")?.addEventListener("click", () => refreshHeatmap());
+    $("btnTrain")?.addEventListener("click", () => runTrain());
+    $("btnInfer")?.addEventListener("click", () => runInfer());
+    $("btnReset")?.addEventListener("click", resetUi);
+
+    $("dt_minutes")?.addEventListener("change", () => {
+      if (hmState.payload) drawHeatmapCanvas(hmState.payload);
+    });
+
+    bindDetailButtons();
+    bindHeatmapFit();
+
+    document.addEventListener("keydown", (ev) => {
+      if (ev.key === "Escape") closeDetailDrawer();
+    });
+
+    // auto-load
+    refreshHeatmap();
+  });
+</script>
+{% endblock %}

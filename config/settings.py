@@ -194,3 +194,12 @@ IV_FDD_DATASETS_DIR = IV_FDD_DIR / "datasets"
 IV_FDD_MODELS_DIR = IV_FDD_DIR / "models"
 for _p in (IV_FDD_DIR, IV_FDD_DATASETS_DIR, IV_FDD_MODELS_DIR):
     _p.mkdir(parents=True, exist_ok=True)
+
+
+#---------------------------------
+#-------------------MPPT GNN FDD (GRU+GNN)
+#---------------------------------
+MPPT_GNN_FDD_DIR = _user_data_dir() / "mppt_gnn_fdd"
+MPPT_GNN_FDD_MODELS_DIR = MPPT_GNN_FDD_DIR / "models"
+for _p in (MPPT_GNN_FDD_DIR, MPPT_GNN_FDD_MODELS_DIR):
+    _p.mkdir(parents=True, exist_ok=True)

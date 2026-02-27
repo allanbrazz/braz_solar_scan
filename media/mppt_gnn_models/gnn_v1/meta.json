@@ -1,0 +1,81 @@
+{
+  "plant_id": 2,
+  "start": "2025-01-01",
+  "end": "2025-12-31",
+  "model_version": "gnn_v1",
+  "dataset": {
+    "n_mppt": 4,
+    "g_day_gate": 120.0,
+    "pac_gate_w": 80.0,
+    "min_day_points": 12,
+    "pac_model_gate": 80.0,
+    "mm_abs_p90_max_for_normal": 0.5,
+    "n_days_max": 180,
+    "base_days_target": 60,
+    "aug_per_day": 6,
+    "seed": 42,
+    "p_disc": 0.25,
+    "p_off": 0.2,
+    "p_imb": 0.25,
+    "p_curt": 0.2,
+    "p_meteo": 0.1
+  },
+  "dataset_stats": {
+    "days_scanned": 180,
+    "days_usable": 166,
+    "days_normal": 2,
+    "fallback_used": 0,
+    "base_days_used": 2,
+    "samples_total": 56,
+    "dim": 1632
+  },
+  "mlp": {
+    "hidden_layer_sizes": [
+      256,
+      128
+    ],
+    "alpha": 0.0001,
+    "max_iter": 60,
+    "early_stopping": true,
+    "validation_fraction": 0.15,
+    "n_iter_no_change": 8,
+    "random_state": 42
+  },
+  "feature_map": {
+    "v_mppt_n": 0,
+    "i_mppt_n": 1,
+    "pdc_est_n": 2,
+    "i_rel": 3,
+    "v_rel": 4,
+    "share_p": 5,
+    "dv_mppt": 6,
+    "di_mppt": 7,
+    "pac_n": 8,
+    "vdc_total_n": 9,
+    "iac_n": 10,
+    "pac_model_n": 11,
+    "mismatch_n": 12,
+    "g_n": 13,
+    "t_n": 14,
+    "dpac": 15,
+    "dmm": 16
+  },
+  "train_shape": {
+    "X": [
+      56,
+      1632
+    ],
+    "y": [
+      56
+    ]
+  },
+  "classes": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5
+  ],
+  "note": "Modelo sklearn baseline (flatten 24h) + fault injection. Dataset builder é robusto: se não houver dias 'normais', usa dias 'utilizáveis' como base."
+}
