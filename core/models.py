@@ -5,7 +5,7 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 from decimal import Decimal
-from django.db.models import Q
+from django.db.models import Q, F
 
 #---------------------------
 #--------------------------- P     M
@@ -801,16 +801,15 @@ class PVPlantMergedRecord15m(models.Model):
 # ---------------------------
 # F A L H A S
 # ---------------------------
-
-
 class PlantDiagnostic15m(models.Model):
     """
     Um registro por timestamp (ex: cada 15 min), por planta.
 
     Guarda:
       - code/label do diagnóstico (RCA / regras / ML)
-      - mismatch / indicadores auxiliares (opcional)
+      - mismatch / indicadores auxiliares
       - valid: se a amostra era válida (G>=limiar, sem NaN etc.)
+      - campos do detector universal plant-level
     """
 
     plant = models.ForeignKey(
@@ -836,8 +835,16 @@ class PlantDiagnostic15m(models.Model):
         blank=True,
     )
 
-    # Indica se a amostra passou no gate básico de qualidade (ex.: G>=g_min_valid etc.)
+    # Indica se a amostra passou no gate básico de qualidade
     valid = models.BooleanField(default=False)
+
+    # Detector universal plant-level (residual físico)
+    anomaly_flag = models.BooleanField(default=False, db_index=True)
+    detector_score = models.FloatField(null=True, blank=True)
+    ewma_z = models.FloatField(null=True, blank=True)
+    cusum_score = models.FloatField(null=True, blank=True)
+    stable_sky = models.BooleanField(default=False)
+    detector_version = models.CharField(max_length=64, default="residual_v1", blank=True)
 
     # Campos opcionais (úteis para debug e drill-down)
     g_poa = models.FloatField(
@@ -887,13 +894,15 @@ class PlantDiagnostic15m(models.Model):
         indexes = [
             models.Index(fields=["plant", "ts_utc"], name="idx_diag15m_plant_ts"),
             models.Index(fields=["plant", "rca_code", "ts_utc"], name="idx_diag15m_plant_code_ts"),
+            models.Index(fields=["plant", "anomaly_flag", "ts_utc"], name="idx_diag15m_plant_anom_ts"),
         ]
         ordering = ["plant_id", "ts_utc"]
 
     def __str__(self) -> str:
-        # ts_utc pode ser None antes de salvar, então protege
         ts = self.ts_utc.isoformat() if self.ts_utc else "n/a"
         return f"{self.plant_id} {ts} {self.rca_label}"
+
+
 
 # ---------------------------
 # MPPT-level FDD predictions (GNN/GRU)
@@ -947,3 +956,129 @@ class MPPTDiagnostic15m(models.Model):
     def __str__(self) -> str:
         ts = self.ts_utc.isoformat() if self.ts_utc else "n/a"
         return f"{self.plant_id} {self.source_oper} mppt{self.mppt} {ts} {self.pred_label}"
+    
+
+# ---------------------------
+# Event-level FDD
+# ---------------------------
+
+class FaultEvent(models.Model):
+    """
+    Evento anômalo persistido (plant-level), derivado dos bins de PlantDiagnostic15m.
+    """
+    STATUS_OPEN = "open"
+    STATUS_CLOSED = "closed"
+    STATUS_REVIEWED = "reviewed"
+    STATUS_DISMISSED = "dismissed"
+
+    STATUS_CHOICES = [
+        (STATUS_OPEN, "Open"),
+        (STATUS_CLOSED, "Closed"),
+        (STATUS_REVIEWED, "Reviewed"),
+        (STATUS_DISMISSED, "Dismissed"),
+    ]
+
+    plant = models.ForeignKey(
+        "core.PVPlant",
+        on_delete=models.CASCADE,
+        related_name="fault_events",
+        db_index=True,
+    )
+    source_oper = models.CharField(max_length=30, blank=True, default="", db_index=True)
+    source_meteo = models.CharField(max_length=20, blank=True, default="", db_index=True)
+
+    ts_start_utc = models.DateTimeField(db_index=True)
+    ts_end_utc = models.DateTimeField(db_index=True)
+
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=STATUS_OPEN, db_index=True)
+    detector_version = models.CharField(max_length=64, default="residual_v1", blank=True)
+
+    detector_score_max = models.FloatField(null=True, blank=True)
+    detector_score_mean = models.FloatField(null=True, blank=True)
+    severity_score = models.FloatField(null=True, blank=True)
+    energy_loss_wh = models.FloatField(null=True, blank=True)
+
+    event_label_prelim = models.CharField(max_length=64, default="unknown", blank=True)
+    known_vs_unknown = models.CharField(max_length=16, default="pending", db_index=True)
+    final_label = models.CharField(max_length=64, default="", blank=True)
+    confidence = models.FloatField(
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(0.0), MaxValueValidator(1.0)],
+    )
+    novelty_score = models.FloatField(null=True, blank=True)
+
+    meta = models.JSONField(null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Fault Event"
+        verbose_name_plural = "Fault Events"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["plant", "source_oper", "ts_start_utc", "ts_end_utc", "detector_version"],
+                name="uniq_faultevent_window_detector",
+            ),
+            models.CheckConstraint(
+                condition=Q(ts_end_utc__gte=F("ts_start_utc")),
+                name="chk_faultevent_end_after_start",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["plant", "ts_start_utc"], name="idx_faultevent_plant_start"),
+            models.Index(fields=["plant", "status", "ts_start_utc"], name="idx_faultevent_status_start"),
+            models.Index(fields=["plant", "final_label", "ts_start_utc"], name="idx_faultevent_label_start"),
+        ]
+        ordering = ["plant_id", "ts_start_utc"]
+
+    def __str__(self) -> str:
+        return f"event {self.plant_id} {self.ts_start_utc.isoformat()}..{self.ts_end_utc.isoformat()}"
+
+
+class FaultEventMPPT(models.Model):
+    """
+    Diagnóstico por MPPT associado a um FaultEvent.
+    """
+    event = models.ForeignKey(
+        "core.FaultEvent",
+        on_delete=models.CASCADE,
+        related_name="mppt_predictions",
+        db_index=True,
+    )
+    source_oper = models.CharField(max_length=30, blank=True, default="", db_index=True)
+    mppt = models.PositiveSmallIntegerField(validators=[MinValueValidator(1), MaxValueValidator(16)])
+
+    model_version = models.CharField(max_length=64, default="event_rules_v1", blank=True)
+    pred_code = models.SmallIntegerField(default=99)
+    pred_label = models.CharField(max_length=64, default="unknown_fault", blank=True)
+    confidence = models.FloatField(
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(0.0), MaxValueValidator(1.0)],
+    )
+    novelty_score = models.FloatField(null=True, blank=True)
+    contribution = models.JSONField(null=True, blank=True)
+    proba = models.JSONField(null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Fault Event MPPT"
+        verbose_name_plural = "Fault Event MPPT"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["event", "mppt", "model_version"],
+                name="uniq_faulteventmppt_event_mppt_model",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["event", "mppt"], name="idx_faulteventmppt_event_mppt"),
+            models.Index(fields=["event", "pred_code"], name="idx_faulteventmppt_event_code"),
+        ]
+        ordering = ["event_id", "mppt"]
+
+    def __str__(self) -> str:
+        return f"event={self.event_id} mppt={self.mppt} {self.pred_label}"    
