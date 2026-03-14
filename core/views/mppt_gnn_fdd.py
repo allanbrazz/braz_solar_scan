@@ -1,3 +1,4 @@
+#views/mppt_gnn_fdd
 from __future__ import annotations
 
 import ast
@@ -184,6 +185,19 @@ def _parse_float(s: Optional[str], default: float) -> float:
         return float(default)
 
 
+
+def _normalize_dt_minutes(v: Optional[str]) -> int:
+    try:
+        x = int(v) if v is not None else 15
+    except Exception:
+        x = 15
+    if x <= 15:
+        return 15
+    if x <= 30:
+        return 30
+    return 60
+
+
 def _json_body(request: HttpRequest) -> dict:
     try:
         raw = request.body.decode("utf-8") if request.body else ""
@@ -293,6 +307,66 @@ def _all_concrete_field_names(model_cls: Any) -> List[str]:
     except Exception:
         pass
     return names
+
+
+
+def _distinct_nonempty_values(model_cls: Any, field_name: str, **filters: Any) -> List[str]:
+    try:
+        q = model_cls.objects.filter(**filters)
+        vals = q.values_list(field_name, flat=True).distinct().order_by(field_name)
+        return [str(v) for v in vals if str(v or "").strip()]
+    except Exception:
+        return []
+
+
+def _detect_available_mppts(
+    *,
+    plant_id: int,
+    source_oper: Optional[str] = None,
+    source_meteo: Optional[str] = None,
+    dt0_utc: Optional[datetime] = None,
+    dt1_utc: Optional[datetime] = None,
+    max_mppt: int = 8,
+) -> List[int]:
+    if PVPlantMergedRecord15m is None:
+        return [1, 2, 3, 4]
+
+    model_names = _model_field_names(PVPlantMergedRecord15m)
+    candidate_idxs: List[int] = []
+    for i in range(1, max_mppt + 1):
+        if f"mppt{i}_vdc_v" in model_names or f"mppt{i}_idc_a" in model_names:
+            candidate_idxs.append(i)
+
+    if not candidate_idxs:
+        return [1, 2, 3, 4]
+
+    q = PVPlantMergedRecord15m.objects.filter(plant_id=plant_id)
+    if source_oper:
+        q = q.filter(source_oper__startswith=source_oper)
+    if source_meteo:
+        q = q.filter(source_meteo=source_meteo)
+    if dt0_utc is not None:
+        q = q.filter(ts_utc__gte=dt0_utc)
+    if dt1_utc is not None:
+        q = q.filter(ts_utc__lt=dt1_utc)
+
+    observed: List[int] = []
+    for i in candidate_idxs:
+        vf = f"mppt{i}_vdc_v"
+        inf = f"mppt{i}_idc_a"
+        has_v = False
+        has_i = False
+        try:
+            if vf in model_names:
+                has_v = q.exclude(**{f"{vf}__isnull": True}).exists()
+            if inf in model_names:
+                has_i = q.exclude(**{f"{inf}__isnull": True}).exists()
+        except Exception:
+            pass
+        if has_v or has_i:
+            observed.append(i)
+
+    return observed or candidate_idxs
 
 
 def _coerce_jsonish(v: Any) -> Any:
@@ -703,13 +777,16 @@ def _build_merged_snapshot_for_ts(*, plant_id: int, ts_utc: datetime) -> Dict[st
 # ============================================================
 # Helpers de eventos
 # ============================================================
+
 def _find_event_for_tkey(
     *,
     plant_id: int,
     dt_local: datetime,
     tz: ZoneInfo,
     model_version: Optional[str],
+    detector_version: Optional[str],
     source_oper: Optional[str],
+    source_meteo: Optional[str],
     mppt: int,
 ) -> Optional[int]:
     if FaultEvent is None:
@@ -722,8 +799,12 @@ def _find_event_for_tkey(
         ts_start_utc__lte=tsu,
         ts_end_utc__gte=tsu,
     )
+    if detector_version:
+        q = q.filter(detector_version=detector_version)
     if source_oper:
         q = q.filter(source_oper__startswith=source_oper)
+    if source_meteo:
+        q = q.filter(source_meteo=source_meteo)
 
     events = list(q.order_by("ts_start_utc"))
     if not events:
@@ -753,7 +834,6 @@ def _find_event_for_tkey(
             best_id = ev.id
     return best_id
 
-
 def _build_event_bin_map(
     *,
     plant_id: int,
@@ -765,13 +845,15 @@ def _build_event_bin_map(
     bpd: int,
     dt_minutes: int,
     source_oper: Optional[str],
+    source_meteo: Optional[str],
+    detector_version: Optional[str],
     model_version: Optional[str],
     mppt: int,
-) -> Tuple[Dict[Tuple[int, int], Dict[str, Any]], List[dict], List[str], List[str]]:
+) -> Tuple[Dict[Tuple[int, int], Dict[str, Any]], List[dict], List[str], List[str], List[str], List[str]]:
     best_info: Dict[Tuple[int, int], Dict[str, Any]] = {}
 
     if FaultEvent is None:
-        return best_info, [], [], []
+        return best_info, [], [], [], [], []
 
     q = FaultEvent.objects.filter(
         plant_id=plant_id,
@@ -779,8 +861,12 @@ def _build_event_bin_map(
         ts_end_utc__gte=dt0_utc,
     ).order_by("ts_start_utc")
 
+    if detector_version:
+        q = q.filter(detector_version=detector_version)
     if source_oper:
         q = q.filter(source_oper__startswith=source_oper)
+    if source_meteo:
+        q = q.filter(source_meteo=source_meteo)
 
     events = list(
         q.values(
@@ -788,6 +874,8 @@ def _build_event_bin_map(
             "ts_start_utc",
             "ts_end_utc",
             "source_oper",
+            "source_meteo",
+            "detector_version",
             "event_label_prelim",
             "final_label",
             "severity_score",
@@ -796,21 +884,43 @@ def _build_event_bin_map(
         )
     )
 
+    if source_oper:
+        # já filtrado no queryset por prefixo
+        pass
+    elif mppt > 0:
+        events = [
+            e for e in events
+            if _extract_mppt_index_from_source(str(e.get("source_oper") or "")) == mppt
+        ]
+    else:
+        # view plant-level/agregada: não misturar eventos MPPT específicos
+        events = [
+            e for e in events
+            if _is_agg_source(str(e.get("source_oper") or ""))
+        ]
+
     mv_list: List[str] = []
     if FaultEventMPPT is not None:
-        mv_list = list(
-            FaultEventMPPT.objects.filter(event__plant_id=plant_id)
-            .values_list("model_version", flat=True)
-            .distinct()
-            .order_by("model_version")
-        )
+        qmv = FaultEventMPPT.objects.filter(event__plant_id=plant_id)
+        if source_oper:
+            qmv = qmv.filter(event__source_oper__startswith=source_oper)
+        if source_meteo:
+            qmv = qmv.filter(event__source_meteo=source_meteo)
+        if detector_version:
+            qmv = qmv.filter(event__detector_version=detector_version)
+        mv_list = [str(v) for v in qmv.values_list("model_version", flat=True).distinct().order_by("model_version") if str(v or "").strip()]
 
-    so_list = list(
-        FaultEvent.objects.filter(plant_id=plant_id)
-        .values_list("source_oper", flat=True)
-        .distinct()
-        .order_by("source_oper")
-    )
+    qe = FaultEvent.objects.filter(plant_id=plant_id)
+    if detector_version:
+        qe = qe.filter(detector_version=detector_version)
+    if source_oper:
+        qe = qe.filter(source_oper__startswith=source_oper)
+    if source_meteo:
+        qe = qe.filter(source_meteo=source_meteo)
+
+    so_list = [str(v) for v in qe.values_list("source_oper", flat=True).distinct().order_by("source_oper") if str(v or "").strip()]
+    sm_list = [str(v) for v in qe.values_list("source_meteo", flat=True).distinct().order_by("source_meteo") if str(v or "").strip()]
+    dv_list = [str(v) for v in qe.values_list("detector_version", flat=True).distinct().order_by("detector_version") if str(v or "").strip()]
 
     pred_map = _best_pred_rows_for_events(
         [int(e["id"]) for e in events],
@@ -860,17 +970,20 @@ def _build_event_bin_map(
                             "label": str(label),
                             "state": _label_state(str(label)),
                             "tkey": _tkey(cur_bin),
+                            "source_oper": ev.get("source_oper"),
+                            "source_meteo": ev.get("source_meteo"),
+                            "detector_version": ev.get("detector_version"),
+                            "score": sc,
                         }
             cur_bin += timedelta(minutes=dt_minutes)
 
-    return best_info, events, mv_list, so_list
-
-
+    return best_info, events, mv_list, so_list, sm_list, dv_list
 # ============================================================
 # Página
 # ============================================================
 @require_GET
 @login_required
+
 def mppt_gnn_fdd_view(request: HttpRequest):
     qs = (
         PVPlant.objects.all().order_by("nome")
@@ -895,6 +1008,17 @@ def mppt_gnn_fdd_view(request: HttpRequest):
     start_q = request.GET.get("start")
     end_q = request.GET.get("end")
 
+    mppt_options = [1, 2, 3, 4]
+    if plant_id:
+        try:
+            mppt_options = _detect_available_mppts(
+                plant_id=int(plant_id),
+                source_oper=(source_oper or None),
+                source_meteo=(source_meteo or None),
+            )
+        except Exception:
+            logger.exception("mppt option inference failed")
+
     if plant_id and (not start_q or not end_q):
         try:
             plant_obj = PVPlant.objects.filter(id=int(plant_id)).first()
@@ -903,14 +1027,22 @@ def mppt_gnn_fdd_view(request: HttpRequest):
                 agg = None
 
                 if view_mode == "full" and PlantDiagnostic15m is not None:
-                    agg = PlantDiagnostic15m.objects.filter(plant_id=int(plant_id)).aggregate(
-                        ts_min=Min("ts_utc"),
-                        ts_max=Max("ts_utc"),
-                    )
+                    qd = PlantDiagnostic15m.objects.filter(plant_id=int(plant_id))
+                    if detector_version:
+                        qd = qd.filter(detector_version=detector_version)
+                    if source_oper and "source_oper" in _model_field_names(PlantDiagnostic15m):
+                        qd = qd.filter(source_oper__startswith=source_oper)
+                    if source_meteo and "source_meteo" in _model_field_names(PlantDiagnostic15m):
+                        qd = qd.filter(source_meteo=source_meteo)
+                    agg = qd.aggregate(ts_min=Min("ts_utc"), ts_max=Max("ts_utc"))
                 elif FaultEvent is not None:
                     q = FaultEvent.objects.filter(plant_id=int(plant_id))
+                    if detector_version:
+                        q = q.filter(detector_version=detector_version)
                     if source_oper:
                         q = q.filter(source_oper__startswith=source_oper)
+                    if source_meteo:
+                        q = q.filter(source_meteo=source_meteo)
                     agg = q.aggregate(ts_min=Min("ts_start_utc"), ts_max=Max("ts_end_utc"))
 
                 if agg and agg["ts_max"]:
@@ -929,10 +1061,10 @@ def mppt_gnn_fdd_view(request: HttpRequest):
             "plant_id": plant_id,
             "start": start_q or d_start.isoformat(),
             "end": end_q or d_end.isoformat(),
-            "dt_minutes": int(float(request.GET.get("dt_minutes") or 15)),
+            "dt_minutes": _normalize_dt_minutes(request.GET.get("dt_minutes")),
             "mppt": request.GET.get("mppt") or "all",
-            "dt_options": [5, 10, 15, 30, 60],
-            "mppt_options": [1, 2, 3, 4],
+            "dt_options": [15, 30, 60],
+            "mppt_options": mppt_options,
             "model_version": model_version,
             "detector_version": detector_version,
             "source_oper": source_oper,
@@ -948,6 +1080,7 @@ def mppt_gnn_fdd_view(request: HttpRequest):
 # ============================================================
 # API 1: Heatmap
 # ============================================================
+
 @require_GET
 @login_required
 def mppt_gnn_fdd_api(request: HttpRequest) -> JsonResponse:
@@ -970,14 +1103,16 @@ def mppt_gnn_fdd_api(request: HttpRequest) -> JsonResponse:
         if d_start > d_end:
             d_start, d_end = d_end, d_start
 
-        dt_minutes = _parse_int(request.GET.get("dt_minutes"), default=15, lo=5, hi=60)
+        dt_minutes = _normalize_dt_minutes(request.GET.get("dt_minutes"))
         mppt = _parse_int(request.GET.get("mppt"), default=0, lo=0, hi=32)
         view_mode = (request.GET.get("view_mode") or "full").strip().lower()
         if view_mode not in {"full", "events"}:
             view_mode = "full"
 
         model_version = (request.GET.get("model_version") or "").strip() or None
+        detector_version = (request.GET.get("detector_version") or "").strip() or None
         source_oper = (request.GET.get("source_oper") or "").strip() or None
+        source_meteo = (request.GET.get("source_meteo") or "").strip() or None
 
         dt0_local = datetime.combine(d_start, time.min, tzinfo=tz)
         dt1_local = datetime.combine(d_end + timedelta(days=1), time.min, tzinfo=tz)
@@ -997,7 +1132,7 @@ def mppt_gnn_fdd_api(request: HttpRequest) -> JsonResponse:
         event_ids: List[List[Optional[int]]] = [[None for _ in range(bpd)] for _ in range(len(days))]
         labels: List[List[Optional[str]]] = [[None for _ in range(bpd)] for _ in range(len(days))]
 
-        event_best_info, events, mv_list, so_list = _build_event_bin_map(
+        event_best_info, events, mv_list, so_list, sm_list, dv_list = _build_event_bin_map(
             plant_id=plant_id,
             tz=tz,
             dt0_utc=dt0_utc,
@@ -1007,9 +1142,27 @@ def mppt_gnn_fdd_api(request: HttpRequest) -> JsonResponse:
             bpd=bpd,
             dt_minutes=dt_minutes,
             source_oper=source_oper,
+            source_meteo=source_meteo,
+            detector_version=detector_version,
             model_version=model_version,
             mppt=mppt,
         )
+
+        available_mppts = _detect_available_mppts(
+            plant_id=plant_id,
+            source_oper=source_oper,
+            source_meteo=source_meteo,
+            dt0_utc=dt0_utc,
+            dt1_utc=dt1_utc,
+        )
+
+        available_common = {
+            "model_versions": mv_list,
+            "source_opers": so_list,
+            "source_meteos": sm_list,
+            "detector_versions": dv_list,
+            "mppt_options": available_mppts,
+        }
 
         if view_mode == "events":
             event_count = len(events)
@@ -1017,10 +1170,14 @@ def mppt_gnn_fdd_api(request: HttpRequest) -> JsonResponse:
             if event_count == 0:
                 avail = None
                 if FaultEvent is not None:
-                    avail = FaultEvent.objects.filter(plant_id=plant_id).aggregate(
-                        ts_min=Min("ts_start_utc"),
-                        ts_max=Max("ts_end_utc"),
-                    )
+                    qev = FaultEvent.objects.filter(plant_id=plant_id)
+                    if detector_version:
+                        qev = qev.filter(detector_version=detector_version)
+                    if source_oper:
+                        qev = qev.filter(source_oper__startswith=source_oper)
+                    if source_meteo:
+                        qev = qev.filter(source_meteo=source_meteo)
+                    avail = qev.aggregate(ts_min=Min("ts_start_utc"), ts_max=Max("ts_end_utc"))
                 return JsonResponse(
                     {
                         "ok": True,
@@ -1038,12 +1195,17 @@ def mppt_gnn_fdd_api(request: HttpRequest) -> JsonResponse:
                         "labels": labels,
                         "pred_count": 0,
                         "available": {
+                            **available_common,
                             "event_min_utc": avail["ts_min"].isoformat() if avail and avail["ts_min"] else None,
                             "event_max_utc": avail["ts_max"].isoformat() if avail and avail["ts_max"] else None,
-                            "model_versions": mv_list,
-                            "source_opers": so_list,
                         },
-                        "echo": {"model_version": model_version, "source_oper": source_oper, "mppt": mppt},
+                        "echo": {
+                            "model_version": model_version,
+                            "detector_version": detector_version,
+                            "source_oper": source_oper,
+                            "source_meteo": source_meteo,
+                            "mppt": mppt,
+                        },
                         "hint": "Sem eventos no período/filtros atuais.",
                     },
                     status=200,
@@ -1090,11 +1252,14 @@ def mppt_gnn_fdd_api(request: HttpRequest) -> JsonResponse:
                     "pred_count": event_count,
                     "counts_by_label": counts_by_label,
                     "counts_by_state": counts_by_state,
-                    "available": {
-                        "model_versions": mv_list,
-                        "source_opers": so_list,
+                    "available": available_common,
+                    "echo": {
+                        "model_version": model_version,
+                        "detector_version": detector_version,
+                        "source_oper": source_oper,
+                        "source_meteo": source_meteo,
+                        "mppt": mppt,
                     },
-                    "echo": {"model_version": model_version, "source_oper": source_oper, "mppt": mppt},
                 },
                 status=200,
             )
@@ -1107,6 +1272,13 @@ def mppt_gnn_fdd_api(request: HttpRequest) -> JsonResponse:
             ts_utc__gte=dt0_utc,
             ts_utc__lt=dt1_utc,
         ).order_by("ts_utc")
+        diag_names = _model_field_names(PlantDiagnostic15m)
+        if detector_version and "detector_version" in diag_names:
+            qd = qd.filter(detector_version=detector_version)
+        if source_oper and "source_oper" in diag_names:
+            qd = qd.filter(source_oper__startswith=source_oper)
+        if source_meteo and "source_meteo" in diag_names:
+            qd = qd.filter(source_meteo=source_meteo)
 
         diag_fields = _existing_fields(
             PlantDiagnostic15m,
@@ -1122,15 +1294,39 @@ def mppt_gnn_fdd_api(request: HttpRequest) -> JsonResponse:
                 "pac_model_w",
                 "g_poa",
                 "tcell_c",
+                "source_oper",
+                "source_meteo",
+                "detector_version",
             ],
         )
         diag_rows = list(qd.values(*diag_fields))
 
+        if "source_oper" in diag_fields:
+            if source_oper:
+                # já filtrado no queryset por prefixo
+                pass
+            elif mppt > 0:
+                diag_rows = [
+                    r for r in diag_rows
+                    if _extract_mppt_index_from_source(str(r.get("source_oper") or "")) == mppt
+                ]
+            else:
+                # modo "Todos"/plant-level = usar apenas fontes agregadas
+                diag_rows = [
+                    r for r in diag_rows
+                    if _is_agg_source(str(r.get("source_oper") or ""))
+                ]
+
         if not diag_rows:
-            avail = PlantDiagnostic15m.objects.filter(plant_id=plant_id).aggregate(
-                ts_min=Min("ts_utc"),
-                ts_max=Max("ts_utc"),
-            )
+            qavail = PlantDiagnostic15m.objects.filter(plant_id=plant_id)
+            if detector_version and "detector_version" in diag_names:
+                qavail = qavail.filter(detector_version=detector_version)
+            if source_oper and "source_oper" in diag_names:
+                qavail = qavail.filter(source_oper__startswith=source_oper)
+            if source_meteo and "source_meteo" in diag_names:
+                qavail = qavail.filter(source_meteo=source_meteo)
+
+            avail = qavail.aggregate(ts_min=Min("ts_utc"), ts_max=Max("ts_utc"))
             return JsonResponse(
                 {
                     "ok": True,
@@ -1148,12 +1344,17 @@ def mppt_gnn_fdd_api(request: HttpRequest) -> JsonResponse:
                     "labels": labels,
                     "pred_count": 0,
                     "available": {
+                        **available_common,
                         "diag_min_utc": avail["ts_min"].isoformat() if avail["ts_min"] else None,
                         "diag_max_utc": avail["ts_max"].isoformat() if avail["ts_max"] else None,
-                        "model_versions": mv_list,
-                        "source_opers": so_list,
                     },
-                    "echo": {"model_version": model_version, "source_oper": source_oper, "mppt": mppt},
+                    "echo": {
+                        "model_version": model_version,
+                        "detector_version": detector_version,
+                        "source_oper": source_oper,
+                        "source_meteo": source_meteo,
+                        "mppt": mppt,
+                    },
                     "hint": "Sem diagnósticos 15 min no período/filtros atuais.",
                 },
                 status=200,
@@ -1179,15 +1380,24 @@ def mppt_gnn_fdd_api(request: HttpRequest) -> JsonResponse:
                 continue
 
             key = (di, bi)
+            valid = bool(r.get("valid"))
             anomaly = bool(r.get("anomaly_flag"))
-            rca_label = (r.get("rca_label") or "").strip()
+            rca_label = (r.get("rca_label") or "").strip().lower()
 
-            state = 1
-            label = "normal"
-
+            # Semântica do heatmap nesta versão:
+            # 0 = cinza   -> bin sem linha diagnóstica carregada
+            # 1 = verde   -> existe linha diagnóstica e não há falha
+            # 2 = vermelho-> falha detectada
+            #
+            # "invalid" e "no_oper_data" continuam visíveis no label/tooltip,
+            # mas entram no grupo verde para não colapsar dias inteiros em cinza
+            # quando o detector persistiu a linha, porém marcou o ponto como inválido.
             if anomaly:
                 state = 2
                 label = rca_label or "anomaly"
+            else:
+                state = 1
+                label = rca_label or ("invalid" if not valid else "normal")
 
             detector_score = _safe_float(r.get("detector_score"), 0.0) or 0.0
             score = (10_000_000 if state == 2 else 1_000_000) + detector_score
@@ -1205,10 +1415,34 @@ def mppt_gnn_fdd_api(request: HttpRequest) -> JsonResponse:
             if einfo:
                 event_ids[di][bi] = int(einfo["event_id"])
 
+        for key, einfo in event_best_info.items():
+            di, bi = key
+            cur_state = int(grid[di][bi] or 0)
+            cur_label = labels[di][bi] or ""
+            should_overlay = False
+
+            if int(einfo["state"]) > cur_state:
+                should_overlay = True
+            elif int(einfo["state"]) == cur_state and int(einfo["state"]) == 2:
+                should_overlay = True
+            elif cur_state == 0 and int(einfo["state"]) > 0:
+                should_overlay = True
+
+            if should_overlay:
+                grid[di][bi] = int(einfo["state"])
+                labels[di][bi] = str(einfo["label"])
+                event_ids[di][bi] = int(einfo["event_id"])
+                if not tkeys[di][bi]:
+                    tkeys[di][bi] = einfo["tkey"]
+            elif not event_ids[di][bi]:
+                event_ids[di][bi] = int(einfo["event_id"])
+            elif cur_state == 2 and cur_label and cur_label.lower() in {"anomaly", "plant_wide_loss", "localized_loss"}:
+                labels[di][bi] = str(einfo["label"])
+
         for di in range(len(days)):
             for bi in range(bpd):
                 state = grid[di][bi]
-                label = labels[di][bi] or ("normal" if state == 1 else "anomaly" if state == 2 else "no_oper_data")
+                label = labels[di][bi] or ("normal" if state == 1 else "anomaly" if state == 2 else "sem_diagnostico")
                 counts_by_label[label] = counts_by_label.get(label, 0) + 1
 
                 if state == 1:
@@ -1234,13 +1468,20 @@ def mppt_gnn_fdd_api(request: HttpRequest) -> JsonResponse:
                 "event_ids": event_ids,
                 "labels": labels,
                 "pred_count": len(diag_rows),
+                "diag_rows_total": len(diag_rows),
+                "diag_rows_valid": sum(1 for r in diag_rows if bool(r.get("valid"))),
+                "diag_rows_invalid": sum(1 for r in diag_rows if not bool(r.get("valid"))),
+                "diag_rows_anomaly": sum(1 for r in diag_rows if bool(r.get("anomaly_flag"))),
                 "counts_by_label": counts_by_label,
                 "counts_by_state": counts_by_state,
-                "available": {
-                    "model_versions": mv_list,
-                    "source_opers": so_list,
+                "available": available_common,
+                "echo": {
+                    "model_version": model_version,
+                    "detector_version": detector_version,
+                    "source_oper": source_oper,
+                    "source_meteo": source_meteo,
+                    "mppt": mppt,
                 },
-                "echo": {"model_version": model_version, "source_oper": source_oper, "mppt": mppt},
             },
             status=200,
         )
@@ -1272,7 +1513,9 @@ def mppt_gnn_fdd_dump_api(request: HttpRequest) -> JsonResponse:
 
         mppt = _parse_int(request.GET.get("mppt"), default=0, lo=0, hi=32)
         model_version = (request.GET.get("model_version") or "").strip() or None
+        detector_version = (request.GET.get("detector_version") or "").strip() or None
         source_oper = (request.GET.get("source_oper") or "").strip() or None
+        source_meteo = (request.GET.get("source_meteo") or "").strip() or None
 
         event_id = request.GET.get("event_id")
         tkey = (request.GET.get("tkey") or request.GET.get("ts_local") or "").strip()
@@ -1281,7 +1524,14 @@ def mppt_gnn_fdd_dump_api(request: HttpRequest) -> JsonResponse:
         dt_local = None
 
         if event_id and FaultEvent is not None:
-            event = FaultEvent.objects.filter(id=int(event_id), plant_id=plant_id).first()
+            qev = FaultEvent.objects.filter(id=int(event_id), plant_id=plant_id)
+            if detector_version:
+                qev = qev.filter(detector_version=detector_version)
+            if source_oper:
+                qev = qev.filter(source_oper__startswith=source_oper)
+            if source_meteo:
+                qev = qev.filter(source_meteo=source_meteo)
+            event = qev.first()
             if event is not None and tkey:
                 dt_local = _parse_tkey_to_local(tkey, tz)
 
@@ -1295,11 +1545,20 @@ def mppt_gnn_fdd_dump_api(request: HttpRequest) -> JsonResponse:
                 dt_local=dt_local,
                 tz=tz,
                 model_version=model_version,
+                detector_version=detector_version,
                 source_oper=source_oper,
+                source_meteo=source_meteo,
                 mppt=mppt,
             )
             if found_event_id and FaultEvent is not None:
-                event = FaultEvent.objects.filter(id=found_event_id, plant_id=plant_id).first()
+                qev = FaultEvent.objects.filter(id=found_event_id, plant_id=plant_id)
+                if detector_version:
+                    qev = qev.filter(detector_version=detector_version)
+                if source_oper:
+                    qev = qev.filter(source_oper__startswith=source_oper)
+                if source_meteo:
+                    qev = qev.filter(source_meteo=source_meteo)
+                event = qev.first()
 
         pred = None
         if event is not None:
@@ -1308,9 +1567,6 @@ def mppt_gnn_fdd_dump_api(request: HttpRequest) -> JsonResponse:
 
         selected_bin: Dict[str, Any] = {}
 
-        # -----------------------------------------------------------------
-        # 1) Window do evento
-        # -----------------------------------------------------------------
         if event is not None and load_event_window is not None and dt_local is not None:
             try:
                 win, ts_grid, meta = load_event_window(event_id=event.id, pre_bins=8, post_bins=8, n_mppt=8)
@@ -1330,36 +1586,18 @@ def mppt_gnn_fdd_dump_api(request: HttpRequest) -> JsonResponse:
 
                     if getattr(win, "pac", None) is not None:
                         selected_bin["pac_w"] = float(win.pac[idx]) if win.pac[idx] == win.pac[idx] else None
-
                     if getattr(win, "pac_model", None) is not None:
                         selected_bin["pac_model_w"] = float(win.pac_model[idx]) if win.pac_model[idx] == win.pac_model[idx] else None
-
                     if getattr(win, "mismatch", None) is not None:
                         selected_bin["mismatch"] = float(win.mismatch[idx]) if win.mismatch[idx] == win.mismatch[idx] else None
-
                     if getattr(win, "g", None) is not None:
                         selected_bin["g_wm2"] = float(win.g[idx]) if win.g[idx] == win.g[idx] else None
-
                     if getattr(win, "t", None) is not None:
                         selected_bin["t_air_c"] = float(win.t[idx]) if win.t[idx] == win.t[idx] else None
-
                     if getattr(win, "vdc_total", None) is not None:
                         selected_bin["vdc_total_v"] = float(win.vdc_total[idx]) if win.vdc_total[idx] == win.vdc_total[idx] else None
-
                     if getattr(win, "iac", None) is not None:
                         selected_bin["iac_a"] = float(win.iac[idx]) if win.iac[idx] == win.iac[idx] else None
-
-                    if getattr(win, "vac", None) is not None:
-                        selected_bin["vac_v"] = float(win.vac[idx]) if win.vac[idx] == win.vac[idx] else None
-
-                    if getattr(win, "fac", None) is not None:
-                        selected_bin["fac_hz"] = float(win.fac[idx]) if win.fac[idx] == win.fac[idx] else None
-
-                    if getattr(win, "qac", None) is not None:
-                        selected_bin["inv_qac_var"] = float(win.qac[idx]) if win.qac[idx] == win.qac[idx] else None
-
-                    if getattr(win, "pf", None) is not None:
-                        selected_bin["inv_pf"] = float(win.pf[idx]) if win.pf[idx] == win.pf[idx] else None
 
                     _append_mppt_arrays_from_window(selected_bin, win, idx)
 
@@ -1373,39 +1611,30 @@ def mppt_gnn_fdd_dump_api(request: HttpRequest) -> JsonResponse:
                         try:
                             meta_dict = _coerce_jsonish(meta if isinstance(meta, dict) else vars(meta))
                             if isinstance(meta_dict, dict):
-                                if "warning" in meta_dict:
-                                    selected_bin["inv_warning"] = meta_dict.get("warning")
-                                if "warnings" in meta_dict:
-                                    selected_bin["inv_warnings"] = meta_dict.get("warnings")
-                                if "alarm" in meta_dict:
-                                    selected_bin["inv_alarm"] = meta_dict.get("alarm")
-                                if "alarms" in meta_dict:
-                                    selected_bin["inv_alarms"] = meta_dict.get("alarms")
-                                if "status" in meta_dict:
-                                    selected_bin["inv_status"] = meta_dict.get("status")
-                                if "mode" in meta_dict:
-                                    selected_bin["inv_mode"] = meta_dict.get("mode")
+                                selected_bin["window_meta"] = meta_dict
                         except Exception:
                             logger.exception("failed to merge load_event_window meta")
             except Exception:
                 logger.exception("load_event_window failed inside dump_api")
 
-        # -----------------------------------------------------------------
-        # 2) PlantDiagnostic15m dinâmica
-        # -----------------------------------------------------------------
         if PlantDiagnostic15m is not None and dt_local is not None:
             tsu = dt_local.astimezone(dt_tz.utc)
 
             diag_fields = _existing_fields(
                 PlantDiagnostic15m,
-                DIAG_BASE_CANDIDATES + MPPT_FIELD_CANDIDATES,
+                DIAG_BASE_CANDIDATES + MPPT_FIELD_CANDIDATES + ["source_oper", "source_meteo"],
             )
 
-            drow = (
-                PlantDiagnostic15m.objects.filter(plant_id=plant_id, ts_utc=tsu)
-                .values(*diag_fields)
-                .first()
-            )
+            qdiag = PlantDiagnostic15m.objects.filter(plant_id=plant_id, ts_utc=tsu)
+            diag_names = _model_field_names(PlantDiagnostic15m)
+            if detector_version and "detector_version" in diag_names:
+                qdiag = qdiag.filter(detector_version=detector_version)
+            if source_oper and "source_oper" in diag_names:
+                qdiag = qdiag.filter(source_oper__startswith=source_oper)
+            if source_meteo and "source_meteo" in diag_names:
+                qdiag = qdiag.filter(source_meteo=source_meteo)
+
+            drow = qdiag.values(*diag_fields).first()
 
             if drow:
                 diag_payload: Dict[str, Any] = {}
@@ -1417,12 +1646,8 @@ def mppt_gnn_fdd_dump_api(request: HttpRequest) -> JsonResponse:
                 alias_map = {
                     "pac_real_w": "pac_w",
                     "pac_model_w": "pac_model_w",
-                    "p_ac_real_w": "pac_w",
-                    "p_ac_model_w": "pac_model_w",
                     "g_poa": "g_wm2",
-                    "gpoa": "g_wm2",
                     "temp_air_c": "t_air_c",
-                    "temp_air": "t_air_c",
                     "v_ac_v": "vac_v",
                     "i_ac_a": "iac_a",
                     "v_dc_v": "vdc_total_v",
@@ -1436,9 +1661,6 @@ def mppt_gnn_fdd_dump_api(request: HttpRequest) -> JsonResponse:
                     selected_bin["ts_local"] = dt_local.isoformat()
                     selected_bin["ts_utc"] = tsu.isoformat()
 
-        # -----------------------------------------------------------------
-        # 3) Snapshot merged_15m
-        # -----------------------------------------------------------------
         merged_snapshot = {
             "source_oper_list": [],
             "sources": {},
@@ -1450,10 +1672,7 @@ def mppt_gnn_fdd_dump_api(request: HttpRequest) -> JsonResponse:
 
         if dt_local is not None:
             tsu = dt_local.astimezone(dt_tz.utc)
-            merged_snapshot = _build_merged_snapshot_for_ts(
-                plant_id=plant_id,
-                ts_utc=tsu,
-            )
+            merged_snapshot = _build_merged_snapshot_for_ts(plant_id=plant_id, ts_utc=tsu)
 
             chosen_total = merged_snapshot.get("chosen_total") or {}
             for k, v in chosen_total.items():
@@ -1472,20 +1691,81 @@ def mppt_gnn_fdd_dump_api(request: HttpRequest) -> JsonResponse:
 
             if mppt > 0:
                 mp_tag = f"mppt{mppt}"
-                if canonical_mppt.get(f"{mp_tag}_pac_w") is not None:
-                    selected_bin["mppt_pac_w"] = _coerce_jsonish(canonical_mppt.get(f"{mp_tag}_pac_w"))
-                if canonical_mppt.get(f"{mp_tag}_pdc_w") is not None:
-                    selected_bin["mppt_pdc_w"] = _coerce_jsonish(canonical_mppt.get(f"{mp_tag}_pdc_w"))
-                if canonical_mppt.get(f"{mp_tag}_vdc_v") is not None:
-                    selected_bin["mppt_vdc_v"] = _coerce_jsonish(canonical_mppt.get(f"{mp_tag}_vdc_v"))
-                if canonical_mppt.get(f"{mp_tag}_idc_a") is not None:
-                    selected_bin["mppt_idc_a"] = _coerce_jsonish(canonical_mppt.get(f"{mp_tag}_idc_a"))
+                for suffix in ["pac_w", "pdc_w", "vdc_v", "idc_a", "warning", "warnings", "alarm", "alarms", "status"]:
+                    val = canonical_mppt.get(f"{mp_tag}_{suffix}")
+                    if val is not None:
+                        selected_bin[f"mppt_{suffix}"] = _coerce_jsonish(val)
 
         if event is None and not selected_bin and not merged_snapshot.get("sources"):
             return JsonResponse(
                 {"ok": True, "found": False, "hint": "Nenhum evento, diagnóstico ou snapshot merged encontrado para esse bin."},
                 status=200,
             )
+
+        event_meta = _coerce_jsonish_deep(event.meta) if event else None
+        plant_summary = event_meta.get("plant_summary", {}) if isinstance(event_meta, dict) else {}
+        feature_summary = {}
+        if pred and isinstance(pred.get("contribution"), dict):
+            feature_summary = _coerce_jsonish_deep((pred.get("contribution") or {}).get("features") or {}) or {}
+
+        selected_mppt_summary = {}
+        if mppt > 0:
+            selected_mppt_summary = {
+                "mppt": mppt,
+                "source_oper": selected_bin.get(f"mppt{mppt}_source_oper"),
+                "pac_w": selected_bin.get("mppt_pac_w"),
+                "pdc_w": selected_bin.get("mppt_pdc_w"),
+                "vdc_v": selected_bin.get("mppt_vdc_v"),
+                "idc_a": selected_bin.get("mppt_idc_a"),
+                "warning": selected_bin.get("mppt_warning"),
+                "warnings": selected_bin.get("mppt_warnings"),
+                "alarm": selected_bin.get("mppt_alarm"),
+                "alarms": selected_bin.get("mppt_alarms"),
+                "status": selected_bin.get("mppt_status"),
+            }
+
+        bin_flags = {
+            "diag_valid": selected_bin.get("diag_valid"),
+            "diag_anomaly_flag": selected_bin.get("diag_anomaly_flag"),
+            "diag_detector_version": selected_bin.get("diag_detector_version"),
+            "diag_source_oper": selected_bin.get("diag_source_oper"),
+            "diag_source_meteo": selected_bin.get("diag_source_meteo"),
+            "flag_inv_missing": selected_bin.get("flag_inv_missing"),
+            "flag_meteo_missing": selected_bin.get("flag_meteo_missing"),
+            "flag_inv_missing_all": selected_bin.get("flag_inv_missing_all"),
+            "flag_inv_missing_partial": selected_bin.get("flag_inv_missing_partial"),
+            "inv_coverage": selected_bin.get("inv_coverage"),
+        }
+
+        source_summary = {
+            "requested_source_oper": source_oper,
+            "requested_source_meteo": source_meteo,
+            "requested_detector_version": detector_version,
+            "requested_model_version": model_version,
+            "event_source_oper": event.source_oper if event else None,
+            "event_source_meteo": event.source_meteo if event else None,
+            "event_detector_version": event.detector_version if event else None,
+            "prediction_source_oper": (pred or {}).get("source_oper"),
+            "prediction_model_version": (pred or {}).get("model_version"),
+            "available_source_oper_list": merged_snapshot.get("source_oper_list") or [],
+            "chosen_sources": (merged_snapshot.get("chosen_total") or {}).get("chosen_sources"),
+            "chosen_policy": (merged_snapshot.get("chosen_total") or {}).get("policy"),
+        }
+
+        event_summary = {
+            "event_id": event.id if event else None,
+            "status": event.status if event else None,
+            "event_label_prelim": event.event_label_prelim if event else None,
+            "final_label": event.final_label if event else None,
+            "known_vs_unknown": event.known_vs_unknown if event else None,
+            "confidence": event.confidence if event else None,
+            "novelty_score": event.novelty_score if event else None,
+            "severity_score": event.severity_score if event else None,
+            "energy_loss_wh": event.energy_loss_wh if event else None,
+            "detector_score_max": event.detector_score_max if event else None,
+            "detector_score_mean": event.detector_score_mean if event else None,
+            **_coerce_jsonish_deep(plant_summary),
+        }
 
         dump = {
             "plant_id": plant_id,
@@ -1509,7 +1789,7 @@ def mppt_gnn_fdd_dump_api(request: HttpRequest) -> JsonResponse:
                 "known_vs_unknown": event.known_vs_unknown if event else None,
                 "confidence": event.confidence if event else None,
                 "novelty_score": event.novelty_score if event else None,
-                "meta": _coerce_jsonish(event.meta) if event else None,
+                "meta": event_meta,
             },
             "mppt_pred": pred or {
                 "pred_code": None,
@@ -1522,6 +1802,11 @@ def mppt_gnn_fdd_dump_api(request: HttpRequest) -> JsonResponse:
                 "source_oper": source_oper,
                 "mppt": mppt,
             },
+            "event_summary": _coerce_jsonish(event_summary),
+            "mppt_feature_summary": _coerce_jsonish(feature_summary),
+            "selected_mppt_summary": _coerce_jsonish(selected_mppt_summary),
+            "bin_flags": _coerce_jsonish(bin_flags),
+            "source_summary": _coerce_jsonish(source_summary),
             "selected_bin": _coerce_jsonish(selected_bin),
             "source_oper_list": merged_snapshot.get("source_oper_list") or [],
             "sources": _coerce_jsonish(merged_snapshot.get("sources") or {}),
@@ -1602,8 +1887,12 @@ def mppt_gnn_fdd_actions_api(request: HttpRequest) -> JsonResponse:
                     ts_end_utc__gte=ts_start_utc,
                 ).order_by("ts_start_utc")
 
+                if detector_version:
+                    eq = eq.filter(detector_version=detector_version)
                 if source_oper:
                     eq = eq.filter(source_oper__startswith=source_oper)
+                if source_meteo:
+                    eq = eq.filter(source_meteo=source_meteo)
 
                 event_ids = list(eq.values_list("id", flat=True))
 
@@ -1623,6 +1912,8 @@ def mppt_gnn_fdd_actions_api(request: HttpRequest) -> JsonResponse:
                     "plant_id": plant_id,
                     "model_version": model_version,
                     "detector_version": detector_version,
+                    "source_oper": source_oper or None,
+                    "source_meteo": source_meteo or None,
                     "events_detected": int(det_out.get("events", 0)),
                     "events_inferred": len(infer_outs),
                     "detector": det_out,

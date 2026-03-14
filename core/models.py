@@ -801,15 +801,18 @@ class PVPlantMergedRecord15m(models.Model):
 # ---------------------------
 # F A L H A S
 # ---------------------------
+
 class PlantDiagnostic15m(models.Model):
     """
-    Um registro por timestamp (ex: cada 15 min), por planta.
+    Um registro por timestamp (ex: cada 15 min), por planta e combinação
+    source_oper/source_meteo/detector_version.
 
     Guarda:
       - code/label do diagnóstico (RCA / regras / ML)
       - mismatch / indicadores auxiliares
       - valid: se a amostra era válida (G>=limiar, sem NaN etc.)
       - campos do detector universal plant-level
+      - proveniência do operativo e da meteorologia usados no diagnóstico
     """
 
     plant = models.ForeignKey(
@@ -819,10 +822,23 @@ class PlantDiagnostic15m(models.Model):
         db_index=True,
     )
 
-    # Armazenar SEMPRE em UTC (datetime aware)
     ts_utc = models.DateTimeField("Timestamp (UTC)", db_index=True)
 
-    # Diagnóstico final (por exemplo: fuzzy/rules/RF)
+    source_oper = models.CharField(
+        max_length=30,
+        blank=True,
+        default="",
+        db_index=True,
+        help_text="Fonte operativa usada para este diagnóstico 15 min.",
+    )
+    source_meteo = models.CharField(
+        max_length=20,
+        blank=True,
+        default="",
+        db_index=True,
+        help_text="Fonte meteorológica usada para este diagnóstico 15 min.",
+    )
+
     rca_code = models.SmallIntegerField(
         "RCA code",
         default=0,
@@ -835,10 +851,8 @@ class PlantDiagnostic15m(models.Model):
         blank=True,
     )
 
-    # Indica se a amostra passou no gate básico de qualidade
     valid = models.BooleanField(default=False)
 
-    # Detector universal plant-level (residual físico)
     anomaly_flag = models.BooleanField(default=False, db_index=True)
     detector_score = models.FloatField(null=True, blank=True)
     ewma_z = models.FloatField(null=True, blank=True)
@@ -846,7 +860,6 @@ class PlantDiagnostic15m(models.Model):
     stable_sky = models.BooleanField(default=False)
     detector_version = models.CharField(max_length=64, default="residual_v1", blank=True)
 
-    # Campos opcionais (úteis para debug e drill-down)
     g_poa = models.FloatField(
         "GPOA/POA (W/m²)",
         null=True,
@@ -859,18 +872,9 @@ class PlantDiagnostic15m(models.Model):
         blank=True,
     )
 
-    pac_real_w = models.FloatField(
-        "Pac real (W)",
-        null=True,
-        blank=True,
-    )
-    pac_model_w = models.FloatField(
-        "Pac modelo (W)",
-        null=True,
-        blank=True,
-    )
+    pac_real_w = models.FloatField("Pac real (W)", null=True, blank=True)
+    pac_model_w = models.FloatField("Pac modelo (W)", null=True, blank=True)
 
-    # mismatch_rel = (Pac_real - Pac_model) / max(Pac_model, eps)
     mismatch_rel = models.FloatField(
         "Mismatch relativo",
         null=True,
@@ -878,7 +882,6 @@ class PlantDiagnostic15m(models.Model):
         validators=[MinValueValidator(-5.0), MaxValueValidator(5.0)],
     )
 
-    # Auditoria
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -887,12 +890,14 @@ class PlantDiagnostic15m(models.Model):
         verbose_name_plural = "Diagnósticos 15 min"
         constraints = [
             models.UniqueConstraint(
-                fields=["plant", "ts_utc"],
-                name="uniq_plant_ts_utc_diag15m",
+                fields=["plant", "source_oper", "source_meteo", "detector_version", "ts_utc"],
+                name="uniq_diag15m_plant_sources_detector_ts",
             ),
         ]
         indexes = [
             models.Index(fields=["plant", "ts_utc"], name="idx_diag15m_plant_ts"),
+            models.Index(fields=["plant", "source_oper", "source_meteo", "ts_utc"], name="idx_diag15m_sources_ts"),
+            models.Index(fields=["plant", "detector_version", "ts_utc"], name="idx_diag15m_detector_ts"),
             models.Index(fields=["plant", "rca_code", "ts_utc"], name="idx_diag15m_plant_code_ts"),
             models.Index(fields=["plant", "anomaly_flag", "ts_utc"], name="idx_diag15m_plant_anom_ts"),
         ]
@@ -900,8 +905,8 @@ class PlantDiagnostic15m(models.Model):
 
     def __str__(self) -> str:
         ts = self.ts_utc.isoformat() if self.ts_utc else "n/a"
-        return f"{self.plant_id} {ts} {self.rca_label}"
-
+        src = f"{self.source_oper or '-'}|{self.source_meteo or '-'}|{self.detector_version or '-'}"
+        return f"{self.plant_id} {ts} {src} {self.rca_label}"
 
 
 # ---------------------------

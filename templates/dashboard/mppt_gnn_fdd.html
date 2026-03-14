@@ -390,22 +390,26 @@
 
       <div class="ctl sm">
         <label for="model_version">model_version</label>
-        <input id="model_version" type="text" value="{{ model_version|default:'event_rules_v1' }}">
+        <input id="model_version" list="modelVersionList" type="text" value="{{ model_version|default:'event_rules_v1' }}">
+        <datalist id="modelVersionList"></datalist>
       </div>
 
       <div class="ctl sm">
         <label for="detector_version">detector_version</label>
-        <input id="detector_version" type="text" value="{{ detector_version|default:'residual_v1' }}">
+        <input id="detector_version" list="detectorVersionList" type="text" value="{{ detector_version|default:'residual_v1' }}">
+        <datalist id="detectorVersionList"></datalist>
       </div>
 
       <div class="ctl" style="min-width:260px;">
         <label for="source_oper">source_oper</label>
-        <input id="source_oper" type="text" value="{{ source_oper|default:'' }}" placeholder="opcional">
+        <input id="source_oper" list="sourceOperList" type="text" value="{{ source_oper|default:'' }}" placeholder="opcional">
+        <datalist id="sourceOperList"></datalist>
       </div>
 
       <div class="ctl" style="min-width:260px;">
         <label for="source_meteo">source_meteo</label>
-        <input id="source_meteo" type="text" value="{{ source_meteo|default:'' }}" placeholder="opcional">
+        <input id="source_meteo" list="sourceMeteoList" type="text" value="{{ source_meteo|default:'' }}" placeholder="opcional">
+        <datalist id="sourceMeteoList"></datalist>
       </div>
 
       <div class="ctl" style="min-width:520px;">
@@ -462,7 +466,7 @@
       <div class="tile"><p class="t">diag_count</p><p class="v" id="kpiPred">—</p><p class="s">bins/linhas carregadas</p></div>
       <div class="tile"><p class="t">Operativo normal</p><p class="v" id="kpiOk">—</p><p class="s">verde</p></div>
       <div class="tile"><p class="t">Operativo anômalo</p><p class="v" id="kpiFault">—</p><p class="s">vermelho</p></div>
-      <div class="tile"><p class="t">Sem operativos</p><p class="v" id="kpiNone">—</p><p class="s">cinza</p></div>
+      <div class="tile"><p class="t">Sem diagnóstico</p><p class="v" id="kpiNone">—</p><p class="s">cinza</p></div>
       <div class="tile"><p class="t">Model</p><p class="v" id="kpiModel">—</p><p class="s">model_version</p></div>
       <div class="tile"><p class="t">Intervalo</p><p class="v" id="kpiRange">—</p><p class="s">start → end</p></div>
     </div>
@@ -474,14 +478,14 @@
         <h3 style="margin-top:0">Heatmap — dia × bin (canvas)</h3>
         <div class="hm-sub">
           Linhas = dias • Colunas = bins de <b id="hmBinLbl">15</b> min •
-          cinza = sem operativos do inversor •
-          verde = há operativos e o bin está normal •
-          vermelho = há operativos e o bin está anômalo.
+          cinza = sem diagnóstico útil / inválido / sem operação útil •
+          verde = diagnóstico válido e normal •
+          vermelho = diagnóstico válido e anômalo.
         </div>
       </div>
 
       <div class="legend">
-        <span class="badge"><span class="dot" style="background:var(--hm-none)"></span>sem operativos</span>
+        <span class="badge"><span class="dot" style="background:var(--hm-none)"></span>sem diagnóstico / inválido</span>
         <span class="badge"><span class="dot" style="background:var(--hm-ok)"></span>normal</span>
         <span class="badge"><span class="dot" style="background:var(--hm-crit)"></span>anômalo</span>
         <span class="badge"><span class="mono" id="hmBadgeTxt">—</span></span>
@@ -540,8 +544,33 @@
     </div>
 
     <div class="detail-section">
+      <h4>Resumo do evento</h4>
+      <table class="kv" id="detailEventSummary"></table>
+    </div>
+
+    <div class="detail-section">
       <h4>Predição MPPT</h4>
       <table class="kv" id="detailPred"></table>
+    </div>
+
+    <div class="detail-section">
+      <h4>Features do MPPT / evento</h4>
+      <table class="kv" id="detailFeat"></table>
+    </div>
+
+    <div class="detail-section">
+      <h4>Resumo do MPPT selecionado</h4>
+      <table class="kv" id="detailMpptSummary"></table>
+    </div>
+
+    <div class="detail-section">
+      <h4>Flags e cobertura</h4>
+      <table class="kv" id="detailFlags"></table>
+    </div>
+
+    <div class="detail-section">
+      <h4>Proveniência e filtros</h4>
+      <table class="kv" id="detailSources"></table>
     </div>
 
     <div class="detail-section">
@@ -1127,7 +1156,7 @@
       }
     }
 
-    $("hmBadgeTxt").textContent = `normal=${ok} | anômalo=${crit} | sem_operativos=${none}`;
+    $("hmBadgeTxt").textContent = `normal=${ok} | anômalo=${crit} | sem_diagnóstico=${none}`;
     $("kpiOk").textContent = String(ok);
     $("kpiFault").textContent = String(crit);
     $("kpiNone").textContent = String(none);
@@ -1161,7 +1190,12 @@
   function clearDetailTables(){
     renderKvTable($("detailMetaTbl"), {});
     renderKvTable($("detailEvent"), {});
+    renderKvTable($("detailEventSummary"), {});
     renderKvTable($("detailPred"), {});
+    renderKvTable($("detailFeat"), {});
+    renderKvTable($("detailMpptSummary"), {});
+    renderKvTable($("detailFlags"), {});
+    renderKvTable($("detailSources"), {});
     renderKvTable($("detailInvOut"), {});
     renderKvTable($("detailMppt"), {});
     renderKvTable($("detailWarn"), {});
@@ -1213,6 +1247,37 @@
     };
   }
 
+
+  function syncDatalist(id, values){
+    const dl = $(id);
+    if (!dl) return;
+    dl.innerHTML = "";
+    for (const v of (values || [])){
+      const opt = document.createElement("option");
+      opt.value = String(v);
+      dl.appendChild(opt);
+    }
+  }
+
+  function syncMpptSelect(values){
+    const sel = $("mppt");
+    if (!sel) return;
+    const current = String(sel.value || "all");
+    const opts = Array.isArray(values) && values.length ? values : [1,2,3,4];
+    sel.innerHTML = '<option value="all">Todos</option>' + opts.map(v => `<option value="${v}">MPPT ${v}</option>`).join("");
+    const keep = opts.map(String).includes(current) || current === "all" ? current : "all";
+    sel.value = keep;
+  }
+
+  function syncAvailableControls(av){
+    if (!av) return;
+    syncDatalist("modelVersionList", av.model_versions || []);
+    syncDatalist("detectorVersionList", av.detector_versions || []);
+    syncDatalist("sourceOperList", av.source_opers || []);
+    syncDatalist("sourceMeteoList", av.source_meteos || []);
+    syncMpptSelect(av.mppt_options || []);
+  }
+
   async function refreshHeatmap(){
     const page = $("mpptPage");
     const apiUrl = page ? page.dataset.api : null;
@@ -1227,6 +1292,7 @@
 
       const data = await fetchApi(apiUrl, payload);
       hmState.payload = data;
+      syncAvailableControls(data.available || {});
 
       $("kpiPred").textContent = String(data.pred_count ?? "—");
       $("kpiModel").textContent = payload.model_version || "—";
@@ -1294,7 +1360,12 @@
     const metaTxt = $("detailMeta");
     const metaTbl = $("detailMetaTbl");
     const tblEvent = $("detailEvent");
+    const tblEventSummary = $("detailEventSummary");
     const tblPred = $("detailPred");
+    const tblFeat = $("detailFeat");
+    const tblMpptSummary = $("detailMpptSummary");
+    const tblFlags = $("detailFlags");
+    const tblSources = $("detailSources");
     const tblInvOut = $("detailInvOut");
     const tblMppt = $("detailMppt");
     const tblWarn = $("detailWarn");
@@ -1306,7 +1377,12 @@
       metaTxt.textContent = `${hit.day} ${hit.ts} • sem registro`;
       renderKvTable(metaTbl, buildMetaBlock(hit));
       renderKvTable(tblEvent, {});
+      renderKvTable(tblEventSummary, {});
       renderKvTable(tblPred, {});
+      renderKvTable(tblFeat, {});
+      renderKvTable(tblMpptSummary, {});
+      renderKvTable(tblFlags, {});
+      renderKvTable(tblSources, {});
       renderKvTable(tblInvOut, {});
       renderKvTable(tblMppt, {});
       renderKvTable(tblWarn, {});
@@ -1320,7 +1396,12 @@
 
     const d = data.dump || {};
     const ev = normalizeDict(d.event || {});
+    const evSummary = normalizeDict(d.event_summary || {});
     const mp = normalizeDict(d.mppt_pred || {});
+    const featSummary = normalizeDict(d.mppt_feature_summary || {});
+    const mpptSummary = normalizeDict(d.selected_mppt_summary || {});
+    const binFlags = normalizeDict(d.bin_flags || {});
+    const sourceSummary = normalizeDict(d.source_summary || {});
     const sbRaw = d.selected_bin || {};
     const sb = normalizeDict(sbRaw);
     const chosenTotalRaw = d.chosen_total || {};
@@ -1411,11 +1492,16 @@
     const metaObj = buildMetaBlock(hit, d);
 
     metaTxt.textContent =
-      `${hit.day} ${hit.ts} • event_id=${fmtAny(ev.id)} • final_label=${fmtAny(ev.final_label)} • pred_label=${fmtAny(mp.pred_label)}`;
+      `${hit.day} ${hit.ts} • event_id=${fmtAny(ev.id)} • final_label=${fmtAny(ev.final_label || evSummary.final_label)} • pred_label=${fmtAny(mp.pred_label)}`;
 
     renderKvTable(metaTbl, metaObj);
     renderKvTable(tblEvent, ev);
+    renderKvTable(tblEventSummary, evSummary);
     renderKvTable(tblPred, mp);
+    renderKvTable(tblFeat, featSummary);
+    renderKvTable(tblMpptSummary, mpptSummary);
+    renderKvTable(tblFlags, binFlags);
+    renderKvTable(tblSources, sourceSummary);
     renderKvTable(tblInvOut, invOut);
     renderKvTable(tblMppt, mpptData);
     renderKvTable(tblWarn, warnData);
@@ -1452,6 +1538,10 @@
       const di = Math.floor(gy / stride);
 
       if (ti < 0 || ti >= bpd || di < 0 || di >= days.length) return null;
+
+      const rx = gx % stride;
+      const ry = gy % stride;
+      if (rx > cell || ry > cell) return null;
 
       const tkey = (g.tkeys[di] && g.tkeys[di][ti]) ? g.tkeys[di][ti] : null;
       const eventId = (g.eventIds[di] && g.eventIds[di][ti]) ? g.eventIds[di][ti] : null;
@@ -1492,11 +1582,16 @@
         $("detailMeta").textContent = `${h.day} ${h.ts} • bin sem referência temporal`;
         renderKvTable($("detailMetaTbl"), buildMetaBlock(h));
         renderKvTable($("detailEvent"), {});
+        renderKvTable($("detailEventSummary"), {});
         renderKvTable($("detailPred"), {});
+        renderKvTable($("detailFeat"), {});
+        renderKvTable($("detailMpptSummary"), {});
+        renderKvTable($("detailFlags"), {});
+        renderKvTable($("detailSources"), {});
         renderKvTable($("detailInvOut"), {});
         renderKvTable($("detailMppt"), {});
         renderKvTable($("detailWarn"), {});
-        renderKvTable($("detailBin"), { hint: "Bin sem tkey disponível." });
+        renderKvTable($("detailBin"), { hint: "Bin sem tkey disponível. Verifique filtros de fonte/detector e cobertura diagnóstica." });
         renderKvTable($("detailRawOper"), {});
         hmState.selectedDump = { day: h.day, ts: h.ts, event_id: h.eventId, tkey: null, label: h.label };
         $("detailDump").textContent = JSON.stringify(hmState.selectedDump, null, 2);

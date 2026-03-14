@@ -114,16 +114,26 @@ def build_fault_events_for_range(
         detector_version=p.detector_version,
     ).order_by("ts_utc")
 
+    if p.source_oper:
+        qs = qs.filter(source_oper=p.source_oper)
+    if p.source_meteo:
+        qs = qs.filter(source_meteo=p.source_meteo)
+
     rows = list(qs)
     groups = [g for g in _group_contiguous(rows, gap_bins=p.gap_bins) if len(g) >= p.min_event_bins]
 
     if p.replace_existing:
-        FaultEvent.objects.filter(
+        qdel = FaultEvent.objects.filter(
             plant_id=plant_id,
             detector_version=p.detector_version,
             ts_start_utc__lt=ts_end_utc,
             ts_end_utc__gte=ts_start_utc,
-        ).delete()
+        )
+        if p.source_oper:
+            qdel = qdel.filter(source_oper=p.source_oper)
+        if p.source_meteo:
+            qdel = qdel.filter(source_meteo=p.source_meteo)
+        qdel.delete()
 
     created = 0
     updated = 0
@@ -147,6 +157,9 @@ def build_fault_events_for_range(
                     "n_bins": len(g),
                     "rca_labels": [r.rca_label for r in g],
                     "ts_bins_utc": [r.ts_utc.isoformat() for r in g],
+                    "source_oper": p.source_oper,
+                    "source_meteo": p.source_meteo,
+                    "detector_version": p.detector_version,
                 },
             }
             obj, was_created = FaultEvent.objects.update_or_create(

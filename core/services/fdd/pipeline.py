@@ -123,6 +123,7 @@ def run_detection_pipeline(
             "plant_id": plant_id,
             "source_oper": src_oper,
             "source_meteo": src_meteo,
+            "detector_version": detector_version,
             "written_diag": 0,
             "events": 0,
             "message": "Sem dados casados no período.",
@@ -203,6 +204,8 @@ def run_detection_pipeline(
             PlantDiagnostic15m(
                 plant_id=plant_id,
                 ts_utc=row["ts_utc"],
+                source_oper=src_oper,
+                source_meteo=src_meteo,
                 rca_code=int(rca["codes"][i]),
                 rca_label=str(rca["labels"][i]),
                 valid=bool(det["valid_period"][i]),
@@ -226,6 +229,9 @@ def run_detection_pipeline(
                 plant_id=plant_id,
                 ts_utc__gte=ts_start_utc,
                 ts_utc__lt=ts_end_utc,
+                detector_version=detector_version,
+                source_oper=src_oper,
+                source_meteo=src_meteo,
             ).delete()
         PlantDiagnostic15m.objects.bulk_create(objs, batch_size=1000)
 
@@ -237,7 +243,7 @@ def run_detection_pipeline(
             detector_version=detector_version,
             source_oper=src_oper,
             source_meteo=src_meteo,
-            replace_existing=True,
+            replace_existing=delete_existing,
         ),
     )
 
@@ -246,6 +252,7 @@ def run_detection_pipeline(
         "plant_id": plant_id,
         "source_oper": src_oper,
         "source_meteo": src_meteo,
+        "detector_version": detector_version,
         "ts_start_utc": ts_start_utc.isoformat(),
         "ts_end_utc": ts_end_utc.isoformat(),
         "written_diag": len(objs),

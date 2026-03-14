@@ -91,7 +91,7 @@ def infer_event_and_persist(
     confidence_threshold: float = 0.60,
     pre_bins: int = 8,
     post_bins: int = 8,
-    n_mppt: int = 4,
+    n_mppt: Optional[int] = None,
     replace_existing: bool = True,
 ) -> dict:
     event = FaultEvent.objects.filter(id=event_id).first()
@@ -112,15 +112,17 @@ def infer_event_and_persist(
     )
 
     pred_rows: List[dict[str, Any]] = []
-    for feat in mppt_feats:
+    mppt_indices = list(meta.get("mppt_indices") or [])
+    for pos, feat in enumerate(mppt_feats):
+        mppt_number = int(mppt_indices[pos]) if pos < len(mppt_indices) else int(feat["mppt"])
         pred = _rule_predict_one(feat, plant_summary, str(event.event_label_prelim or "unknown"), confidence_threshold)
         pred_rows.append(
             {
-                "mppt": int(feat["mppt"]),
+                "mppt": mppt_number,
                 "source_oper": meta["source_oper"],
                 "model_version": model_version,
                 **pred,
-                "feature_snapshot": feat,
+                "feature_snapshot": {**feat, "mppt": mppt_number},
             }
         )
 

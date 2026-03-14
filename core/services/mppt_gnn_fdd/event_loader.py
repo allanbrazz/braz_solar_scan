@@ -64,12 +64,56 @@ def _fill_on_grid(ts_grid: List[datetime], rows: List[Dict[str, Any]], key: str)
     return arr
 
 
+def _merged_model_field_names() -> set[str]:
+    names: set[str] = set()
+    try:
+        for f in PVPlantMergedRecord15m._meta.get_fields():
+            if getattr(f, "attname", None):
+                names.add(str(f.attname))
+            if getattr(f, "name", None):
+                names.add(str(f.name))
+    except Exception:
+        pass
+    return names
+
+
+def _candidate_mppt_indices(max_mppt: int = 16) -> List[int]:
+    names = _merged_model_field_names()
+    out: List[int] = []
+    for i in range(1, max_mppt + 1):
+        if f"mppt{i}_vdc_v" in names or f"mppt{i}_idc_a" in names:
+            out.append(i)
+    return out or [1, 2, 3, 4]
+
+
+def _resolve_mppt_indices(rows: List[Dict[str, Any]], requested_n_mppt: Optional[int]) -> List[int]:
+    candidates = _candidate_mppt_indices(max_mppt=max(int(requested_n_mppt or 16), 16))
+    observed: List[int] = []
+
+    for i in candidates:
+        v_key = f"mppt{i}_vdc_v"
+        i_key = f"mppt{i}_idc_a"
+        has_any = any((r.get(v_key) is not None) or (r.get(i_key) is not None) for r in rows)
+        if has_any:
+            observed.append(i)
+
+    base = observed or candidates
+    if requested_n_mppt:
+        base = [i for i in base if i <= int(requested_n_mppt)] or [i for i in candidates if i <= int(requested_n_mppt)]
+
+    if not base:
+        base = [1, 2, 3, 4][: max(1, int(requested_n_mppt or 4))]
+
+    top = max(base)
+    return list(range(1, top + 1))
+
+
 def load_event_window(
     *,
     event_id: int,
     pre_bins: int = 8,
     post_bins: int = 8,
-    n_mppt: int = 4,
+    n_mppt: Optional[int] = None,
 ) -> Tuple[WindowArrays, List[datetime], Dict[str, Any]]:
     event = FaultEvent.objects.select_related(
         "plant",
@@ -88,6 +132,16 @@ def load_event_window(
 
     ts_grid = _grid_range_utc(dt0_utc, dt1_utc, dt_min=15)
 
+    base_fields = [
+        "ts_utc",
+        "p_ac_w", "v_dc_v", "i_ac_a",
+        "gti", "ghi", "dni", "dhi", "temp_air",
+    ]
+    mppt_candidates = _candidate_mppt_indices(max_mppt=max(int(n_mppt or 16), 16))
+    mppt_fields: List[str] = []
+    for k in mppt_candidates:
+        mppt_fields.extend([f"mppt{k}_vdc_v", f"mppt{k}_idc_a"])
+
     rows = list(
         PVPlantMergedRecord15m.objects.filter(
             plant_id=event.plant_id,
@@ -97,13 +151,7 @@ def load_event_window(
             ts_utc__lte=dt1_utc,
         )
         .order_by("ts_utc")
-        .values(
-            "ts_utc",
-            "p_ac_w", "v_dc_v", "i_ac_a",
-            "gti", "ghi", "dni", "dhi", "temp_air",
-            "mppt1_vdc_v", "mppt2_vdc_v", "mppt3_vdc_v", "mppt4_vdc_v",
-            "mppt1_idc_a", "mppt2_idc_a", "mppt3_idc_a", "mppt4_idc_a",
-        )
+        .values(*(base_fields + mppt_fields))
     )
 
     pac = _fill_on_grid(ts_grid, rows, "p_ac_w")
@@ -115,11 +163,12 @@ def load_event_window(
     dhi = _fill_on_grid(ts_grid, rows, "dhi")
     tair = _fill_on_grid(ts_grid, rows, "temp_air")
 
-    mppt_vdc = np.full((n_mppt, len(ts_grid)), np.nan, dtype=float)
-    mppt_idc = np.full((n_mppt, len(ts_grid)), np.nan, dtype=float)
-    for k in range(1, n_mppt + 1):
-        mppt_vdc[k - 1] = _fill_on_grid(ts_grid, rows, f"mppt{k}_vdc_v")
-        mppt_idc[k - 1] = _fill_on_grid(ts_grid, rows, f"mppt{k}_idc_a")
+    resolved_mppts = _resolve_mppt_indices(rows, n_mppt)
+    mppt_vdc = np.full((len(resolved_mppts), len(ts_grid)), np.nan, dtype=float)
+    mppt_idc = np.full((len(resolved_mppts), len(ts_grid)), np.nan, dtype=float)
+    for pos, k in enumerate(resolved_mppts):
+        mppt_vdc[pos] = _fill_on_grid(ts_grid, rows, f"mppt{k}_vdc_v")
+        mppt_idc[pos] = _fill_on_grid(ts_grid, rows, f"mppt{k}_idc_a")
 
     pac_model, mismatch = compute_pac_model_and_mismatch(
         plant=event.plant,
@@ -141,6 +190,8 @@ def load_event_window(
         "event_end_utc": event.ts_end_utc,
         "event_start_idx": pre_bins,
         "event_end_idx": len(ts_grid) - post_bins - 1,
+        "mppt_indices": resolved_mppts,
+        "n_mppt": len(resolved_mppts),
     }
 
     win = WindowArrays(
