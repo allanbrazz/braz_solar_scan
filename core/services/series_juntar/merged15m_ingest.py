@@ -37,6 +37,7 @@ DEFAULT_INV_JSON_KEY_CANDIDATES: Dict[str, Sequence[str]] = {
     "i_dc_a": ("i_dc_a", "idc", "i_dc", "Idc", "dc_current", "pv_current"),
     "v_ac_v": ("v_ac_v", "uac", "vac", "v_ac", "Vac", "ac_voltage", "grid_voltage"),
     "i_ac_a": ("i_ac_a", "iac", "i_ac", "Iac", "ac_current", "grid_current"),
+    "freq_hz": ("freq_hz", "fac", "fac_hz", "frequency", "grid_frequency"),
 }
 
 DEFAULT_METEO_JSON_KEY_CANDIDATES: Dict[str, Sequence[str]] = {
@@ -285,7 +286,7 @@ def persist_merged_15m(
 
     candidate_cols = (
         list(DEFAULT_INV_MEAN_COLS)
-        + ["e_ac_wh_15", "inv_n", "inv_coverage", "flag_inv_missing", "flag_low_coverage"]
+        + ["freq_hz", "e_ac_wh_15", "inv_n", "inv_coverage", "flag_inv_missing", "flag_low_coverage"]
         + list(DEFAULT_METEO_COLS)
         + ["flag_meteo_missing"]
     )

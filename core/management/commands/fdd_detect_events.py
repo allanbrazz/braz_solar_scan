@@ -11,7 +11,7 @@ from core.services.fdd.pipeline import run_detection_pipeline
 
 
 class Command(BaseCommand):
-    help = "Roda detector plant-level por residual, persiste PlantDiagnostic15m e consolida FaultEvent."
+    help = "Roda detector híbrido plant-level (tiers de irradiância + regras) e consolida FaultEvent."
 
     def add_arguments(self, parser):
         parser.add_argument("--plant", type=int, required=True)
@@ -19,7 +19,7 @@ class Command(BaseCommand):
         parser.add_argument("--end", type=str, required=True, help="Data final local YYYY-MM-DD (inclusiva)")
         parser.add_argument("--source-oper", type=str, default="")
         parser.add_argument("--source-meteo", type=str, default="")
-        parser.add_argument("--detector-version", type=str, default="residual_v1")
+        parser.add_argument("--detector-version", type=str, default="hybrid_rules_v1")
         parser.add_argument("--delete-existing", type=int, default=1)
 
     def handle(self, *args, **opts):

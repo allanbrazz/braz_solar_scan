@@ -1,7 +1,6 @@
 # core/services/mppt_gnn_fdd/window_loader.py
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone as dt_tz
 from typing import Any, Dict, Optional, Tuple, List
 
@@ -11,7 +10,7 @@ from django.db.models import Count
 
 from core.models import PVPlant, PVPlantMergedRecord15m
 from core.services.mppt_gnn_fdd.features import WindowArrays
-from core.services.mppt_gnn_fdd.constants import T_STEPS_DEFAULT, DT_MIN_DEFAULT, EPS
+from core.services.mppt_gnn_fdd.constants import T_STEPS_DEFAULT, DT_MIN_DEFAULT
 
 
 def _plant_tz(plant: PVPlant) -> ZoneInfo:
@@ -22,9 +21,17 @@ def _plant_tz(plant: PVPlant) -> ZoneInfo:
         return ZoneInfo("UTC")
 
 
-def _pick_best_source_meteo(plant_id: int, dt0_utc: datetime, dt1_utc: datetime) -> Optional[str]:
+def _pick_best_source_meteo(
+    plant_id: int,
+    dt0_utc: datetime,
+    dt1_utc: datetime,
+) -> Optional[str]:
     row = (
-        PVPlantMergedRecord15m.objects.filter(plant_id=plant_id, ts_utc__gte=dt0_utc, ts_utc__lt=dt1_utc)
+        PVPlantMergedRecord15m.objects.filter(
+            plant_id=plant_id,
+            ts_utc__gte=dt0_utc,
+            ts_utc__lt=dt1_utc,
+        )
         .values("source_meteo")
         .annotate(n=Count("id"))
         .order_by("-n")
@@ -33,10 +40,18 @@ def _pick_best_source_meteo(plant_id: int, dt0_utc: datetime, dt1_utc: datetime)
     return (row or {}).get("source_meteo")
 
 
-def _pick_best_source_oper(plant_id: int, source_meteo: str, dt0_utc: datetime, dt1_utc: datetime) -> Optional[str]:
+def _pick_best_source_oper(
+    plant_id: int,
+    source_meteo: str,
+    dt0_utc: datetime,
+    dt1_utc: datetime,
+) -> Optional[str]:
     row = (
         PVPlantMergedRecord15m.objects.filter(
-            plant_id=plant_id, source_meteo=source_meteo, ts_utc__gte=dt0_utc, ts_utc__lt=dt1_utc
+            plant_id=plant_id,
+            source_meteo=source_meteo,
+            ts_utc__gte=dt0_utc,
+            ts_utc__lt=dt1_utc,
         )
         .values("source_oper")
         .annotate(n=Count("id"))
@@ -46,8 +61,12 @@ def _pick_best_source_oper(plant_id: int, source_meteo: str, dt0_utc: datetime, 
     return (row or {}).get("source_oper")
 
 
-def _grid_utc(dt0_utc: datetime, steps: int = T_STEPS_DEFAULT, dt_min: int = DT_MIN_DEFAULT) -> List[datetime]:
-    out = []
+def _grid_utc(
+    dt0_utc: datetime,
+    steps: int = T_STEPS_DEFAULT,
+    dt_min: int = DT_MIN_DEFAULT,
+) -> List[datetime]:
+    out: List[datetime] = []
     cur = dt0_utc
     for _ in range(int(steps)):
         out.append(cur)
@@ -55,7 +74,11 @@ def _grid_utc(dt0_utc: datetime, steps: int = T_STEPS_DEFAULT, dt_min: int = DT_
     return out
 
 
-def _fill_on_grid(ts_grid: List[datetime], rows: List[Dict[str, Any]], key: str) -> np.ndarray:
+def _fill_on_grid(
+    ts_grid: List[datetime],
+    rows: List[Dict[str, Any]],
+    key: str,
+) -> np.ndarray:
     idx = {t: j for j, t in enumerate(ts_grid)}
     arr = np.full(len(ts_grid), np.nan, dtype=float)
     for r in rows:
@@ -85,7 +108,7 @@ def compute_pac_model_and_mismatch(
     pac_real: np.ndarray,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
-    Usa o power_model do teu projeto para gerar:
+    Usa o power_model do projeto para gerar:
       pac_model_w [T] e mismatch [T]
     """
     from dataclasses import asdict, is_dataclass
@@ -99,7 +122,6 @@ def compute_pac_model_and_mismatch(
 
     details = getattr(plant, "details", None)
     if not details or not getattr(details, "module_id", None):
-        # fallback: modelo indisponível
         pac_model = np.full_like(pac_real, np.nan)
         mm = np.full_like(pac_real, np.nan)
         return pac_model, mm
@@ -121,7 +143,6 @@ def compute_pac_model_and_mismatch(
 
     times_np = np.asarray(times_utc, dtype="datetime64[ns]")
 
-    # escolhe GPOA usado: gti se existe, senão transpo de ghi, senão ghi
     mask_gti = np.isfinite(gti)
     has_gti = bool(mask_gti.any())
 
@@ -149,7 +170,9 @@ def compute_pac_model_and_mismatch(
                 albedo=float(getattr(pl, "albedo", 0.20) or 0.20),
             )
             if "times_shift_minutes" in trans_sig.parameters:
-                trans_kwargs["times_shift_minutes"] = float(getattr(pl, "meteo_time_shift_minutes", 0.0) or 0.0)
+                trans_kwargs["times_shift_minutes"] = float(
+                    getattr(pl, "meteo_time_shift_minutes", 0.0) or 0.0
+                )
             trans = transpose_ghi_to_poa_isotropic(**trans_kwargs)
             g_poa_transpo = np.asarray(trans.get("g_poa"), dtype=float)
 
@@ -183,8 +206,16 @@ def compute_pac_model_and_mismatch(
         kwargs["window_minutes"] = 60.0
 
     out = expected_and_mismatch(**kwargs) or {}
-    pac_expected = np.asarray(out.get("pac_expected_w"), dtype=float) if out.get("pac_expected_w") is not None else None
-    mismatch = np.asarray(out.get("mismatch_rel"), dtype=float) if out.get("mismatch_rel") is not None else None
+    pac_expected = (
+        np.asarray(out.get("pac_expected_w"), dtype=float)
+        if out.get("pac_expected_w") is not None
+        else None
+    )
+    mismatch = (
+        np.asarray(out.get("mismatch_rel"), dtype=float)
+        if out.get("mismatch_rel") is not None
+        else None
+    )
 
     if pac_expected is None:
         pac_model = np.full_like(pac_real, np.nan)
@@ -205,7 +236,7 @@ def load_daily_window(
     n_mppt: int = 4,
 ) -> Tuple[WindowArrays, List[datetime], Dict[str, Any]]:
     """
-    Retorna WindowArrays (globais+mppt), lista times_utc (grid) e meta.
+    Retorna WindowArrays (globais + mppt), lista times_utc (grid) e meta.
     """
     plant = PVPlant.objects.filter(id=plant_id).first()
     if plant is None:
@@ -232,17 +263,32 @@ def load_daily_window(
             ts_utc__lt=dt1_utc,
         ).values(
             "ts_utc",
-            "p_ac_w", "v_dc_v", "i_ac_a",
-            "gti", "ghi", "dni", "dhi",
+            "p_ac_w",
+            "v_dc_v",
+            "i_ac_a",
+            "v_ac_v",
+            "freq_hz",
+            "gti",
+            "ghi",
+            "dni",
+            "dhi",
             "temp_air",
-            "mppt1_vdc_v","mppt2_vdc_v","mppt3_vdc_v","mppt4_vdc_v",
-            "mppt1_idc_a","mppt2_idc_a","mppt3_idc_a","mppt4_idc_a",
+            "mppt1_vdc_v",
+            "mppt2_vdc_v",
+            "mppt3_vdc_v",
+            "mppt4_vdc_v",
+            "mppt1_idc_a",
+            "mppt2_idc_a",
+            "mppt3_idc_a",
+            "mppt4_idc_a",
         )
     )
 
     pac = _fill_on_grid(ts_grid, rows, "p_ac_w")
     vdc_total = _fill_on_grid(ts_grid, rows, "v_dc_v")
     iac = _fill_on_grid(ts_grid, rows, "i_ac_a")
+    vac = _fill_on_grid(ts_grid, rows, "v_ac_v")
+    freq = _fill_on_grid(ts_grid, rows, "freq_hz")
 
     gti = _fill_on_grid(ts_grid, rows, "gti")
     ghi = _fill_on_grid(ts_grid, rows, "ghi")
@@ -253,10 +299,9 @@ def load_daily_window(
     mppt_vdc = np.full((n_mppt, len(ts_grid)), np.nan, dtype=float)
     mppt_idc = np.full((n_mppt, len(ts_grid)), np.nan, dtype=float)
     for k in range(1, n_mppt + 1):
-        mppt_vdc[k-1] = _fill_on_grid(ts_grid, rows, f"mppt{k}_vdc_v")
-        mppt_idc[k-1] = _fill_on_grid(ts_grid, rows, f"mppt{k}_idc_a")
+        mppt_vdc[k - 1] = _fill_on_grid(ts_grid, rows, f"mppt{k}_vdc_v")
+        mppt_idc[k - 1] = _fill_on_grid(ts_grid, rows, f"mppt{k}_idc_a")
 
-    # power_model -> pac_model + mismatch
     pac_model, mm = compute_pac_model_and_mismatch(
         plant=plant,
         times_utc=ts_grid,
@@ -284,6 +329,8 @@ def load_daily_window(
         mismatch=mm,
         g=(gti if np.isfinite(gti).any() else ghi),
         t=tair,
+        vac=vac,
+        freq=freq,
         mppt_vdc=mppt_vdc,
         mppt_idc=mppt_idc,
     )

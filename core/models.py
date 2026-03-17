@@ -714,6 +714,7 @@ class PVPlantMergedRecord15m(models.Model):
     i_dc_a = models.FloatField(null=True, blank=True)
     v_ac_v = models.FloatField(null=True, blank=True)
     i_ac_a = models.FloatField(null=True, blank=True)
+    freq_hz = models.FloatField(null=True, blank=True)
 
     # -------- MPPT-level (para features internas / GNN) --------
     mppt1_vdc_v = models.FloatField(null=True, blank=True)
@@ -804,15 +805,8 @@ class PVPlantMergedRecord15m(models.Model):
 
 class PlantDiagnostic15m(models.Model):
     """
-    Um registro por timestamp (ex: cada 15 min), por planta e combinação
-    source_oper/source_meteo/detector_version.
-
-    Guarda:
-      - code/label do diagnóstico (RCA / regras / ML)
-      - mismatch / indicadores auxiliares
-      - valid: se a amostra era válida (G>=limiar, sem NaN etc.)
-      - campos do detector universal plant-level
-      - proveniência do operativo e da meteorologia usados no diagnóstico
+    Diagnóstico plant-level por timestamp com suporte a tiers de irradiância,
+    estado operativo, domínio provável da falha e confiança do diagnóstico.
     """
 
     plant = models.ForeignKey(
@@ -839,48 +833,42 @@ class PlantDiagnostic15m(models.Model):
         help_text="Fonte meteorológica usada para este diagnóstico 15 min.",
     )
 
-    rca_code = models.SmallIntegerField(
-        "RCA code",
-        default=0,
-        validators=[MinValueValidator(0)],
-    )
-    rca_label = models.CharField(
-        "RCA label",
-        max_length=40,
-        default="invalid",
-        blank=True,
-    )
+    rca_code = models.SmallIntegerField("RCA code", default=0, validators=[MinValueValidator(0)])
+    rca_label = models.CharField("RCA label", max_length=64, default="invalid", blank=True)
 
     valid = models.BooleanField(default=False)
-
     anomaly_flag = models.BooleanField(default=False, db_index=True)
     detector_score = models.FloatField(null=True, blank=True)
     ewma_z = models.FloatField(null=True, blank=True)
     cusum_score = models.FloatField(null=True, blank=True)
     stable_sky = models.BooleanField(default=False)
-    detector_version = models.CharField(max_length=64, default="residual_v1", blank=True)
+    detector_version = models.CharField(max_length=64, default="hybrid_rules_v1", blank=True)
 
-    g_poa = models.FloatField(
-        "GPOA/POA (W/m²)",
-        null=True,
-        blank=True,
-        validators=[MinValueValidator(0.0)],
-    )
-    tcell_c = models.FloatField(
-        "Tcell (°C)",
-        null=True,
-        blank=True,
-    )
+    g_poa = models.FloatField("GPOA/POA (W/m²)", null=True, blank=True, validators=[MinValueValidator(0.0)])
+    tcell_c = models.FloatField("Tcell (°C)", null=True, blank=True)
 
     pac_real_w = models.FloatField("Pac real (W)", null=True, blank=True)
     pac_model_w = models.FloatField("Pac modelo (W)", null=True, blank=True)
+    mismatch_rel = models.FloatField("Mismatch relativo", null=True, blank=True, validators=[MinValueValidator(-5.0), MaxValueValidator(5.0)])
 
-    mismatch_rel = models.FloatField(
-        "Mismatch relativo",
-        null=True,
-        blank=True,
-        validators=[MinValueValidator(-5.0), MaxValueValidator(5.0)],
-    )
+    irradiance_tier = models.CharField(max_length=1, default="N", blank=True)
+    fine_diag_allowed = models.BooleanField(default=False)
+    meteo_quality_ok = models.BooleanField(default=False)
+    direct_grid_evidence = models.BooleanField(default=False)
+    zero_injection_flag = models.BooleanField(default=False)
+
+    state_label = models.CharField(max_length=64, default="unknown", blank=True)
+    domain_label = models.CharField(max_length=64, default="unknown", blank=True)
+    diagnosis_label = models.CharField(max_length=64, default="invalid", blank=True)
+    diagnosis_confidence = models.FloatField(null=True, blank=True, validators=[MinValueValidator(0.0), MaxValueValidator(1.0)])
+
+    v_ac_v = models.FloatField(null=True, blank=True)
+    i_ac_a = models.FloatField(null=True, blank=True)
+    freq_hz = models.FloatField(null=True, blank=True)
+    alarm_code_oper = models.IntegerField(null=True, blank=True)
+    alarm_sev_oper = models.PositiveSmallIntegerField(null=True, blank=True)
+
+    evidence_json = models.JSONField(null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -906,7 +894,7 @@ class PlantDiagnostic15m(models.Model):
     def __str__(self) -> str:
         ts = self.ts_utc.isoformat() if self.ts_utc else "n/a"
         src = f"{self.source_oper or '-'}|{self.source_meteo or '-'}|{self.detector_version or '-'}"
-        return f"{self.plant_id} {ts} {src} {self.rca_label}"
+        return f"{self.plant_id} {ts} {src} {self.diagnosis_label or self.rca_label}"
 
 
 # ---------------------------

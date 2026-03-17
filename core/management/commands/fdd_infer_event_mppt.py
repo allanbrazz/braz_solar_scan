@@ -8,13 +8,13 @@ from core.services.mppt_gnn_fdd.event_infer_pipeline import infer_events_and_per
 
 
 class Command(BaseCommand):
-    help = "Inferência MPPT/event-level MVP rule-based e persistência em FaultEventMPPT."
+    help = "Inferência MPPT/event-level rule-based alinhada ao pipeline híbrido plant-level."
 
     def add_arguments(self, parser):
         parser.add_argument("--plant", type=int, default=None)
         parser.add_argument("--event-id", type=int, action="append", dest="event_ids")
         parser.add_argument("--status", type=str, action="append", dest="statuses")
-        parser.add_argument("--model-version", type=str, default="event_rules_v1")
+        parser.add_argument("--model-version", type=str, default="event_rules_v2")
         parser.add_argument("--confidence-threshold", type=float, default=0.60)
         parser.add_argument("--replace-existing", type=int, default=1)
 

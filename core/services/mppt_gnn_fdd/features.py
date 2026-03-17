@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple
 
 import numpy as np
 
@@ -21,9 +21,13 @@ class WindowArrays:
     g: np.ndarray
     t: np.ndarray
 
-    # mppt [N,T]
+    # mppt [N,T] -> campos obrigatórios antes dos opcionais
     mppt_vdc: np.ndarray
     mppt_idc: np.ndarray
+
+    # opcionais [T]
+    vac: Optional[np.ndarray] = None
+    freq: Optional[np.ndarray] = None
 
 
 def _diff(x: np.ndarray) -> np.ndarray:
@@ -64,6 +68,10 @@ def build_node_features(
 
     N, T = v_raw.shape
 
+    # opcionais
+    vac_raw = None if win.vac is None else np.asarray(win.vac, float)
+    freq_raw = None if win.freq is None else np.asarray(win.freq, float)
+
     # pdc estimado (nan-safe)
     pdc_est_raw = v_raw * i_raw
 
@@ -87,6 +95,17 @@ def build_node_features(
     i_n = scaler.n_pos(i0, scaler.mppt_idc_p99)
     pdc_n = scaler.n_pos(pdc0, scaler.mppt_pdc_p99)
 
+    vac_n = None
+    if vac_raw is not None:
+        vac_n = scaler.n_pos(_nan_to_0(vac_raw), getattr(scaler, "vac_p99", 1000.0))
+
+    freq_n = None
+    if freq_raw is not None:
+        f0 = _nan_to_0(freq_raw)
+        # normalização suave em torno de 50/60 Hz
+        base = 60.0 if np.nanmedian(f0[np.isfinite(f0)]) > 55.0 else 50.0
+        freq_n = np.clip((f0 - base) / 5.0, -1.0, 1.0)
+
     # peers (nanmedian/nansum)
     i_med = np.nanmedian(i_raw, axis=0)  # [T]
     v_med = np.nanmedian(v_raw, axis=0)
@@ -108,6 +127,7 @@ def build_node_features(
 
     feats = []
     fmap: Dict[str, int] = {}
+
     def add(name: str, arr: np.ndarray):
         fmap[name] = len(feats)
         feats.append(arr)
@@ -132,6 +152,12 @@ def build_node_features(
     add("t_n", np.tile(t_n[None, :], (N, 1)))
     add("dpac", np.tile(dpac[None, :], (N, 1)))
     add("dmm", np.tile(dmm[None, :], (N, 1)))
+
+    if vac_n is not None:
+        add("vac_n", np.tile(vac_n[None, :], (N, 1)))
+
+    if freq_n is not None:
+        add("freq_n", np.tile(freq_n[None, :], (N, 1)))
 
     X = np.stack(feats, axis=0)     # [F,N,T]
     X = np.transpose(X, (1, 2, 0))  # [N,T,F]

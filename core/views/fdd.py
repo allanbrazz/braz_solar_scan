@@ -856,24 +856,48 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
                 status=500,
             )
 
-        det_params = DetectionParams(
-            gpoa_gate_wm2=float(gpoa_gate),
-            stable_cv_max=_gf("stable_cv_max", 0.08),
-            stable_window_points=_gi("stable_window_points", 6),
-            ewma_lambda=_gf("ewma_lambda", 0.20),
-            ewma_L=_gf("ewma_L", 3.0),
-            cusum_k=_gf("cusum_k", 0.50),
-            cusum_h=_gf("cusum_h", 8.0),
-            min_baseline_points=_gi("min_baseline_points", 24),
-            inv_cov_min=_gf("inv_cov_min", 0.30),
-        )
+        # ----------------------------
+        # DetectionParams: compatível com API antiga e nova
+        # ----------------------------
+        det_sig = inspect.signature(DetectionParams)
+        det_param_names = set(det_sig.parameters.keys())
+
+        if "gpoa_gate_wm2" in det_param_names:
+            # API antiga
+            det_params = DetectionParams(
+                gpoa_gate_wm2=float(gpoa_gate),
+                stable_cv_max=_gf("stable_cv_max", 0.08),
+                stable_window_points=_gi("stable_window_points", 6),
+                ewma_lambda=_gf("ewma_lambda", 0.20),
+                ewma_L=_gf("ewma_L", 3.0),
+                cusum_k=_gf("cusum_k", 0.50),
+                cusum_h=_gf("cusum_h", 8.0),
+                min_baseline_points=_gi("min_baseline_points", 24),
+                inv_cov_min=_gf("inv_cov_min", 0.30),
+            )
+        else:
+            # API nova híbrida
+            det_params = DetectionParams(
+                sun_available_gpoa_wm2=_gf("sun_available_gpoa_wm2", max(150.0, float(gpoa_gate))),
+                coarse_diag_gpoa_wm2=_gf("coarse_diag_gpoa_wm2", max(700.0, float(gpoa_gate))),
+                fine_diag_gpoa_wm2=_gf("fine_diag_gpoa_wm2", max(800.0, float(gpoa_gate))),
+                stable_cv_max=_gf("stable_cv_max", 0.08),
+                stable_ramp_max_wm2=_gf("stable_ramp_max_wm2", 120.0),
+                stable_window_points=_gi("stable_window_points", 6),
+                ewma_lambda=_gf("ewma_lambda", 0.20),
+                ewma_L=_gf("ewma_L", 3.0),
+                cusum_k=_gf("cusum_k", 0.50),
+                cusum_h=_gf("cusum_h", 8.0),
+                min_baseline_points=_gi("min_baseline_points", 24),
+                inv_cov_min=_gf("inv_cov_min", 0.30),
+            )
 
         det = detect_anomalies(
             mismatch_rel=mismatch_rel,
             g_poa_wm2=g_poa_used,
             valid_model=base_gate,
             flag_meteo_missing=flag_meteo_missing,
-            flag_inv_missing=flag_inv_missing_all,  # ✅ all-missing
+            flag_inv_missing=flag_inv_missing_all,
             inv_coverage=inv_cov,
             params=det_params,
         ) or {}
@@ -881,11 +905,22 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
         valid_period = [bool(v) for v in (det.get("valid_period") or base_gate)]
         anomaly = [bool(v) for v in (det.get("anomaly") or [False] * n)]
         stable_sky = [bool(v) for v in (det.get("stable_sky") or [False] * n)]
+
+        # Campos novos da API híbrida
+        coarse_period = [bool(v) for v in (det.get("coarse_period") or valid_period)]
+        fine_period = [bool(v) for v in (det.get("fine_period") or [False] * n)]
+        meteo_quality_ok = [bool(v) for v in (det.get("meteo_quality_ok") or stable_sky)]
+        irradiance_tier = [str(v) for v in (det.get("irradiance_tier") or ["N"] * n)]
+
         det_dbg = {
             "z": det.get("z"),
             "ewma_z": det.get("ewma_z"),
             "cusum": det.get("cusum"),
             "baseline": det.get("baseline"),
+            "coarse_period": coarse_period,
+            "fine_period": fine_period,
+            "meteo_quality_ok": meteo_quality_ok,
+            "irradiance_tier": irradiance_tier,
         }
 
         pac_cap_w = None
@@ -900,13 +935,48 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
         except Exception:
             pac_cap_w = None
 
-        rca_params = RCAParams(
-            warn_abs=float(thr.warn_abs),
-            fault_abs=float(thr.fault_abs),
-            min_baseline_points=_gi("rca_min_baseline_points", 24),
-        )
+        # ----------------------------
+        # RCAParams: compatível com API antiga e nova
+        # ----------------------------
+        rca_sig = inspect.signature(RCAParams)
+        rca_param_names = set(rca_sig.parameters.keys())
 
-        rca = diagnose_rca_series(
+        if "warn_abs" in rca_param_names and "fault_abs" in rca_param_names:
+            # API antiga
+            rca_params = RCAParams(
+                warn_abs=float(thr.warn_abs),
+                fault_abs=float(thr.fault_abs),
+                min_baseline_points=_gi("rca_min_baseline_points", 24),
+            )
+        else:
+            # API nova híbrida
+            rca_params = RCAParams(
+                sun_available_gpoa_wm2=_gf("sun_available_gpoa_wm2", max(150.0, float(gpoa_gate))),
+                expected_power_min_w=float(pmin_w),
+                zero_abs_w=_gf("zero_abs_w", 100.0),
+                zero_rel_model=_gf("zero_rel_model", 0.05),
+                degraded_rel=_gf("degraded_rel", 0.25),
+                severe_rel=_gf("severe_rel", 0.50),
+                low_i_ratio_warn=_gf("low_i_ratio_warn", 0.35),
+                low_i_ratio_crit=_gf("low_i_ratio_crit", 0.15),
+                low_v_ratio_warn=_gf("low_v_ratio_warn", 0.80),
+                low_v_ratio_crit=_gf("low_v_ratio_crit", 0.60),
+                vac_low_ratio=_gf("vac_low_ratio", 0.90),
+                vac_high_ratio=_gf("vac_high_ratio", 1.10),
+                vac_abs_margin_v=_gf("vac_abs_margin_v", 10.0),
+                freq_abs_tol_hz=_gf("freq_abs_tol_hz", 1.0),
+                clip_margin=_gf("clip_margin", 0.98),
+                clip_model_margin=_gf("clip_model_margin", 1.02),
+                min_baseline_points=_gi("rca_min_baseline_points", 24),
+            )
+
+        # ----------------------------
+        # diagnose_rca_series: compatível com API antiga e nova
+        # ----------------------------
+        diag_sig = inspect.signature(diagnose_rca_series)
+        diag_param_names = set(diag_sig.parameters.keys())
+
+        diag_kwargs = dict(
             anomaly=anomaly,
             valid_period=valid_period,
             mismatch_rel=mismatch_rel,
@@ -914,12 +984,60 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
             i_dc_a=i_dc_a,
             pac_real_w=p_ac_w,
             pac_model_w=pac_model_w,
-            flag_inv_missing=flag_inv_missing_all,  # ✅ all-missing
+            flag_inv_missing=flag_inv_missing_all,
             flag_meteo_missing=flag_meteo_missing,
             inv_coverage=inv_cov,
             pac_cap_w=pac_cap_w,
             params=rca_params,
-        ) or {}
+        )
+
+        if "g_poa_wm2" in diag_param_names:
+            diag_kwargs["g_poa_wm2"] = g_poa_used
+        if "coarse_period" in diag_param_names:
+            diag_kwargs["coarse_period"] = coarse_period
+        if "fine_period" in diag_param_names:
+            diag_kwargs["fine_period"] = fine_period
+        if "meteo_quality_ok" in diag_param_names:
+            diag_kwargs["meteo_quality_ok"] = meteo_quality_ok
+        if "irradiance_tier" in diag_param_names:
+            diag_kwargs["irradiance_tier"] = irradiance_tier
+        if "v_ac_v" in diag_param_names:
+            diag_kwargs["v_ac_v"] = v_ac_v
+        if "i_ac_a" in diag_param_names:
+            diag_kwargs["i_ac_a"] = i_ac_a
+
+        # frequência pode nem existir nesta tela; envia nulo se necessário
+        if "freq_hz" in diag_param_names:
+            diag_kwargs["freq_hz"] = [None] * n
+
+        def _pick_diag_row_for_ts(ts_utc: datetime) -> Optional[Dict[str, Any]]:
+            by_src = per_ts.get(ts_utc, {})
+            if not by_src:
+                return None
+            for s in selected_sources:
+                rr = by_src.get(s)
+                if rr is not None:
+                    return rr
+            try:
+                return next(iter(by_src.values()))
+            except Exception:
+                return None
+
+        if "alarm_code" in diag_param_names:
+            alarm_code_series = []
+            for ts_utc in times_utc:
+                row = _pick_diag_row_for_ts(ts_utc)
+                alarm_code_series.append(None if row is None else row.get("alarm_code"))
+            diag_kwargs["alarm_code"] = alarm_code_series
+
+        if "alarm_sev" in diag_param_names:
+            alarm_sev_series = []
+            for ts_utc in times_utc:
+                row = _pick_diag_row_for_ts(ts_utc)
+                alarm_sev_series.append(None if row is None else row.get("alarm_sev"))
+            diag_kwargs["alarm_sev"] = alarm_sev_series
+
+        rca = diagnose_rca_series(**diag_kwargs) or {}
 
         rca_codes_raw = rca.get("codes") or [0] * n
         rca_labels_raw = rca.get("labels") or ["normal"] * n

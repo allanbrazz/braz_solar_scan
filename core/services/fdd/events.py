@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from statistics import mode
 from typing import Iterable, Optional
 
 from django.db import transaction
@@ -11,16 +11,20 @@ from django.db.models import QuerySet
 from core.models import FaultEvent, PlantDiagnostic15m
 
 
-EVENT_LABEL_MAP = {
-    "clipping_limit": "curtailment_clipping",
-    "meteo_bias_underestimate": "meteo_bias",
-    "meteo_bias_small": "meteo_bias",
-    "low_current_string_offline": "localized_loss",
-    "low_current_shading_soiling": "localized_loss",
-    "low_voltage_bypass_short_mppt": "localized_loss",
-    "low_voltage_anomaly": "localized_loss",
-    "power_loss": "plant_wide_loss",
-    "anomaly_unspecified": "plant_wide_loss",
+COARSE_EVENT_BY_DIAGNOSIS = {
+    "grid_overvoltage_trip": "grid_fault",
+    "grid_overvoltage_derating": "grid_fault",
+    "grid_undervoltage_trip": "grid_fault",
+    "grid_undervoltage_derating": "grid_fault",
+    "grid_overfrequency_trip": "grid_fault",
+    "grid_underfrequency_trip": "grid_fault",
+    "inverter_off_under_sun": "inverter_shutdown",
+    "unknown_shutdown_with_sun": "inverter_shutdown",
+    "dc_side_partial_loss_probable": "dc_side_partial_loss",
+    "dc_side_voltage_anomaly_probable": "dc_side_partial_loss",
+    "partial_generation_loss_probable": "dc_side_partial_loss",
+    "persistent_underperformance": "persistent_underperformance",
+    "curtailment_clipping": "curtailment_clipping",
 }
 
 
@@ -28,7 +32,7 @@ EVENT_LABEL_MAP = {
 class EventBuildParams:
     gap_bins: int = 1
     min_event_bins: int = 2
-    detector_version: str = "residual_v1"
+    detector_version: str = "hybrid_rules_v1"
     source_oper: str = ""
     source_meteo: str = ""
     replace_existing: bool = True
@@ -81,19 +85,31 @@ def _energy_loss_wh(rows: list[PlantDiagnostic15m], dt_hours: float = 0.25) -> f
     return acc if seen else None
 
 
-def _event_label_prelim(rows: list[PlantDiagnostic15m]) -> str:
-    labels = [r.rca_label for r in rows if r.rca_label and r.rca_label not in {"ok", "invalid"}]
-    if not labels:
-        return "unknown"
+def _dominant(counter: Counter[str], default: str) -> str:
+    if not counter:
+        return default
+    return sorted(counter.items(), key=lambda kv: (-kv[1], kv[0]))[0][0]
 
-    mapped = [EVENT_LABEL_MAP.get(lbl, lbl) for lbl in labels]
-    try:
-        return mode(mapped)
-    except Exception:
-        counts: dict[str, int] = {}
-        for lbl in mapped:
-            counts[lbl] = counts.get(lbl, 0) + 1
-        return sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[0][0]
+
+def _event_label_prelim(rows: list[PlantDiagnostic15m]) -> tuple[str, str, str]:
+    diag_counter: Counter[str] = Counter()
+    dom_counter: Counter[str] = Counter()
+    state_counter: Counter[str] = Counter()
+
+    for r in rows:
+        diag = str((getattr(r, "diagnosis_label", None) or getattr(r, "rca_label", None) or "").strip())
+        dom = str((getattr(r, "domain_label", None) or "unknown").strip())
+        st = str((getattr(r, "state_label", None) or "unknown").strip())
+        if diag and diag not in {"ok", "invalid", "low_irradiance"}:
+            diag_counter[diag] += 1
+        if dom:
+            dom_counter[dom] += 1
+        if st:
+            state_counter[st] += 1
+
+    diag_dominant = _dominant(diag_counter, "unknown")
+    coarse = COARSE_EVENT_BY_DIAGNOSIS.get(diag_dominant, diag_dominant)
+    return coarse, _dominant(dom_counter, "unknown"), _dominant(state_counter, "unknown")
 
 
 def build_fault_events_for_range(
@@ -109,7 +125,6 @@ def build_fault_events_for_range(
         plant_id=plant_id,
         ts_utc__gte=ts_start_utc,
         ts_utc__lt=ts_end_utc,
-        valid=True,
         anomaly_flag=True,
         detector_version=p.detector_version,
     ).order_by("ts_utc")
@@ -140,6 +155,8 @@ def build_fault_events_for_range(
 
     with transaction.atomic():
         for g in groups:
+            event_label_prelim, domain_prelim, state_prelim = _event_label_prelim(g)
+            diagnosis_counter = Counter(str((getattr(r, "diagnosis_label", None) or getattr(r, "rca_label", None) or "unknown")) for r in g)
             defaults = {
                 "source_oper": p.source_oper,
                 "source_meteo": p.source_meteo,
@@ -148,18 +165,24 @@ def build_fault_events_for_range(
                 "detector_score_mean": _safe_mean(r.detector_score for r in g),
                 "severity_score": _safe_max_abs(r.mismatch_rel for r in g),
                 "energy_loss_wh": _energy_loss_wh(g),
-                "event_label_prelim": _event_label_prelim(g),
+                "event_label_prelim": event_label_prelim,
                 "known_vs_unknown": "pending",
                 "final_label": "",
-                "confidence": None,
+                "confidence": _safe_mean(getattr(r, "diagnosis_confidence", None) for r in g),
                 "novelty_score": None,
                 "meta": {
                     "n_bins": len(g),
                     "rca_labels": [r.rca_label for r in g],
+                    "diagnosis_labels": [getattr(r, "diagnosis_label", None) for r in g],
+                    "dominant_diagnosis": _dominant(diagnosis_counter, "unknown"),
+                    "diagnosis_counts": dict(diagnosis_counter),
+                    "domain_prelim": domain_prelim,
+                    "state_prelim": state_prelim,
                     "ts_bins_utc": [r.ts_utc.isoformat() for r in g],
                     "source_oper": p.source_oper,
                     "source_meteo": p.source_meteo,
                     "detector_version": p.detector_version,
+                    "irradiance_tier_counts": dict(Counter(str(getattr(r, "irradiance_tier", "N")) for r in g)),
                 },
             }
             obj, was_created = FaultEvent.objects.update_or_create(

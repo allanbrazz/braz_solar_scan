@@ -9,7 +9,7 @@ from core.models import PVPlant, PVPlantMergedRecord15m
 
 
 MERGED_COLS = (
-    "p_dc_w", "p_ac_w", "v_dc_v", "i_dc_a", "v_ac_v", "i_ac_a",
+    "p_dc_w", "p_ac_w", "v_dc_v", "i_dc_a", "v_ac_v", "i_ac_a", "freq_hz",
     "e_ac_wh_15",
     "inv_n", "inv_coverage", "flag_low_coverage",
     "ghi", "dni", "dhi", "gti",
@@ -144,6 +144,7 @@ def upsert_merged_15m_df(
         e_total = _to_float(row.get("e_ac_wh_15"))
         vac = _to_float(row.get("v_ac_v"))
         iac = _to_float(row.get("i_ac_a"))
+        freq = _to_float(row.get("freq_hz"))
 
         if has_mppt:
             pdc_k = []
@@ -189,6 +190,7 @@ def upsert_merged_15m_df(
                             # AC (não é por MPPT, mas útil)
                             v_ac_v=vac,
                             i_ac_a=iac,
+                            freq_hz=freq,
 
                             e_ac_wh_15=e15,
 
@@ -213,6 +215,7 @@ def upsert_merged_15m_df(
                 i_dc_a=_to_float(row.get("i_dc_a")),
                 v_ac_v=vac,
                 i_ac_a=iac,
+                freq_hz=freq,
 
                 e_ac_wh_15=e_total,
 

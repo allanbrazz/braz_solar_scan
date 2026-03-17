@@ -242,6 +242,73 @@ def _safe_float(x: Any, default: Optional[float] = 0.0) -> Optional[float]:
         return default
 
 
+def _has_useful_oper_data_from_diag_row(r: Dict[str, Any]) -> bool:
+    """
+    Coverage-first:
+    considera o bin "operativo" quando existe algum dado útil do inversor
+    persistido na linha diagnóstica, mesmo que o ponto não seja elegível
+    para diagnóstico fino (`valid=False`).
+    """
+    candidates = [
+        "pac_real_w", "p_ac_real_w",
+        "v_ac_v", "vac_v",
+        "i_ac_a", "iac_a",
+        "v_dc_v", "vdc_total_v",
+        "i_dc_a",
+    ]
+    for k in candidates:
+        v = _safe_float(r.get(k), None)
+        if v is not None:
+            return True
+    return False
+
+
+def _has_useful_oper_data_from_merged_row(r: Dict[str, Any]) -> bool:
+    """
+    Coverage-first usando a merged 15 min.
+
+    Regras:
+    - se a linha explicita que faltou inversor -> sem cobertura
+    - se houver inv_coverage > 0 -> com cobertura
+    - se houver ao menos uma variável operativa do inversor preenchida -> com cobertura
+
+    Campos meramente estruturais/default (ex.: inv_n=0, alarm_sev=0)
+    não devem, sozinhos, pintar o bin de verde.
+    """
+    flag_inv_missing = r.get("flag_inv_missing", None)
+    if flag_inv_missing is True:
+        return False
+
+    inv_coverage = _safe_float(r.get("inv_coverage"), None)
+    if inv_coverage is not None and inv_coverage > 0:
+        return True
+
+    operative_numeric_fields = [
+        "p_ac_w",
+        "p_dc_w",
+        "v_ac_v",
+        "i_ac_a",
+        "v_dc_v",
+        "i_dc_a",
+        "e_ac_wh_15",
+        "mppt1_vdc_v",
+        "mppt2_vdc_v",
+        "mppt3_vdc_v",
+        "mppt4_vdc_v",
+        "mppt1_idc_a",
+        "mppt2_idc_a",
+        "mppt3_idc_a",
+        "mppt4_idc_a",
+    ]
+
+    for k in operative_numeric_fields:
+        v = _safe_float(r.get(k), None)
+        if v is not None:
+            return True
+
+    return False
+
+
 def _error_json(msg: str, *, trace: Optional[str] = None) -> JsonResponse:
     payload: Dict[str, Any] = {"ok": False, "error": msg}
     if getattr(settings, "DEBUG", False) and trace:
@@ -1267,6 +1334,52 @@ def mppt_gnn_fdd_api(request: HttpRequest) -> JsonResponse:
         if PlantDiagnostic15m is None:
             return _error_json("PlantDiagnostic15m não está disponível.")
 
+        # ------------------------------------------------------------
+        # Coverage-first: base visual vem da tabela merged 15 min.
+        # Diagnóstico 15 min entra apenas como overlay de anomalia/label.
+        # ------------------------------------------------------------
+        merged_names = _model_field_names(PVPlantMergedRecord15m)
+        qm = PVPlantMergedRecord15m.objects.filter(
+            plant_id=plant_id,
+            ts_utc__gte=dt0_utc,
+            ts_utc__lt=dt1_utc,
+        ).order_by("ts_utc")
+        if source_oper and "source_oper" in merged_names:
+            qm = qm.filter(source_oper__startswith=source_oper)
+        if source_meteo and "source_meteo" in merged_names:
+            qm = qm.filter(source_meteo=source_meteo)
+
+        merged_fields = _existing_fields(
+            PVPlantMergedRecord15m,
+            [
+                "ts_utc",
+                "source_oper",
+                "source_meteo",
+                "p_ac_w",
+                "p_dc_w",
+                "v_ac_v",
+                "i_ac_a",
+                "v_dc_v",
+                "i_dc_a",
+                "e_ac_wh_15",
+                "alarm_code",
+                "alarm_sev",
+                "inv_n",
+                "inv_coverage",
+                "flag_inv_missing",
+                "flag_low_coverage",
+                "mppt1_vdc_v",
+                "mppt2_vdc_v",
+                "mppt3_vdc_v",
+                "mppt4_vdc_v",
+                "mppt1_idc_a",
+                "mppt2_idc_a",
+                "mppt3_idc_a",
+                "mppt4_idc_a",
+            ],
+        )
+        merged_rows = list(qm.values(*merged_fields))
+
         qd = PlantDiagnostic15m.objects.filter(
             plant_id=plant_id,
             ts_utc__gte=dt0_utc,
@@ -1291,9 +1404,17 @@ def mppt_gnn_fdd_api(request: HttpRequest) -> JsonResponse:
                 "detector_score",
                 "mismatch_rel",
                 "pac_real_w",
+                "p_ac_real_w",
                 "pac_model_w",
                 "g_poa",
                 "tcell_c",
+                "v_ac_v",
+                "vac_v",
+                "i_ac_a",
+                "iac_a",
+                "v_dc_v",
+                "vdc_total_v",
+                "i_dc_a",
                 "source_oper",
                 "source_meteo",
                 "detector_version",
@@ -1303,7 +1424,6 @@ def mppt_gnn_fdd_api(request: HttpRequest) -> JsonResponse:
 
         if "source_oper" in diag_fields:
             if source_oper:
-                # já filtrado no queryset por prefixo
                 pass
             elif mppt > 0:
                 diag_rows = [
@@ -1311,13 +1431,12 @@ def mppt_gnn_fdd_api(request: HttpRequest) -> JsonResponse:
                     if _extract_mppt_index_from_source(str(r.get("source_oper") or "")) == mppt
                 ]
             else:
-                # modo "Todos"/plant-level = usar apenas fontes agregadas
                 diag_rows = [
                     r for r in diag_rows
-                    if _is_agg_source(str(r.get("source_oper") or ""))
+                    if _is_agg_source(str(r.get("source_oper") or "")) or str(r.get("source_oper") or "").strip().upper() in {"SHINEMONITOR", "GROWATT", "MANUAL"}
                 ]
 
-        if not diag_rows:
+        if not diag_rows and not merged_rows and not event_best_info:
             qavail = PlantDiagnostic15m.objects.filter(plant_id=plant_id)
             if detector_version and "detector_version" in diag_names:
                 qavail = qavail.filter(detector_version=detector_version)
@@ -1363,7 +1482,37 @@ def mppt_gnn_fdd_api(request: HttpRequest) -> JsonResponse:
         counts_by_label: Dict[str, int] = {}
         counts_by_state: Dict[str, int] = {"none": 0, "ok": 0, "fault": 0}
         best_score: Dict[Tuple[int, int], float] = {}
+        coverage_map: Dict[Tuple[int, int], bool] = {}
 
+        # Base do heatmap = cobertura operativa observada na merged
+        for r in merged_rows:
+            tsu = r.get("ts_utc")
+            if tsu is None:
+                continue
+
+            ts_local = tsu.astimezone(tz)
+            di = (ts_local.date() - d_start).days
+            if not (0 <= di < len(days)):
+                continue
+
+            minutes = ts_local.hour * 60 + ts_local.minute
+            bi = int(minutes // dt_minutes)
+            if not (0 <= bi < bpd):
+                continue
+
+            key = (di, bi)
+            has_oper = _has_useful_oper_data_from_merged_row(r)
+            if not has_oper:
+                continue
+
+            coverage_map[key] = True
+            grid[di][bi] = 1
+            if not tkeys[di][bi]:
+                tkeys[di][bi] = _tkey(ts_local)
+            if not labels[di][bi]:
+                labels[di][bi] = "coverage_only"
+
+        # Overlay do diagnóstico 15 min
         for r in diag_rows:
             tsu = r.get("ts_utc")
             if tsu is None:
@@ -1383,21 +1532,22 @@ def mppt_gnn_fdd_api(request: HttpRequest) -> JsonResponse:
             valid = bool(r.get("valid"))
             anomaly = bool(r.get("anomaly_flag"))
             rca_label = (r.get("rca_label") or "").strip().lower()
+            has_oper_diag = _has_useful_oper_data_from_diag_row(r)
+            has_oper = bool(coverage_map.get(key)) or has_oper_diag
 
-            # Semântica do heatmap nesta versão:
-            # 0 = cinza   -> bin sem linha diagnóstica carregada
-            # 1 = verde   -> existe linha diagnóstica e não há falha
-            # 2 = vermelho-> falha detectada
-            #
-            # "invalid" e "no_oper_data" continuam visíveis no label/tooltip,
-            # mas entram no grupo verde para não colapsar dias inteiros em cinza
-            # quando o detector persistiu a linha, porém marcou o ponto como inválido.
-            if anomaly:
+            # Semântica correta para a tela full-state:
+            # 0 = cinza   -> sem operativos úteis do inversor
+            # 1 = verde   -> há operativos úteis e não há anomalia
+            # 2 = vermelho-> há operativos úteis e anomalia detectada
+            if anomaly and has_oper:
                 state = 2
                 label = rca_label or "anomaly"
-            else:
+            elif has_oper:
                 state = 1
-                label = rca_label or ("invalid" if not valid else "normal")
+                label = rca_label or ("normal" if valid else "coverage_only")
+            else:
+                state = 0
+                label = rca_label or ("invalid" if not valid else "no_oper_data")
 
             detector_score = _safe_float(r.get("detector_score"), 0.0) or 0.0
             score = (10_000_000 if state == 2 else 1_000_000) + detector_score
@@ -1415,6 +1565,7 @@ def mppt_gnn_fdd_api(request: HttpRequest) -> JsonResponse:
             if einfo:
                 event_ids[di][bi] = int(einfo["event_id"])
 
+        # Overlay final do event-level
         for key, einfo in event_best_info.items():
             di, bi = key
             cur_state = int(grid[di][bi] or 0)
@@ -1472,6 +1623,8 @@ def mppt_gnn_fdd_api(request: HttpRequest) -> JsonResponse:
                 "diag_rows_valid": sum(1 for r in diag_rows if bool(r.get("valid"))),
                 "diag_rows_invalid": sum(1 for r in diag_rows if not bool(r.get("valid"))),
                 "diag_rows_anomaly": sum(1 for r in diag_rows if bool(r.get("anomaly_flag"))),
+                "merged_rows_total": len(merged_rows),
+                "merged_rows_with_oper": sum(1 for r in merged_rows if _has_useful_oper_data_from_merged_row(r)),
                 "counts_by_label": counts_by_label,
                 "counts_by_state": counts_by_state,
                 "available": available_common,

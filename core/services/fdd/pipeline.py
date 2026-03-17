@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import defaultdict
 from datetime import datetime
 from typing import Any, Optional
 
@@ -12,6 +13,30 @@ from core.services.fdd.detection import DetectionParams, detect_anomalies
 from core.services.fdd.events import EventBuildParams, build_fault_events_for_range
 from core.services.fdd.rca import RCAParams, diagnose_rca_series
 from core.services.mppt_gnn_fdd.window_loader import compute_pac_model_and_mismatch
+
+
+MERGED_FIELDS = (
+    "ts_utc",
+    "source_oper",
+    "p_ac_w",
+    "p_dc_w",
+    "v_dc_v",
+    "i_dc_a",
+    "v_ac_v",
+    "i_ac_a",
+    "freq_hz",
+    "gti",
+    "ghi",
+    "dni",
+    "dhi",
+    "temp_air",
+    "alarm_code",
+    "alarm_sev",
+    "inv_coverage",
+    "flag_low_coverage",
+    "flag_meteo_missing",
+    "flag_inv_missing",
+)
 
 
 def _pick_best_source_meteo(plant_id: int, ts_start_utc: datetime, ts_end_utc: datetime) -> Optional[str]:
@@ -29,8 +54,30 @@ def _pick_best_source_meteo(plant_id: int, ts_start_utc: datetime, ts_end_utc: d
     return (row or {}).get("source_meteo")
 
 
-def _pick_best_source_oper(plant_id: int, source_meteo: str, ts_start_utc: datetime, ts_end_utc: datetime) -> Optional[str]:
-    row = (
+
+def _source_root(src: str) -> str:
+    s = str(src or "").strip()
+    return s.split("|", 1)[0] if "|" in s else s
+
+
+
+def _is_agg_source(src: str) -> bool:
+    s = str(src or "").strip().upper()
+    if not s:
+        return False
+    if "|" not in s:
+        return True
+    return s.endswith("|AGG")
+
+
+
+def _is_mppt_source(src: str) -> bool:
+    return "|MPPT" in str(src or "").upper()
+
+
+
+def _pick_best_agg_source_oper(plant_id: int, source_meteo: str, ts_start_utc: datetime, ts_end_utc: datetime) -> Optional[str]:
+    rows = list(
         PVPlantMergedRecord15m.objects.filter(
             plant_id=plant_id,
             source_meteo=source_meteo,
@@ -40,9 +87,127 @@ def _pick_best_source_oper(plant_id: int, source_meteo: str, ts_start_utc: datet
         .values("source_oper")
         .annotate(n=Count("id"))
         .order_by("-n")
-        .first()
     )
-    return (row or {}).get("source_oper")
+    for row in rows:
+        src = str((row or {}).get("source_oper") or "")
+        if _is_agg_source(src):
+            return src
+    return None
+
+
+
+def _load_exact_rows(
+    *,
+    plant_id: int,
+    source_oper: str,
+    source_meteo: str,
+    ts_start_utc: datetime,
+    ts_end_utc: datetime,
+) -> list[dict[str, Any]]:
+    return list(
+        PVPlantMergedRecord15m.objects.filter(
+            plant_id=plant_id,
+            source_oper=source_oper,
+            source_meteo=source_meteo,
+            ts_utc__gte=ts_start_utc,
+            ts_utc__lt=ts_end_utc,
+        )
+        .order_by("ts_utc")
+        .values(*MERGED_FIELDS)
+    )
+
+
+
+def _first_finite(values: list[Any]) -> Optional[float]:
+    for v in values:
+        if v is None:
+            continue
+        try:
+            f = float(v)
+        except Exception:
+            continue
+        if np.isfinite(f):
+            return f
+    return None
+
+
+
+def _bool_any(values: list[Any]) -> bool:
+    return any(bool(v) for v in values)
+
+
+
+def _bool_all(values: list[Any], *, default: bool = False) -> bool:
+    vals = [bool(v) for v in values]
+    return all(vals) if vals else default
+
+
+
+def _synthesize_agg_rows_from_mppt(
+    *,
+    plant_id: int,
+    source_meteo: str,
+    ts_start_utc: datetime,
+    ts_end_utc: datetime,
+) -> tuple[str, list[dict[str, Any]]]:
+    raw = list(
+        PVPlantMergedRecord15m.objects.filter(
+            plant_id=plant_id,
+            source_meteo=source_meteo,
+            ts_utc__gte=ts_start_utc,
+            ts_utc__lt=ts_end_utc,
+        )
+        .order_by("ts_utc", "source_oper")
+        .values(*MERGED_FIELDS)
+    )
+    mppt_rows = [r for r in raw if _is_mppt_source(str(r.get("source_oper") or ""))]
+    if not mppt_rows:
+        return "", []
+
+    roots = sorted({_source_root(str(r.get("source_oper") or "")) for r in mppt_rows if str(r.get("source_oper") or "").strip()})
+    agg_source = f"{roots[0]}|AGG" if len(roots) == 1 else "PLANT|AGG"
+
+    by_ts: dict[datetime, list[dict[str, Any]]] = defaultdict(list)
+    for row in mppt_rows:
+        tsu = row.get("ts_utc")
+        if tsu is not None:
+            by_ts[tsu].append(row)
+
+    out: list[dict[str, Any]] = []
+    for tsu in sorted(by_ts.keys()):
+        grp = by_ts[tsu]
+        pac = sum(float(r.get("p_ac_w") or 0.0) for r in grp if r.get("p_ac_w") is not None)
+        pdc = sum(float(r.get("p_dc_w") or 0.0) for r in grp if r.get("p_dc_w") is not None)
+        idc = sum(float(r.get("i_dc_a") or 0.0) for r in grp if r.get("i_dc_a") is not None)
+        vdc_vals = [r.get("v_dc_v") for r in grp if r.get("v_dc_v") is not None]
+        vdc = (sum(float(v) for v in vdc_vals) / len(vdc_vals)) if vdc_vals else None
+
+        out.append(
+            {
+                "ts_utc": tsu,
+                "source_oper": agg_source,
+                "p_ac_w": pac if pac != 0.0 or any(r.get("p_ac_w") is not None for r in grp) else None,
+                "p_dc_w": pdc if pdc != 0.0 or any(r.get("p_dc_w") is not None for r in grp) else None,
+                "v_dc_v": vdc,
+                "i_dc_a": idc if idc != 0.0 or any(r.get("i_dc_a") is not None for r in grp) else None,
+                "v_ac_v": _first_finite([r.get("v_ac_v") for r in grp]),
+                "i_ac_a": _first_finite([r.get("i_ac_a") for r in grp]),
+                "freq_hz": _first_finite([r.get("freq_hz") for r in grp]),
+                "gti": _first_finite([r.get("gti") for r in grp]),
+                "ghi": _first_finite([r.get("ghi") for r in grp]),
+                "dni": _first_finite([r.get("dni") for r in grp]),
+                "dhi": _first_finite([r.get("dhi") for r in grp]),
+                "temp_air": _first_finite([r.get("temp_air") for r in grp]),
+                "alarm_code": None,
+                "alarm_sev": None,
+                "inv_coverage": _first_finite([r.get("inv_coverage") for r in grp]),
+                "flag_low_coverage": _bool_any([r.get("flag_low_coverage") for r in grp]),
+                "flag_meteo_missing": _bool_all([r.get("flag_meteo_missing") for r in grp], default=False),
+                "flag_inv_missing": _bool_all([r.get("flag_inv_missing") for r in grp], default=False),
+            }
+        )
+    return agg_source, out
+
 
 
 def _float_array(rows: list[dict[str, Any]], key: str) -> np.ndarray:
@@ -58,8 +223,10 @@ def _float_array(rows: list[dict[str, Any]], key: str) -> np.ndarray:
     return out
 
 
+
 def _bool_list(rows: list[dict[str, Any]], key: str) -> list[bool]:
     return [bool(r.get(key)) for r in rows]
+
 
 
 def run_detection_pipeline(
@@ -69,7 +236,7 @@ def run_detection_pipeline(
     ts_end_utc: datetime,
     source_oper: Optional[str] = None,
     source_meteo: Optional[str] = None,
-    detector_version: str = "residual_v1",
+    detector_version: str = "hybrid_rules_v1",
     detection_params: Optional[DetectionParams] = None,
     rca_params: Optional[RCAParams] = None,
     delete_existing: bool = True,
@@ -86,37 +253,41 @@ def run_detection_pipeline(
     if not src_meteo:
         raise ValueError("Nenhuma source_meteo encontrada no período")
 
-    src_oper = source_oper or _pick_best_source_oper(plant_id, src_meteo, ts_start_utc, ts_end_utc)
-    if not src_oper:
-        raise ValueError("Nenhuma source_oper encontrada no período")
-
-    rows = list(
-        PVPlantMergedRecord15m.objects.filter(
+    synthesized_agg = False
+    if source_oper:
+        src_oper = source_oper
+        rows = _load_exact_rows(
             plant_id=plant_id,
             source_oper=src_oper,
             source_meteo=src_meteo,
-            ts_utc__gte=ts_start_utc,
-            ts_utc__lt=ts_end_utc,
+            ts_start_utc=ts_start_utc,
+            ts_end_utc=ts_end_utc,
         )
-        .order_by("ts_utc")
-        .values(
-            "ts_utc",
-            "p_ac_w",
-            "v_dc_v",
-            "i_dc_a",
-            "gti",
-            "ghi",
-            "dni",
-            "dhi",
-            "temp_air",
-            "alarm_code",
-            "alarm_sev",
-            "inv_coverage",
-            "flag_low_coverage",
-            "flag_meteo_missing",
-            "flag_inv_missing",
+    else:
+        src_oper = _pick_best_agg_source_oper(plant_id, src_meteo, ts_start_utc, ts_end_utc) or ""
+        rows = (
+            _load_exact_rows(
+                plant_id=plant_id,
+                source_oper=src_oper,
+                source_meteo=src_meteo,
+                ts_start_utc=ts_start_utc,
+                ts_end_utc=ts_end_utc,
+            )
+            if src_oper
+            else []
         )
-    )
+        if not rows:
+            src_oper, rows = _synthesize_agg_rows_from_mppt(
+                plant_id=plant_id,
+                source_meteo=src_meteo,
+                ts_start_utc=ts_start_utc,
+                ts_end_utc=ts_end_utc,
+            )
+            synthesized_agg = bool(rows)
+
+    if not src_oper:
+        raise ValueError("Nenhuma source_oper agregada encontrada no período")
+
     if not rows:
         return {
             "ok": True,
@@ -133,12 +304,17 @@ def run_detection_pipeline(
     pac_real = _float_array(rows, "p_ac_w")
     vdc = _float_array(rows, "v_dc_v")
     idc = _float_array(rows, "i_dc_a")
+    vac = _float_array(rows, "v_ac_v")
+    iac = _float_array(rows, "i_ac_a")
+    freq = _float_array(rows, "freq_hz")
     gti = _float_array(rows, "gti")
     ghi = _float_array(rows, "ghi")
     dni = _float_array(rows, "dni")
     dhi = _float_array(rows, "dhi")
     temp_air = _float_array(rows, "temp_air")
     inv_coverage = _float_array(rows, "inv_coverage")
+    alarm_code = _float_array(rows, "alarm_code")
+    alarm_sev = _float_array(rows, "alarm_sev")
 
     pac_model, mismatch = compute_pac_model_and_mismatch(
         plant=plant,
@@ -180,9 +356,19 @@ def run_detection_pipeline(
     rca = diagnose_rca_series(
         anomaly=det["anomaly"],
         valid_period=det["valid_period"],
+        coarse_period=det.get("coarse_period"),
+        fine_period=det.get("fine_period"),
+        meteo_quality_ok=det.get("meteo_quality_ok"),
+        irradiance_tier=det.get("irradiance_tier"),
         mismatch_rel=[None if not np.isfinite(v) else float(v) for v in mismatch],
+        g_poa_wm2=[None if not np.isfinite(v) else float(v) for v in g_used],
         v_dc_v=[None if not np.isfinite(v) else float(v) for v in vdc],
         i_dc_a=[None if not np.isfinite(v) else float(v) for v in idc],
+        v_ac_v=[None if not np.isfinite(v) else float(v) for v in vac],
+        i_ac_a=[None if not np.isfinite(v) else float(v) for v in iac],
+        freq_hz=[None if not np.isfinite(v) else float(v) for v in freq],
+        alarm_code=[None if not np.isfinite(v) else float(v) for v in alarm_code],
+        alarm_sev=[None if not np.isfinite(v) else float(v) for v in alarm_sev],
         pac_real_w=[None if not np.isfinite(v) else float(v) for v in pac_real],
         pac_model_w=[None if not np.isfinite(v) else float(v) for v in pac_model],
         flag_inv_missing=_bool_list(rows, "flag_inv_missing"),
@@ -199,7 +385,15 @@ def run_detection_pipeline(
         detector_score = max(
             abs(float(ewma_z)) if ewma_z is not None else 0.0,
             float(cusum) if cusum is not None else 0.0,
+            float(abs(mismatch[i])) if np.isfinite(mismatch[i]) and rca["labels"][i] not in {"ok", "invalid"} else 0.0,
         )
+        diagnosis_label = str(rca["diagnosis_labels"][i])
+        state_label = str(rca["state_labels"][i])
+        domain_label = str(rca["domain_labels"][i])
+        direct_grid = bool(rca["direct_grid_evidence"][i])
+        zero_inj = bool(rca["zero_injection_flag"][i])
+        anomaly_final = bool(det["anomaly"][i]) or direct_grid or diagnosis_label not in {"ok", "invalid"}
+
         objs.append(
             PlantDiagnostic15m(
                 plant_id=plant_id,
@@ -207,9 +401,9 @@ def run_detection_pipeline(
                 source_oper=src_oper,
                 source_meteo=src_meteo,
                 rca_code=int(rca["codes"][i]),
-                rca_label=str(rca["labels"][i]),
+                rca_label=diagnosis_label,
                 valid=bool(det["valid_period"][i]),
-                anomaly_flag=bool(det["anomaly"][i]),
+                anomaly_flag=bool(anomaly_final),
                 detector_score=float(detector_score),
                 ewma_z=ewma_z,
                 cusum_score=cusum,
@@ -220,6 +414,21 @@ def run_detection_pipeline(
                 pac_real_w=None if not np.isfinite(pac_real[i]) else float(pac_real[i]),
                 pac_model_w=None if not np.isfinite(pac_model[i]) else float(pac_model[i]),
                 mismatch_rel=None if not np.isfinite(mismatch[i]) else float(mismatch[i]),
+                irradiance_tier=str(det["irradiance_tier"][i]),
+                fine_diag_allowed=bool(det["fine_period"][i]),
+                meteo_quality_ok=bool(det["meteo_quality_ok"][i]),
+                direct_grid_evidence=direct_grid,
+                zero_injection_flag=zero_inj,
+                state_label=state_label,
+                domain_label=domain_label,
+                diagnosis_label=diagnosis_label,
+                diagnosis_confidence=rca["diagnosis_confidence"][i],
+                v_ac_v=None if not np.isfinite(vac[i]) else float(vac[i]),
+                i_ac_a=None if not np.isfinite(iac[i]) else float(iac[i]),
+                freq_hz=None if not np.isfinite(freq[i]) else float(freq[i]),
+                alarm_code_oper=None if not np.isfinite(alarm_code[i]) else int(alarm_code[i]),
+                alarm_sev_oper=None if not np.isfinite(alarm_sev[i]) else int(alarm_sev[i]),
+                evidence_json=rca["evidence_json"][i],
             )
         )
 
@@ -260,4 +469,5 @@ def run_detection_pipeline(
         "event_summary": events_out,
         "baseline": det.get("baseline"),
         "rca_baseline": rca.get("baseline"),
+        "synthesized_agg": synthesized_agg,
     }

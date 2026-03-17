@@ -79,6 +79,8 @@ def build_event_mppt_features(
         "zero_power_frac": _safe_frac(np.nan_to_num(pac_evt, nan=0.0) <= max(100.0, 0.05 * pac_cap)),
         "clip_frac": _safe_frac(clip_mask),
         "g_mean": _safe_mean(g_evt),
+        "g_high_frac": _safe_frac(np.nan_to_num(g_evt, nan=0.0) >= 800.0),
+        "g_mid_frac": _safe_frac((np.nan_to_num(g_evt, nan=0.0) >= 700.0) & (np.nan_to_num(g_evt, nan=0.0) < 800.0)),
         "pac_cap_w": pac_cap,
         "n_mppt": int(pdc_evt.shape[0]),
     }

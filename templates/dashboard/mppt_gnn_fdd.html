@@ -390,13 +390,13 @@
 
       <div class="ctl sm">
         <label for="model_version">model_version</label>
-        <input id="model_version" list="modelVersionList" type="text" value="{{ model_version|default:'event_rules_v1' }}">
+        <input id="model_version" list="modelVersionList" type="text" value="{{ model_version|default:'event_rules_v2' }}">
         <datalist id="modelVersionList"></datalist>
       </div>
 
       <div class="ctl sm">
         <label for="detector_version">detector_version</label>
-        <input id="detector_version" list="detectorVersionList" type="text" value="{{ detector_version|default:'residual_v1' }}">
+        <input id="detector_version" list="detectorVersionList" type="text" value="{{ detector_version|default:'hybrid_rules_v1' }}">
         <datalist id="detectorVersionList"></datalist>
       </div>
 
@@ -422,7 +422,7 @@
             <span class="label">Atualizar</span>
           </button>
 
-          <button class="btn-glow secondary" id="btnTrain" type="button" title="No MVP event_rules_v1 o treino está desabilitado">
+          <button class="btn-glow secondary" id="btnTrain" type="button" title="No MVP event_rules_v2 o treino está desabilitado">
             <svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
               <path d="M4 20V8" stroke="rgba(233,246,255,.92)" stroke-width="2" stroke-linecap="round"/>
               <path d="M8 20V4" stroke="rgba(233,246,255,.92)" stroke-width="2" stroke-linecap="round"/>
@@ -660,6 +660,15 @@
     diag_anomaly_flag: "Diagnóstico anomalia",
     diag_rca_code: "RCA code",
     diag_rca_label: "RCA label",
+    diag_state_label: "State",
+    diag_domain_label: "Domain",
+    diag_diagnosis_label: "Diagnosis",
+    diag_diagnosis_confidence: "Diagnosis confidence",
+    diag_irradiance_tier: "Irradiance tier",
+    diag_fine_diag_allowed: "Fine diagnosis allowed",
+    diag_meteo_quality_ok: "Meteo quality OK",
+    diag_direct_grid_evidence: "Direct grid evidence",
+    diag_zero_injection_flag: "Zero injection",
     diag_detector_score: "Detector score",
     diag_detector_version: "Detector version",
     diag_ewma_z: "EWMA z",
@@ -1227,8 +1236,8 @@
     const mpptApi = (/^\d+$/.test(mpptRaw)) ? Number(mpptRaw) : 0;
 
     const view_mode = String($("view_mode")?.value || "full").trim() || "full";
-    const model_version = String($("model_version")?.value || "").trim() || "event_rules_v1";
-    const detector_version = String($("detector_version")?.value || "").trim() || "residual_v1";
+    const model_version = String($("model_version")?.value || "").trim() || "event_rules_v2";
+    const detector_version = String($("detector_version")?.value || "").trim() || "hybrid_rules_v1";
     const source_oper = String($("source_oper")?.value || "").trim();
     const source_meteo = String($("source_meteo")?.value || "").trim();
 

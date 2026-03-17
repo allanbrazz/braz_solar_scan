@@ -11,11 +11,13 @@ from core.services.mppt_gnn_fdd.event_loader import load_event_window
 
 RULE_CODE_BY_LABEL = {
     "normal": 0,
-    "mppt_disconnected": 1,
-    "inverter_off_under_sun": 2,
+    "probable_mppt_disconnect": 1,
+    "dc_side_partial_loss": 2,
     "mppt_imbalance": 3,
-    "curtailment_clipping": 4,
-    "meteo_bias": 5,
+    "grid_fault": 4,
+    "inverter_shutdown": 5,
+    "curtailment_clipping": 6,
+    "persistent_underperformance": 7,
     "unknown_fault": 99,
 }
 
@@ -32,33 +34,39 @@ def _mk_result(label: str, confidence: float, extra: Optional[dict] = None) -> d
     }
 
 
-def _rule_predict_one(mppt_feat: dict, plant_summary: dict, prelim_label: str, confidence_threshold: float) -> dict:
-    if prelim_label == "curtailment_clipping" or plant_summary.get("clip_frac", 0.0) >= 0.50:
+def _rule_predict_one(mppt_feat: dict, plant_summary: dict, prelim_label: str, dominant_diagnosis: str, confidence_threshold: float) -> dict:
+    if prelim_label == "grid_fault":
+        res = _mk_result("grid_fault", 0.92, {"reason": dominant_diagnosis or "grid_fault_prelim"})
+    elif prelim_label == "inverter_shutdown":
+        res = _mk_result("inverter_shutdown", 0.88, {"reason": dominant_diagnosis or "inverter_shutdown_prelim"})
+    elif prelim_label == "curtailment_clipping" or plant_summary.get("clip_frac", 0.0) >= 0.50:
         res = _mk_result("curtailment_clipping", 0.90, {"reason": "clip_frac_high"})
-    elif prelim_label == "meteo_bias" and plant_summary.get("mismatch_mean", 0.0) >= 0.20:
-        res = _mk_result("meteo_bias", 0.80, {"reason": "positive_residual_bias"})
-    elif plant_summary.get("zero_power_frac", 0.0) >= 0.80 and plant_summary.get("g_mean", 0.0) >= 300.0:
-        res = _mk_result("inverter_off_under_sun", 0.85, {"reason": "zero_power_under_sun"})
-    elif mppt_feat.get("outage_frac", 0.0) >= 0.60 and mppt_feat.get("i_rel_med", 1.0) <= 0.20:
-        conf = min(0.95, 0.70 + 0.25 * mppt_feat.get("outage_frac", 0.0))
-        res = _mk_result("mppt_disconnected", conf, {"reason": "current_outage_pattern"})
-    elif (
-        mppt_feat.get("low_i_frac", 0.0) >= 0.60
-        and mppt_feat.get("share_low_frac", 0.0) >= 0.50
-        and mppt_feat.get("i_rel_med", 1.0) <= 0.65
-    ):
-        res = _mk_result("mppt_imbalance", 0.76, {"reason": "low_current_vs_peers"})
-    elif prelim_label == "meteo_bias":
-        res = _mk_result("meteo_bias", 0.65, {"reason": "event_prelabel"})
+    elif prelim_label in {"dc_side_partial_loss", "persistent_underperformance"}:
+        if mppt_feat.get("outage_frac", 0.0) >= 0.60 and mppt_feat.get("i_rel_med", 1.0) <= 0.20:
+            conf = min(0.95, 0.72 + 0.20 * mppt_feat.get("outage_frac", 0.0))
+            res = _mk_result("probable_mppt_disconnect", conf, {"reason": "current_outage_pattern"})
+        elif (
+            mppt_feat.get("low_i_frac", 0.0) >= 0.60
+            and mppt_feat.get("share_low_frac", 0.0) >= 0.50
+            and mppt_feat.get("i_rel_med", 1.0) <= 0.65
+        ):
+            res = _mk_result("mppt_imbalance", 0.78, {"reason": "low_current_vs_peers"})
+        elif plant_summary.get("pac_ratio_mean", 1.0) <= 0.75 and plant_summary.get("g_mean", 0.0) >= 700.0:
+            res = _mk_result("dc_side_partial_loss", 0.70, {"reason": "plant_underproduction_high_irradiance"})
+        else:
+            res = _mk_result("persistent_underperformance", 0.58, {"reason": "event_prelabel_underperformance"})
     else:
         res = _mk_result("normal", 0.55, {"reason": "no_strong_rule"})
 
-    if res["confidence"] < float(confidence_threshold):
+    if res["confidence"] < float(confidence_threshold) and res["pred_label"] not in {"grid_fault", "inverter_shutdown"}:
         return _mk_result("unknown_fault", res["confidence"], {**res.get("contribution", {}), "open_set": True})
     return res
 
 
-def _resolve_event_final_label(pred_rows: List[dict], event_prelim: str, plant_summary: dict) -> tuple[str, str, float, float]:
+def _resolve_event_final_label(pred_rows: List[dict], event_prelim: str, plant_summary: dict, dominant_diagnosis: str) -> tuple[str, str, float, float]:
+    if event_prelim in {"grid_fault", "inverter_shutdown", "curtailment_clipping"}:
+        return dominant_diagnosis or event_prelim, "known", 0.88 if event_prelim != "curtailment_clipping" else 0.82, 0.12
+
     known = [r for r in pred_rows if r["pred_label"] not in {"normal", "unknown_fault"}]
     if known:
         agg: dict[str, float] = {}
@@ -69,11 +77,8 @@ def _resolve_event_final_label(pred_rows: List[dict], event_prelim: str, plant_s
         novelty = float(sum(r["novelty_score"] for r in known) / max(len(known), 1))
         return final_label, "known", confidence, novelty
 
-    if event_prelim in {"curtailment_clipping", "meteo_bias", "plant_wide_loss"}:
-        mapped = event_prelim
-        if mapped == "plant_wide_loss" and plant_summary.get("zero_power_frac", 0.0) >= 0.80:
-            mapped = "inverter_off_under_sun"
-        return mapped, "known", 0.65, 0.35
+    if event_prelim in {"dc_side_partial_loss", "persistent_underperformance"}:
+        return dominant_diagnosis or event_prelim, "known", 0.62, 0.38
 
     unknowns = [r for r in pred_rows if r["pred_label"] == "unknown_fault"]
     if unknowns:
@@ -87,7 +92,7 @@ def _resolve_event_final_label(pred_rows: List[dict], event_prelim: str, plant_s
 def infer_event_and_persist(
     *,
     event_id: int,
-    model_version: str = "event_rules_v1",
+    model_version: str = "event_rules_v2",
     confidence_threshold: float = 0.60,
     pre_bins: int = 8,
     post_bins: int = 8,
@@ -97,6 +102,9 @@ def infer_event_and_persist(
     event = FaultEvent.objects.filter(id=event_id).first()
     if event is None:
         raise ValueError("FaultEvent não encontrado")
+
+    event_meta = event.meta or {}
+    dominant_diagnosis = str(event_meta.get("dominant_diagnosis") or "")
 
     win, ts_grid, meta = load_event_window(
         event_id=event_id,
@@ -115,7 +123,7 @@ def infer_event_and_persist(
     mppt_indices = list(meta.get("mppt_indices") or [])
     for pos, feat in enumerate(mppt_feats):
         mppt_number = int(mppt_indices[pos]) if pos < len(mppt_indices) else int(feat["mppt"])
-        pred = _rule_predict_one(feat, plant_summary, str(event.event_label_prelim or "unknown"), confidence_threshold)
+        pred = _rule_predict_one(feat, plant_summary, str(event.event_label_prelim or "unknown"), dominant_diagnosis, confidence_threshold)
         pred_rows.append(
             {
                 "mppt": mppt_number,
@@ -130,6 +138,7 @@ def infer_event_and_persist(
         pred_rows,
         str(event.event_label_prelim or "unknown"),
         plant_summary,
+        dominant_diagnosis,
     )
 
     with transaction.atomic():
@@ -187,7 +196,7 @@ def infer_events_and_persist(
     plant_id: Optional[int] = None,
     event_ids: Optional[Iterable[int]] = None,
     statuses: Optional[Iterable[str]] = None,
-    model_version: str = "event_rules_v1",
+    model_version: str = "event_rules_v2",
     confidence_threshold: float = 0.60,
     replace_existing: bool = True,
 ) -> List[dict]:

@@ -134,7 +134,7 @@ def load_event_window(
 
     base_fields = [
         "ts_utc",
-        "p_ac_w", "v_dc_v", "i_ac_a",
+        "p_ac_w", "v_dc_v", "i_ac_a", "v_ac_v", "freq_hz",
         "gti", "ghi", "dni", "dhi", "temp_air",
     ]
     mppt_candidates = _candidate_mppt_indices(max_mppt=max(int(n_mppt or 16), 16))
@@ -157,6 +157,8 @@ def load_event_window(
     pac = _fill_on_grid(ts_grid, rows, "p_ac_w")
     vdc_total = _fill_on_grid(ts_grid, rows, "v_dc_v")
     iac = _fill_on_grid(ts_grid, rows, "i_ac_a")
+    vac = _fill_on_grid(ts_grid, rows, "v_ac_v")
+    freq = _fill_on_grid(ts_grid, rows, "freq_hz")
     gti = _fill_on_grid(ts_grid, rows, "gti")
     ghi = _fill_on_grid(ts_grid, rows, "ghi")
     dni = _fill_on_grid(ts_grid, rows, "dni")
@@ -181,6 +183,12 @@ def load_event_window(
         pac_real=pac,
     )
 
+    inv = getattr(getattr(event.plant, "details", None), "inverter", None)
+    try:
+        vac_nom_v = float(getattr(inv, "v_ac_nom_v", None)) if inv is not None and getattr(inv, "v_ac_nom_v", None) is not None else None
+    except Exception:
+        vac_nom_v = None
+
     meta = {
         "event_id": event.id,
         "plant_id": event.plant_id,
@@ -192,6 +200,8 @@ def load_event_window(
         "event_end_idx": len(ts_grid) - post_bins - 1,
         "mppt_indices": resolved_mppts,
         "n_mppt": len(resolved_mppts),
+        "v_ac_nom_v": vac_nom_v,
+        "freq_nom_hz": float(getattr(__import__("django.conf").conf.settings, "FDD_GRID_FREQ_NOM_HZ", 50.0) or 50.0),
     }
 
     win = WindowArrays(
@@ -202,6 +212,8 @@ def load_event_window(
         mismatch=mismatch,
         g=np.where(np.isfinite(gti), gti, ghi),
         t=tair,
+        vac=vac,
+        freq=freq,
         mppt_vdc=mppt_vdc,
         mppt_idc=mppt_idc,
     )

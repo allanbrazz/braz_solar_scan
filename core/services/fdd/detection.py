@@ -1,4 +1,3 @@
-# core/services/fdd_detection.py
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -9,25 +8,28 @@ import numpy as np
 
 @dataclass
 class DetectionParams:
-    # gate de POA para “período válido”
-    gpoa_gate_wm2: float = 300.0
+    # elegibilidade radiométrica
+    sun_available_gpoa_wm2: float = 150.0
+    coarse_diag_gpoa_wm2: float = 700.0
+    fine_diag_gpoa_wm2: float = 800.0
 
-    # estabilidade do céu medida pelo CV (std/mean) de GPOA numa janela
+    # qualidade meteorológica
     stable_cv_max: float = 0.08
+    stable_ramp_max_wm2: float = 120.0
     stable_window_points: int = 6  # 6*15min = 90min
 
     # EWMA
-    ewma_lambda: float = 0.20  # ~75min de constante de tempo (1/lambda pontos)
-    ewma_L: float = 3.0        # limite em desvios (para EWMA z)
+    ewma_lambda: float = 0.20
+    ewma_L: float = 3.0
 
     # CUSUM (em z-score)
-    cusum_k: float = 0.50      # slack
-    cusum_h: float = 8.0       # limiar
+    cusum_k: float = 0.50
+    cusum_h: float = 8.0
 
     # baseline mínimo p/ estimar sigma
-    min_baseline_points: int = 24  # 24*15min = 6h de pontos válidos
+    min_baseline_points: int = 24
 
-    # qualidade mínima de dados
+    # qualidade mínima de dados do inversor
     inv_cov_min: float = 0.30
 
 
@@ -39,7 +41,6 @@ def _to_np(xs: List[Optional[float]]) -> np.ndarray:
 
 
 def _rolling_cv(x: np.ndarray, window: int) -> np.ndarray:
-    """Rolling CV ignorando NaN. Retorna NaN quando não há dados suficientes."""
     n = x.size
     cv = np.full(n, np.nan, dtype=float)
     if window <= 1:
@@ -59,8 +60,18 @@ def _rolling_cv(x: np.ndarray, window: int) -> np.ndarray:
     return cv
 
 
+def _rolling_abs_ramp(x: np.ndarray) -> np.ndarray:
+    out = np.full(x.size, np.nan, dtype=float)
+    if x.size == 0:
+        return out
+    out[0] = 0.0 if np.isfinite(x[0]) else np.nan
+    for i in range(1, x.size):
+        if np.isfinite(x[i]) and np.isfinite(x[i - 1]):
+            out[i] = abs(float(x[i]) - float(x[i - 1]))
+    return out
+
+
 def _robust_loc_scale(z: np.ndarray) -> Tuple[float, float]:
-    """(median, sigma) com sigma via MAD; fallback para std."""
     z = z[np.isfinite(z)]
     if z.size == 0:
         return 0.0, 1.0
@@ -72,6 +83,16 @@ def _robust_loc_scale(z: np.ndarray) -> Tuple[float, float]:
     if (not np.isfinite(sigma)) or sigma < 1e-6:
         sigma = 1.0
     return med, sigma
+
+
+def _tier_for_g(g: float, p: DetectionParams) -> str:
+    if not np.isfinite(g):
+        return "N"
+    if g >= float(p.fine_diag_gpoa_wm2):
+        return "A"
+    if g >= float(p.coarse_diag_gpoa_wm2):
+        return "B"
+    return "C"
 
 
 def detect_anomalies(
@@ -86,10 +107,11 @@ def detect_anomalies(
 ) -> Dict[str, Any]:
     """
     Saídas principais:
-      - valid_period: pontos em que podemos detectar (gate + stable + sem missing + valid_model)
-      - stable_sky: estabilidade baseada em CV(GPOA)
-      - anomaly: flag final (EWMA || CUSUM) em pontos valid_period
-      - score_*: scores úteis para debug/plot
+      - valid_period: há irradiância suficiente para avaliação operacional básica
+      - coarse_period: residual pode apoiar diagnóstico grosseiro (>=700 W/m²)
+      - fine_period: residual fino permitido (>=800 W/m² + meteo ok)
+      - meteo_quality_ok: estabilidade meteorológica aprovada
+      - anomaly: anomalia por residual (EWMA || CUSUM) somente onde residual é elegível
     """
     p = params or DetectionParams()
 
@@ -106,41 +128,32 @@ def detect_anomalies(
     else:
         cov_ok = np.ones_like(vm, dtype=bool)
 
-    # Céu estável via CV(GPOA)
     cv = _rolling_cv(g, int(p.stable_window_points))
+    ramp = _rolling_abs_ramp(g)
     stable_sky = np.isfinite(cv) & (cv <= float(p.stable_cv_max))
+    meteo_quality_ok = stable_sky & np.isfinite(ramp) & (ramp <= float(p.stable_ramp_max_wm2))
 
-    # Período válido para DETECÇÃO
-    valid_period = (
-        vm
-        & np.isfinite(mm)
-        & np.isfinite(g)
-        & (g >= float(p.gpoa_gate_wm2))
-        & stable_sky
-        & (~met_miss)
-        & (~inv_miss)
-        & cov_ok
-    )
+    data_ok = np.isfinite(g) & (~met_miss) & (~inv_miss) & cov_ok
+    valid_period = data_ok & (g >= float(p.sun_available_gpoa_wm2))
+    coarse_period = valid_period & vm & np.isfinite(mm) & (g >= float(p.coarse_diag_gpoa_wm2))
+    residual_ready = coarse_period & meteo_quality_ok
+    fine_period = valid_period & vm & np.isfinite(mm) & (g >= float(p.fine_diag_gpoa_wm2)) & meteo_quality_ok
 
-    # baseline: somente pontos "válidos"
-    base = mm[valid_period]
+    base = mm[residual_ready]
     med, sig = _robust_loc_scale(base)
 
-    # Se baseline insuficiente, relaxa (ainda retorna arrays coerentes)
     if base.size < int(p.min_baseline_points):
-        # usa qualquer ponto com mm finito + g alto (sem stable) como fallback
-        fallback_mask = vm & np.isfinite(mm) & np.isfinite(g) & (g >= float(p.gpoa_gate_wm2)) & (~met_miss) & (~inv_miss) & cov_ok
+        fallback_mask = coarse_period
         med, sig = _robust_loc_scale(mm[fallback_mask])
 
-    z = (mm - med) / sig  # z-score do mismatch
+    z = (mm - med) / sig
 
-    # EWMA em z-score, apenas propagando nos pontos valid_period (senão mantém)
     lam = float(p.ewma_lambda)
     ewma = np.full_like(z, np.nan, dtype=float)
     prev = 0.0
     has_prev = False
     for i in range(z.size):
-        if not valid_period[i] or (not np.isfinite(z[i])):
+        if not residual_ready[i] or (not np.isfinite(z[i])):
             ewma[i] = np.nan
             continue
         if not has_prev:
@@ -150,19 +163,16 @@ def detect_anomalies(
             prev = lam * float(z[i]) + (1.0 - lam) * prev
         ewma[i] = prev
 
-    # Limite de EWMA (desvio do EWMA)
-    # var(EWMA) = lam/(2-lam) quando entrada é N(0,1)
     ewma_sigma = np.sqrt(lam / (2.0 - lam))
-    ewma_flag = valid_period & np.isfinite(ewma) & (np.abs(ewma) > float(p.ewma_L) * ewma_sigma)
+    ewma_flag = residual_ready & np.isfinite(ewma) & (np.abs(ewma) > float(p.ewma_L) * ewma_sigma)
 
-    # CUSUM (two-sided) em z-score
     k = float(p.cusum_k)
     h = float(p.cusum_h)
     s_pos = np.full_like(z, 0.0, dtype=float)
     s_neg = np.full_like(z, 0.0, dtype=float)
     cusum_score = np.full_like(z, np.nan, dtype=float)
     for i in range(z.size):
-        if not valid_period[i] or (not np.isfinite(z[i])):
+        if not residual_ready[i] or (not np.isfinite(z[i])):
             s_pos[i] = 0.0
             s_neg[i] = 0.0
             cusum_score[i] = np.nan
@@ -175,16 +185,30 @@ def detect_anomalies(
         s_neg[i] = sn
         cusum_score[i] = max(sp, sn)
 
-    cusum_flag = valid_period & np.isfinite(cusum_score) & (cusum_score > h)
-
+    cusum_flag = residual_ready & np.isfinite(cusum_score) & (cusum_score > h)
     anomaly = ewma_flag | cusum_flag
+
+    irr_tier = [_tier_for_g(float(v), p) for v in g]
 
     return {
         "valid_period": valid_period.tolist(),
+        "coarse_period": coarse_period.tolist(),
+        "fine_period": fine_period.tolist(),
         "stable_sky": stable_sky.tolist(),
+        "meteo_quality_ok": meteo_quality_ok.tolist(),
+        "irradiance_tier": irr_tier,
+        "gpoa_cv": [None if (not np.isfinite(v)) else float(v) for v in cv.tolist()],
+        "gpoa_ramp_abs": [None if (not np.isfinite(v)) else float(v) for v in ramp.tolist()],
         "z": [None if (not np.isfinite(v)) else float(v) for v in z.tolist()],
         "ewma_z": [None if (not np.isfinite(v)) else float(v) for v in ewma.tolist()],
         "cusum": [None if (not np.isfinite(v)) else float(v) for v in cusum_score.tolist()],
         "anomaly": anomaly.tolist(),
-        "baseline": {"median": med, "sigma": sig, "n_base": int(np.isfinite(base).sum())},
+        "baseline": {
+            "median": med,
+            "sigma": sig,
+            "n_base": int(np.isfinite(base).sum()),
+            "sun_available_gpoa_wm2": float(p.sun_available_gpoa_wm2),
+            "coarse_diag_gpoa_wm2": float(p.coarse_diag_gpoa_wm2),
+            "fine_diag_gpoa_wm2": float(p.fine_diag_gpoa_wm2),
+        },
     }
