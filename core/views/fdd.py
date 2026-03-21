@@ -1066,6 +1066,44 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
         pipeline_name = "ewma_cusum_detection + rca_patterns"
 
     # ----------------------------
+    # Série de plot do mismatch (visual)
+    # Evita explosões em baixa irradiância / baixa potência
+    # e preserva gaps reais quando faltam dados operativos.
+    # ----------------------------
+    gpoa_plot_min = _gf("gpoa_plot_min", max(700.0, float(gpoa_gate)))
+    pmodel_plot_min = _gf("pmodel_plot_min", max(200.0, float(pmin_w)))
+    mismatch_clip_abs = _gf("mismatch_clip_abs", 2.0)
+
+    mismatch_rel_raw: List[Optional[float]] = mismatch_rel[:]
+    mismatch_rel_plot: List[Optional[float]] = []
+
+    for i in range(n):
+        mm = mismatch_rel[i]
+        gp = g_poa_used[i]
+        pm = pac_model_w[i]
+        pr = p_ac_w[i]
+
+        ok_plot = (
+            (mm is not None)
+            and (gp is not None) and (float(gp) >= float(gpoa_plot_min))
+            and (pm is not None) and (abs(float(pm)) >= float(pmodel_plot_min))
+            and (pr is not None)
+            and (not bool(flag_meteo_missing[i]))
+            and (not bool(flag_inv_missing_all[i]))
+        )
+
+        if not ok_plot:
+            mismatch_rel_plot.append(None)
+            continue
+
+        v = float(mm)
+        if np.isfinite(v):
+            v = max(-float(mismatch_clip_abs), min(float(mismatch_clip_abs), v))
+            mismatch_rel_plot.append(v)
+        else:
+            mismatch_rel_plot.append(None)
+
+    # ----------------------------
     # Persistência
     # ----------------------------
     persist = (data.get("persist") or data.get("save") or "").strip().lower() in ("1", "true", "yes", "on")
@@ -1244,7 +1282,10 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
             # model
             "p_ac_model_w": pac_model_w,
             "tcell_c": tcell_c,
-            "mismatch_rel": mismatch_rel,
+            "mismatch_rel": mismatch_rel_plot,
+            "mismatch_rel_raw": mismatch_rel_raw,
+            "gpoa_plot_min": [float(gpoa_plot_min)] * n,
+            "pmodel_plot_min": [float(pmodel_plot_min)] * n,
 
             # detecção + validade
             "valid_model": valid_model,
