@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
 from django.db.models import Max, Min
-from django.http import HttpRequest, JsonResponse
+from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import render
 from django.urls import reverse
 from django.views.decorators.csrf import csrf_exempt
@@ -54,6 +54,11 @@ except Exception:
     load_model_health = None  # type: ignore
     list_available_model_versions = None  # type: ignore
 
+try:
+    from core.services.mppt_gnn_fdd.report_pdf import build_mppt_gnn_pdf_report  # type: ignore
+except Exception:
+    build_mppt_gnn_pdf_report = None  # type: ignore
+
 
 # ============================================================
 # Configuração
@@ -84,6 +89,21 @@ SEV_BY_LABEL: dict[str, int] = {
 }
 
 BENIGN_LABELS = {"normal", "curtailment_clipping", "meteo_bias"}
+
+HEATMAP_STATE_NONE = 0
+HEATMAP_STATE_OK = 1
+HEATMAP_STATE_WARN = 2
+HEATMAP_STATE_CRIT = 3
+
+EVENT_GREEN_CONFIDENCE_MIN = 0.70
+EVENT_WARN_CONFIDENCE_MIN = 0.45
+WARN_MISMATCH_REL = 0.10
+WARN_MISMATCH_REL_SINGLE = 0.20
+WARN_MIN_GPOA_WM2 = 700.0
+WARN_MIN_QC_SCORE = 0.60
+WARN_LABEL_MISMATCH = "warn_mismatch"
+WARN_LABEL_MISMATCH_INTERP = "warn_mismatch_interp"
+WARN_LABEL_GUARDED = "warn_refined_guard"
 
 DIAG_BASE_CANDIDATES = [
     "ts_utc",
@@ -395,10 +415,124 @@ def _error_json(msg: str, *, trace: Optional[str] = None) -> JsonResponse:
 def _label_state(label: str) -> int:
     lab = (label or "").strip().lower()
     if not lab or lab in {"invalid", "no_oper_data"}:
-        return 0
+        return HEATMAP_STATE_NONE
     if lab in BENIGN_LABELS:
-        return 1
-    return 2
+        return HEATMAP_STATE_OK
+    return HEATMAP_STATE_CRIT
+
+
+def _mismatch_underperformance(mismatch_rel: Any) -> Optional[float]:
+    mm = _safe_float(mismatch_rel, None)
+    if mm is None:
+        return None
+    return max(0.0, -mm)
+
+
+def _diag_gpoa_wm2(row: Dict[str, Any]) -> Optional[float]:
+    for key in ("g_poa", "gpoa", "gti", "ghi"):
+        v = _safe_float(row.get(key), None)
+        if v is not None:
+            return v
+    return None
+
+
+def _diag_meteo_good_for_warn(row: Optional[Dict[str, Any]]) -> bool:
+    if not row:
+        return False
+    if bool(row.get("flag_meteo_missing")):
+        return False
+    if bool(row.get("flag_meteo_low_confidence")):
+        return False
+    score = _safe_float(row.get("meteo_qc_score"), None)
+    if score is not None and score < WARN_MIN_QC_SCORE:
+        return False
+    return True
+
+
+def _diag_meteo_allows_green_refinement(row: Optional[Dict[str, Any]]) -> bool:
+    if not row:
+        return False
+    if bool(row.get("flag_meteo_missing")):
+        return False
+    if bool(row.get("flag_meteo_low_confidence")):
+        return False
+    return True
+
+
+def _compute_warn_bin_map(
+    *,
+    diag_rows: List[Dict[str, Any]],
+    tz: ZoneInfo,
+    d_start: date,
+    days_len: int,
+    bpd: int,
+    dt_minutes: int,
+) -> Dict[Tuple[int, int], Dict[str, Any]]:
+    candidate_map: Dict[Tuple[int, int], Dict[str, Any]] = {}
+    per_day: Dict[int, List[Tuple[int, float]]] = {}
+
+    for row in diag_rows:
+        tsu = row.get("ts_utc")
+        if tsu is None or not bool(row.get("valid")):
+            continue
+        if not _has_useful_oper_data_from_diag_row(row):
+            continue
+        if not _diag_meteo_good_for_warn(row):
+            continue
+
+        underperf = _mismatch_underperformance(row.get("mismatch_rel"))
+        if underperf is None or underperf < WARN_MISMATCH_REL:
+            continue
+
+        gpoa = _diag_gpoa_wm2(row)
+        if gpoa is not None and gpoa < WARN_MIN_GPOA_WM2:
+            continue
+
+        stable_sky = row.get("stable_sky")
+        if stable_sky is not None and not bool(stable_sky):
+            continue
+
+        ts_local = tsu.astimezone(tz)
+        di = (ts_local.date() - d_start).days
+        if not (0 <= di < days_len):
+            continue
+        minutes = ts_local.hour * 60 + ts_local.minute
+        bi = int(minutes // dt_minutes)
+        if not (0 <= bi < bpd):
+            continue
+
+        key = (di, bi)
+        meteo_interpolated = bool(row.get("flag_meteo_interpolated"))
+        candidate_map[key] = {
+            "state": HEATMAP_STATE_WARN,
+            "label": WARN_LABEL_MISMATCH_INTERP if meteo_interpolated else WARN_LABEL_MISMATCH,
+            "tkey": _tkey(ts_local),
+            "mismatch_rel": _safe_float(row.get("mismatch_rel"), None),
+            "underperf_rel": underperf,
+            "gpoa_wm2": gpoa,
+            "meteo_interpolated": meteo_interpolated,
+            "meteo_qc_score": _safe_float(row.get("meteo_qc_score"), None),
+        }
+        per_day.setdefault(di, []).append((bi, underperf))
+
+    warn_map: Dict[Tuple[int, int], Dict[str, Any]] = {}
+    for di, items in per_day.items():
+        items = sorted(items, key=lambda x: x[0])
+        for idx, (bi, underperf) in enumerate(items):
+            prev_adj = idx > 0 and (bi - items[idx - 1][0] == 1)
+            next_adj = idx + 1 < len(items) and (items[idx + 1][0] - bi == 1)
+            persistent = prev_adj or next_adj
+            if persistent or underperf >= WARN_MISMATCH_REL_SINGLE:
+                key = (di, bi)
+                info = dict(candidate_map[key])
+                if bool(info.get("meteo_interpolated")):
+                    info["reason"] = "persistent_mismatch_interpolated_meteo" if persistent else "single_bin_high_mismatch_interpolated_meteo"
+                    info["warn_policy"] = "warn_under_interpolated_meteo_qc_guard"
+                else:
+                    info["reason"] = "persistent_mismatch" if persistent else "single_bin_high_mismatch"
+                    info["warn_policy"] = "warn_under_good_meteo"
+                warn_map[key] = info
+    return warn_map
 
 
 def _label_sev(label: str) -> int:
@@ -1114,6 +1248,8 @@ def _build_event_bin_map(
                             "event_id": event_id,
                             "label": str(label),
                             "state": _label_state(str(label)),
+                            "confidence": _safe_float(confidence, None),
+                            "novelty_score": _safe_float(novelty_score, None),
                             "tkey": _tkey(cur_bin),
                             "source_oper": ev.get("source_oper"),
                             "source_meteo": ev.get("source_meteo"),
@@ -1220,6 +1356,7 @@ def mppt_gnn_fdd_view(request: HttpRequest):
             "api_url": reverse("mppt_gnn_fdd_api"),
             "dump_url": reverse("mppt_gnn_fdd_dump_api"),
             "actions_url": reverse("mppt_gnn_fdd_actions_api"),
+            "export_pdf_url": reverse("mppt_gnn_fdd_export_pdf"),
         },
     )
 
@@ -1381,9 +1518,9 @@ def mppt_gnn_fdd_api(request: HttpRequest) -> JsonResponse:
                     labels[di][bi] = str(info["label"])
 
                     counts_by_label[str(info["label"])] = counts_by_label.get(str(info["label"]), 0) + 1
-                    if int(info["state"]) == 1:
+                    if int(info["state"]) == HEATMAP_STATE_OK:
                         counts_by_state["ok"] += 1
-                    elif int(info["state"]) == 2:
+                    elif int(info["state"]) == HEATMAP_STATE_CRIT:
                         counts_by_state["fault"] += 1
                     else:
                         counts_by_state["none"] += 1
@@ -1493,11 +1630,20 @@ def mppt_gnn_fdd_api(request: HttpRequest) -> JsonResponse:
                 "rca_label",
                 "detector_score",
                 "mismatch_rel",
+                "ewma_z",
+                "cusum_score",
+                "stable_sky",
                 "pac_real_w",
                 "p_ac_real_w",
                 "pac_model_w",
                 "g_poa",
+                "gpoa",
+                "gti",
+                "ghi",
                 "tcell_c",
+                "t_air_c",
+                "temp_air_c",
+                "temp_air",
                 "v_ac_v",
                 "vac_v",
                 "i_ac_a",
@@ -1505,6 +1651,12 @@ def mppt_gnn_fdd_api(request: HttpRequest) -> JsonResponse:
                 "v_dc_v",
                 "vdc_total_v",
                 "i_dc_a",
+                "meteo_qc_score",
+                "flag_meteo_missing",
+                "flag_meteo_low_confidence",
+                "flag_meteo_interpolated",
+                "flag_meteo_outlier",
+                "flag_meteo_artifact",
                 "source_oper",
                 "source_meteo",
                 "detector_version",
@@ -1573,9 +1725,19 @@ def mppt_gnn_fdd_api(request: HttpRequest) -> JsonResponse:
             )
 
         counts_by_label: Dict[str, int] = {}
-        counts_by_state: Dict[str, int] = {"none": 0, "ok": 0, "fault": 0}
+        counts_by_state: Dict[str, int] = {"none": 0, "ok": 0, "warn": 0, "fault": 0}
         best_score: Dict[Tuple[int, int], float] = {}
         coverage_map: Dict[Tuple[int, int], bool] = {}
+        diag_context: Dict[Tuple[int, int], Dict[str, Any]] = {}
+
+        warn_bin_map = _compute_warn_bin_map(
+            diag_rows=diag_rows,
+            tz=tz,
+            d_start=d_start,
+            days_len=len(days),
+            bpd=bpd,
+            dt_minutes=dt_minutes,
+        )
 
         # Base do heatmap = cobertura operativa observada na merged
         for r in merged_rows:
@@ -1599,13 +1761,13 @@ def mppt_gnn_fdd_api(request: HttpRequest) -> JsonResponse:
                 continue
 
             coverage_map[key] = True
-            grid[di][bi] = 1
+            grid[di][bi] = HEATMAP_STATE_OK
             if not tkeys[di][bi]:
                 tkeys[di][bi] = _tkey(ts_local)
             if not labels[di][bi]:
                 labels[di][bi] = "coverage_only"
 
-        # Overlay do diagnóstico 15 min
+        # Overlay do diagnóstico 15 min (detector plant-level)
         for r in diag_rows:
             tsu = r.get("ts_utc")
             if tsu is None:
@@ -1628,27 +1790,24 @@ def mppt_gnn_fdd_api(request: HttpRequest) -> JsonResponse:
             has_oper_diag = _has_useful_oper_data_from_diag_row(r)
             has_oper = bool(coverage_map.get(key)) or has_oper_diag
 
-            # Semântica correta para a tela full-state:
-            # 0 = cinza   -> sem operativos úteis do inversor
-            # 1 = verde   -> há operativos úteis e não há anomalia
-            # 2 = vermelho-> há operativos úteis e anomalia detectada
             if anomaly and has_oper:
-                state = 2
+                state = HEATMAP_STATE_CRIT
                 label = rca_label or "anomaly"
             elif has_oper:
-                state = 1
+                state = HEATMAP_STATE_OK
                 label = rca_label or ("normal" if valid else "coverage_only")
             else:
-                state = 0
+                state = HEATMAP_STATE_NONE
                 label = rca_label or ("invalid" if not valid else "no_oper_data")
 
             detector_score = _safe_float(r.get("detector_score"), 0.0) or 0.0
-            score = (10_000_000 if state == 2 else 1_000_000) + detector_score
+            score = (10_000_000 if state == HEATMAP_STATE_CRIT else 1_000_000) + detector_score
 
             prev = best_score.get(key)
             if prev is not None and score <= prev:
                 continue
             best_score[key] = score
+            diag_context[key] = dict(r)
 
             grid[di][bi] = state
             tkeys[di][bi] = _tkey(ts_local)
@@ -1658,40 +1817,74 @@ def mppt_gnn_fdd_api(request: HttpRequest) -> JsonResponse:
             if einfo:
                 event_ids[di][bi] = int(einfo["event_id"])
 
-        # Overlay final do event-level
+        # Overlay do event-level com política híbrida conservadora
         for key, einfo in event_best_info.items():
             di, bi = key
             cur_state = int(grid[di][bi] or 0)
             cur_label = labels[di][bi] or ""
-            should_overlay = False
+            diag_row = diag_context.get(key)
 
-            if int(einfo["state"]) > cur_state:
-                should_overlay = True
-            elif int(einfo["state"]) == cur_state and int(einfo["state"]) == 2:
-                should_overlay = True
-            elif cur_state == 0 and int(einfo["state"]) > 0:
-                should_overlay = True
+            event_state = int(einfo.get("state") or HEATMAP_STATE_NONE)
+            event_label = str(einfo.get("label") or "")
+            event_conf = _safe_float(einfo.get("confidence"), None)
+            meteo_allows_green = _diag_meteo_allows_green_refinement(diag_row)
 
-            if should_overlay:
-                grid[di][bi] = int(einfo["state"])
-                labels[di][bi] = str(einfo["label"])
+            resolved_state = cur_state
+            resolved_label = cur_label or event_label
+
+            if event_state == HEATMAP_STATE_CRIT:
+                resolved_state = HEATMAP_STATE_CRIT
+                resolved_label = event_label or cur_label or "anomaly"
+            elif event_label in BENIGN_LABELS:
+                if cur_state == HEATMAP_STATE_CRIT:
+                    if event_conf is not None and event_conf >= EVENT_GREEN_CONFIDENCE_MIN and meteo_allows_green:
+                        resolved_state = HEATMAP_STATE_OK
+                        resolved_label = event_label
+                    elif event_conf is not None and event_conf >= EVENT_WARN_CONFIDENCE_MIN and meteo_allows_green:
+                        resolved_state = HEATMAP_STATE_WARN
+                        resolved_label = WARN_LABEL_GUARDED
+                elif cur_state == HEATMAP_STATE_NONE:
+                    resolved_state = HEATMAP_STATE_OK
+                    resolved_label = event_label
+                else:
+                    resolved_label = event_label or resolved_label
+
+            if resolved_state != cur_state or resolved_label != cur_label:
+                grid[di][bi] = resolved_state
+                labels[di][bi] = resolved_label
+
+            if not event_ids[di][bi]:
                 event_ids[di][bi] = int(einfo["event_id"])
+            if not tkeys[di][bi]:
+                tkeys[di][bi] = einfo["tkey"]
+
+        # Overlay warn por mismatch moderado/persistente (não rebaixa bins críticos)
+        for key, winfo in warn_bin_map.items():
+            di, bi = key
+            cur_state = int(grid[di][bi] or 0)
+            if cur_state == HEATMAP_STATE_OK:
+                grid[di][bi] = HEATMAP_STATE_WARN
+                if not labels[di][bi] or labels[di][bi] in {"coverage_only", "normal", "curtailment_clipping", "meteo_bias"}:
+                    labels[di][bi] = str(winfo.get("label") or WARN_LABEL_MISMATCH)
                 if not tkeys[di][bi]:
-                    tkeys[di][bi] = einfo["tkey"]
-            elif not event_ids[di][bi]:
-                event_ids[di][bi] = int(einfo["event_id"])
-            elif cur_state == 2 and cur_label and cur_label.lower() in {"anomaly", "plant_wide_loss", "localized_loss"}:
-                labels[di][bi] = str(einfo["label"])
+                    tkeys[di][bi] = str(winfo.get("tkey") or "")
 
         for di in range(len(days)):
             for bi in range(bpd):
                 state = grid[di][bi]
-                label = labels[di][bi] or ("normal" if state == 1 else "anomaly" if state == 2 else "sem_diagnostico")
+                label = labels[di][bi] or (
+                    "normal" if state == HEATMAP_STATE_OK else
+                    WARN_LABEL_MISMATCH if state == HEATMAP_STATE_WARN else
+                    "anomaly" if state == HEATMAP_STATE_CRIT else
+                    "sem_diagnostico"
+                )
                 counts_by_label[label] = counts_by_label.get(label, 0) + 1
 
-                if state == 1:
+                if state == HEATMAP_STATE_OK:
                     counts_by_state["ok"] += 1
-                elif state == 2:
+                elif state == HEATMAP_STATE_WARN:
+                    counts_by_state["warn"] += 1
+                elif state == HEATMAP_STATE_CRIT:
                     counts_by_state["fault"] += 1
                 else:
                     counts_by_state["none"] += 1
@@ -1720,6 +1913,16 @@ def mppt_gnn_fdd_api(request: HttpRequest) -> JsonResponse:
                 "merged_rows_with_oper": sum(1 for r in merged_rows if _has_useful_oper_data_from_merged_row(r)),
                 "counts_by_label": counts_by_label,
                 "counts_by_state": counts_by_state,
+                "state_policy": {
+                    "name": "hybrid_warn_mismatch_v2",
+                    "warn_mismatch_rel": WARN_MISMATCH_REL,
+                    "warn_single_rel": WARN_MISMATCH_REL_SINGLE,
+                    "warn_min_gpoa_wm2": WARN_MIN_GPOA_WM2,
+                    "warn_min_qc_score": WARN_MIN_QC_SCORE,
+                    "warn_allows_interpolated_meteo": True,
+                    "event_green_confidence_min": EVENT_GREEN_CONFIDENCE_MIN,
+                    "event_warn_confidence_min": EVENT_WARN_CONFIDENCE_MIN,
+                },
                 "available": available_common,
                 "model_health": model_health,
                 "versions": version_summary,
@@ -1974,6 +2177,11 @@ def mppt_gnn_fdd_dump_api(request: HttpRequest) -> JsonResponse:
                 "status": selected_bin.get("mppt_status"),
             }
 
+        mismatch_rel_bin = _safe_float(selected_bin.get("mismatch"), None)
+        if mismatch_rel_bin is None:
+            mismatch_rel_bin = _safe_float(selected_bin.get("diag_mismatch_rel"), None)
+        warn_underperf_rel = _mismatch_underperformance(mismatch_rel_bin)
+
         bin_flags = {
             "diag_valid": selected_bin.get("diag_valid"),
             "diag_anomaly_flag": selected_bin.get("diag_anomaly_flag"),
@@ -1990,6 +2198,15 @@ def mppt_gnn_fdd_dump_api(request: HttpRequest) -> JsonResponse:
             "flag_inv_missing_all": selected_bin.get("flag_inv_missing_all"),
             "flag_inv_missing_partial": selected_bin.get("flag_inv_missing_partial"),
             "inv_coverage": selected_bin.get("inv_coverage"),
+            "heatmap_state_policy": "hybrid_warn_mismatch_v2",
+            "warn_mismatch_rel_threshold": WARN_MISMATCH_REL,
+            "warn_mismatch_rel_single": WARN_MISMATCH_REL_SINGLE,
+            "warn_min_qc_score": WARN_MIN_QC_SCORE,
+            "warn_allows_interpolated_meteo": True,
+            "warn_event_green_confidence_min": EVENT_GREEN_CONFIDENCE_MIN,
+            "warn_event_confidence_min": EVENT_WARN_CONFIDENCE_MIN,
+            "warn_underperf_rel": warn_underperf_rel,
+            "warn_interpolated_meteo_note": "Warn por mismatch pode permanecer ativo sob meteo 15 min interpolada quando QC local e confiança basal permitirem.",
         }
 
         source_summary = {
@@ -2080,6 +2297,134 @@ def mppt_gnn_fdd_dump_api(request: HttpRequest) -> JsonResponse:
     except Exception as e:
         logger.exception("mppt_gnn_fdd_dump_api failed")
         return _error_json(str(e), trace=traceback.format_exc())
+
+
+
+
+def _build_export_event_rows(*, plant_id: int, tz: ZoneInfo, dt0_utc: datetime, dt1_utc: datetime, detector_version: Optional[str], source_oper: Optional[str], source_meteo: Optional[str], event_classifier_version: Optional[str], mppt: int) -> List[Dict[str, Any]]:
+    if FaultEvent is None:
+        return []
+
+    q = FaultEvent.objects.filter(
+        plant_id=plant_id,
+        ts_start_utc__lt=dt1_utc,
+        ts_end_utc__gte=dt0_utc,
+    ).order_by("ts_start_utc")
+    if detector_version:
+        q = q.filter(detector_version=detector_version)
+    if source_oper:
+        q = q.filter(source_oper__startswith=source_oper)
+    if source_meteo:
+        q = q.filter(source_meteo=source_meteo)
+
+    events = list(q[:180])
+    if not events:
+        return []
+
+    pred_map = _best_pred_rows_for_events(
+        [int(e.id) for e in events],
+        event_classifier_version=event_classifier_version,
+        mppt=mppt,
+    )
+
+    rows: List[Dict[str, Any]] = []
+    for ev in events:
+        pr = pred_map.get(int(ev.id)) or {}
+        pred_label = str(pr.get("pred_label") or "").strip()
+        pred_mppt = pr.get("mppt")
+        pred_txt = pred_label or "-"
+        if pred_mppt:
+            pred_txt = f"MPPT{pred_mppt}: {pred_txt}"
+        rows.append({
+            "event_id": int(ev.id),
+            "start_local": ev.ts_start_utc.astimezone(tz).strftime("%Y-%m-%d %H:%M"),
+            "end_local": ev.ts_end_utc.astimezone(tz).strftime("%Y-%m-%d %H:%M"),
+            "status": str(getattr(ev, "status", "") or "-"),
+            "final_label": str(getattr(ev, "final_label", "") or getattr(ev, "event_label_prelim", "") or "-"),
+            "mppt_pred": pred_txt,
+            "confidence": pr.get("confidence", getattr(ev, "confidence", None)),
+            "severity_score": getattr(ev, "severity_score", None),
+            "energy_loss_wh": getattr(ev, "energy_loss_wh", None),
+        })
+    return rows
+
+
+@require_GET
+@login_required
+def mppt_gnn_fdd_export_pdf(request: HttpRequest) -> HttpResponse:
+    try:
+        if build_mppt_gnn_pdf_report is None:
+            return HttpResponse("Serviço de geração PDF não disponível.", content_type="text/plain; charset=utf-8", status=500)
+
+        plant_id = int(request.GET.get("plant_id") or request.GET.get("plant") or 0)
+        if not plant_id:
+            return HttpResponse("plant_id obrigatório", content_type="text/plain; charset=utf-8", status=400)
+
+        plant = PVPlant.objects.filter(id=plant_id).first()
+        if plant is None:
+            return HttpResponse("Plant not found", content_type="text/plain; charset=utf-8", status=404)
+        if not (request.user.is_superuser or getattr(plant, "owner_id", None) == request.user.id):
+            return HttpResponse("Forbidden", content_type="text/plain; charset=utf-8", status=403)
+
+        api_response = mppt_gnn_fdd_api(request)
+        payload = json.loads(api_response.content.decode("utf-8"))
+        if not payload.get("ok"):
+            return HttpResponse(str(payload.get("error") or "Falha ao montar payload do relatório."), content_type="text/plain; charset=utf-8", status=400)
+
+        tz = _plant_tz(plant)
+        d_end = _parse_date(request.GET.get("end"), default=date.today())
+        d_start = _parse_date(request.GET.get("start"), default=(d_end - timedelta(days=7)))
+        if d_start > d_end:
+            d_start, d_end = d_end, d_start
+        dt0_utc = datetime.combine(d_start, time.min, tzinfo=tz).astimezone(dt_tz.utc)
+        dt1_utc = datetime.combine(d_end + timedelta(days=1), time.min, tzinfo=tz).astimezone(dt_tz.utc)
+
+        detector_version = (request.GET.get("detector_version") or "").strip() or None
+        event_classifier_version = _resolve_event_classifier_version(request.GET, default=None)
+        source_oper = (request.GET.get("source_oper") or "").strip() or None
+        source_meteo = (request.GET.get("source_meteo") or "").strip() or None
+        mppt = _parse_int(request.GET.get("mppt"), default=0, lo=0, hi=32)
+
+        event_rows = _build_export_event_rows(
+            plant_id=plant_id,
+            tz=tz,
+            dt0_utc=dt0_utc,
+            dt1_utc=dt1_utc,
+            detector_version=detector_version,
+            source_oper=source_oper,
+            source_meteo=source_meteo,
+            event_classifier_version=event_classifier_version,
+            mppt=mppt,
+        )
+
+        filters = {
+            "mppt": mppt,
+            "mppt_ui": request.GET.get("mppt") or "all",
+            "view_mode": (request.GET.get("view_mode") or "full").strip().lower(),
+            "detector_version": detector_version,
+            "event_classifier_version": event_classifier_version,
+            "trained_model_version": _resolve_trained_model_version(request.GET, default=None),
+            "source_oper": source_oper,
+            "source_meteo": source_meteo,
+        }
+
+        generated_at_local = datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S %Z")
+        pdf_bytes = build_mppt_gnn_pdf_report(
+            plant_name=str(getattr(plant, "nome", f"Plant {plant_id}")),
+            filters=filters,
+            payload=payload,
+            event_rows=event_rows,
+            generated_at_local=generated_at_local,
+            user_label=str(getattr(request.user, "username", "") or getattr(request.user, "email", "") or request.user.pk),
+        )
+
+        filename = f"mppt_gnn_fdd_report_plant{plant_id}_{d_start.isoformat()}_{d_end.isoformat()}.pdf"
+        resp = HttpResponse(pdf_bytes, content_type="application/pdf")
+        resp["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return resp
+    except Exception as e:
+        logger.exception("mppt_gnn_fdd_export_pdf failed")
+        return HttpResponse(f"Erro ao gerar PDF: {e}", content_type="text/plain; charset=utf-8", status=500)
 
 
 # ============================================================

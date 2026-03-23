@@ -56,6 +56,7 @@ from core.views.mppt_gnn_fdd import (
     mppt_gnn_fdd_api,
     mppt_gnn_fdd_dump_api,
     mppt_gnn_fdd_actions_api,
+    mppt_gnn_fdd_export_pdf,
 )
 
 # ---------- pvmodules agrupado e namespaced ----------
@@ -121,6 +122,7 @@ urlpatterns = [
     path("dashboard/fdd/mppt-gnn/api/", mppt_gnn_fdd_api, name="mppt_gnn_fdd_api"),
     path("dashboard/fdd/mppt-gnn/dump/", mppt_gnn_fdd_dump_api, name="mppt_gnn_fdd_dump_api"),
     path("dashboard/fdd/mppt-gnn/actions/", mppt_gnn_fdd_actions_api, name="mppt_gnn_fdd_actions_api"),
+    path("dashboard/fdd/mppt-gnn/export-pdf/", mppt_gnn_fdd_export_pdf, name="mppt_gnn_fdd_export_pdf"),
 
     #INVERSOR
     path("inverters/", inverter_list_view, name="inverter_list"),

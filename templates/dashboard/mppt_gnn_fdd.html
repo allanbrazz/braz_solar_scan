@@ -249,6 +249,7 @@
     :root{
       --hm-none: #a0a2a786;
       --hm-ok:   #46e68c;
+      --hm-warn: #ffcf5a;
       --hm-crit: #ff5a6e;
       --hm-sel:  rgba(90,200,255,.95);
     }
@@ -426,7 +427,8 @@
      class="dash"
      data-api="{{ api_url|default:'' }}"
      data-dump="{{ dump_url|default:'' }}"
-     data-actions="{{ actions_url|default:'' }}">
+     data-actions="{{ actions_url|default:'' }}"
+     data-export="{{ export_pdf_url|default:'' }}">
 
   <div class="card glass span-12">
     <div class="page-head">
@@ -436,7 +438,7 @@
           Heatmap coverage-first:
           <b>cinza = sem operativos do inversor</b>,
           <b>verde = bin com operativos e sem anomalia</b>,
-          <b>vermelho = bin com operativos e anomalia detectada</b>.
+          <b>âmbar = mismatch moderado/persistente ou refinamento benigno com guarda</b>, <b>vermelho = bin com operativos e anomalia confirmada</b>.
           Ao clicar no bin, o drawer mostra o evento, o diagnóstico, os dados agregados do inversor,
           os dados canônicos por MPPT <b>sem duplicar AC indevidamente</b>,
           e o <b>registro operativo bruto completo</b>.
@@ -568,6 +570,16 @@
             <span class="label">Detectar + Inferir</span>
           </button>
 
+          <button class="btn-glow secondary" id="btnExportPdf" type="button" title="Exportar relatório PDF de síntese operativa do período selecionado">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M7 3h7l5 5v11a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z" stroke="rgba(233,246,255,.92)" stroke-width="2" stroke-linejoin="round"/>
+              <path d="M14 3v5h5" stroke="rgba(233,246,255,.92)" stroke-width="2" stroke-linejoin="round"/>
+              <path d="M12 11v6" stroke="rgba(233,246,255,.92)" stroke-width="2" stroke-linecap="round"/>
+              <path d="m9.5 14.5 2.5 2.5 2.5-2.5" stroke="rgba(233,246,255,.92)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <span class="label">Exportar PDF</span>
+          </button>
+
           <button class="btn-glow danger" id="btnReset" type="button" title="Limpar heatmap/seleção">
             <svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
               <path d="M21 12a9 9 0 1 1-2.64-6.36" stroke="rgba(233,246,255,.92)" stroke-width="2" stroke-linecap="round"/>
@@ -591,6 +603,7 @@
     <div class="kpi">
       <div class="tile"><p class="t">diag_count</p><p class="v" id="kpiPred">—</p><p class="s">bins/linhas carregadas</p></div>
       <div class="tile"><p class="t">Operativo normal</p><p class="v" id="kpiOk">—</p><p class="s">verde</p></div>
+      <div class="tile"><p class="t">Warn / atenção</p><p class="v" id="kpiWarn">—</p><p class="s">âmbar · mismatch/refino</p></div>
       <div class="tile"><p class="t">Operativo anômalo</p><p class="v" id="kpiFault">—</p><p class="s">vermelho</p></div>
       <div class="tile"><p class="t">Sem diagnóstico</p><p class="v" id="kpiNone">—</p><p class="s">cinza</p></div>
       <div class="tile"><p class="t">Detector</p><p class="v" id="kpiDetector">—</p><p class="s">plant-level</p></div>
@@ -666,6 +679,7 @@
           Linhas = dias • Colunas = bins de <b id="hmBinLbl">15</b> min •
           cinza = sem diagnóstico útil / inválido / sem operação útil •
           verde = diagnóstico válido e normal •
+          âmbar = subdesempenho moderado/persistente, inclusive sob meteo 15 min interpolada quando o QC local permitir, ou benigno refinado com guarda •
           vermelho = diagnóstico válido e anômalo.
         </div>
       </div>
@@ -673,6 +687,7 @@
       <div class="legend">
         <span class="badge"><span class="dot" style="background:var(--hm-none)"></span>sem diagnóstico / inválido</span>
         <span class="badge"><span class="dot" style="background:var(--hm-ok)"></span>normal</span>
+        <span class="badge"><span class="dot" style="background:var(--hm-warn)"></span>warn</span>
         <span class="badge"><span class="dot" style="background:var(--hm-crit)"></span>anômalo</span>
         <span class="badge"><span class="mono" id="hmBadgeTxt">—</span></span>
       </div>
@@ -848,6 +863,9 @@
     p_dc_w: "Potência DC agregada [W]",
     e_ac_wh_15: "Energia AC 15 min [Wh]",
     mismatch: "Mismatch",
+    warn_mismatch: "Warn por mismatch",
+    warn_mismatch_interp: "Warn por mismatch sob meteo interpolada",
+    warn_refined_guard: "Warn por refinamento guardado",
 
     g_wm2: "Irradiância [W/m²]",
     gti: "GTI [W/m²]",
@@ -1357,12 +1375,14 @@
   function sevColor(cls){
     const cs = getComputedStyle(document.documentElement);
     if (cls === "crit") return cs.getPropertyValue("--hm-crit").trim();
+    if (cls === "warn") return cs.getPropertyValue("--hm-warn").trim();
     if (cls === "ok")   return cs.getPropertyValue("--hm-ok").trim();
     return cs.getPropertyValue("--hm-none").trim();
   }
 
   function stateToClass(state){
-    if (state === 2) return "crit";
+    if (state === 3) return "crit";
+    if (state === 2) return "warn";
     if (state === 1) return "ok";
     return "none";
   }
@@ -1691,18 +1711,20 @@
       }
     }
 
-    let ok = 0, crit = 0, none = 0;
+    let ok = 0, warn = 0, crit = 0, none = 0;
     for (let di = 0; di < days.length; di++){
       for (let ti = 0; ti < bpd; ti++){
         const state = (grid[di] && grid[di][ti] !== undefined) ? grid[di][ti] : 0;
-        if (state === 2) crit++;
+        if (state === 3) crit++;
+        else if (state === 2) warn++;
         else if (state === 1) ok++;
         else none++;
       }
     }
 
-    $("hmBadgeTxt").textContent = `normal=${ok} | anômalo=${crit} | sem_diagnóstico=${none}`;
+    $("hmBadgeTxt").textContent = `normal=${ok} | warn=${warn} | anômalo=${crit} | sem_diagnóstico=${none}`;
     $("kpiOk").textContent = String(ok);
+    if ($("kpiWarn")) $("kpiWarn").textContent = String(warn);
     $("kpiFault").textContent = String(crit);
     $("kpiNone").textContent = String(none);
 
@@ -2134,7 +2156,7 @@
       const state = (g.grid[h.di] && g.grid[h.di][h.ti] !== undefined) ? g.grid[h.di][h.ti] : 0;
       const cls = stateToClass(state);
       if (tip){
-        tip.textContent = `${h.day} ${h.ts} • class=${cls} • label=${h.label || "—"} • event_id=${h.eventId || "—"} • tkey=${h.tkey || "—"}`;
+        tip.textContent = `${h.day} ${h.ts} • state=${cls} • label=${h.label || "—"} • event_id=${h.eventId || "—"} • tkey=${h.tkey || "—"}`;
       }
     });
 
@@ -2230,10 +2252,38 @@
     }
   }
 
+  async function runExportPdf(){
+    const page = $("mpptPage");
+    const exportUrl = page ? page.dataset.export : null;
+    if (!exportUrl){
+      alert("Export URL não configurada.");
+      return;
+    }
+    const btn = $("btnExportPdf");
+    try{
+      const payload = currentPayloadBase();
+      const params = new URLSearchParams();
+      Object.entries(payload).forEach(([k, v]) => {
+        if (v === undefined || v === null) return;
+        params.set(k, String(v));
+      });
+      setBtnLoading(btn, true, "Exportar PDF", "Gerando PDF...");
+      setStatus(true, "Gerando relatório PDF com síntese operativa, saúde do modelo, mapa de bins e histórico...", false);
+      window.location.href = `${exportUrl}?${params.toString()}`;
+      setTimeout(() => setStatus(false), 1800);
+    }catch(err){
+      console.error(err);
+      setStatus(true, `Erro exportação PDF: ${String(err.message || err)}`);
+    }finally{
+      setTimeout(() => setBtnLoading(btn, false, "Exportar PDF", "Gerando PDF..."), 1200);
+    }
+  }
+
   function bindControls(){
     $("btnRefresh")?.addEventListener("click", refreshHeatmap);
     $("btnTrain")?.addEventListener("click", runTrain);
     $("btnInfer")?.addEventListener("click", runInfer);
+    $("btnExportPdf")?.addEventListener("click", runExportPdf);
 
     $("btnReset")?.addEventListener("click", () => {
       clearSelection();
@@ -2250,6 +2300,7 @@
       drawHeatmapCanvas(empty);
       $("kpiPred").textContent = "—";
       $("kpiOk").textContent = "—";
+      if ($("kpiWarn")) $("kpiWarn").textContent = "—";
       $("kpiFault").textContent = "—";
       $("kpiNone").textContent = "—";
       $("kpiDetector").textContent = "—";

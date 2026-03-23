@@ -158,17 +158,17 @@ def summarize_model_health(*, model_version: str, meta: Dict[str, Any], art: Opt
     status_note = "Sem validação temporal confiável para sustentar o uso operacional do classificador."
 
     if metrics_source == "validation" and f1_macro is not None and balanced_accuracy is not None:
-        if validation_samples < 20 or len(validation_days) < 3 or (coverage_fraction is not None and coverage_fraction < 0.10):
+        if validation_samples < 50 or len(validation_days) < 5 or (coverage_fraction is not None and coverage_fraction < 0.10):
             status = "atencao"
             status_label = "Atenção"
             status_tone = "warn"
             status_note = "Existe validação temporal, mas a cobertura do holdout ainda é curta para alta confiança operacional."
-        elif f1_macro >= 0.85 and balanced_accuracy >= 0.80:
+        elif f1_macro >= 0.75 and balanced_accuracy >= 0.70 and validation_samples >= 500 and len(validation_days) >= 14:
             status = "confiavel"
             status_label = "Confiável"
             status_tone = "ok"
             status_note = "As métricas validadas estão em faixa adequada para uso operacional assistido."
-        elif f1_macro >= 0.70 and balanced_accuracy >= 0.65:
+        elif f1_macro >= 0.55 and balanced_accuracy >= 0.60 and validation_samples >= 300 and len(validation_days) >= 10:
             status = "atencao"
             status_label = "Atenção"
             status_tone = "warn"

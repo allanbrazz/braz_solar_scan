@@ -95,16 +95,26 @@ def build_node_features(
     i_n = scaler.n_pos(i0, scaler.mppt_idc_p99)
     pdc_n = scaler.n_pos(pdc0, scaler.mppt_pdc_p99)
 
-    vac_n = None
-    if vac_raw is not None:
+    # IMPORTANTE: manter dimensionalidade fixa entre janelas.
+    # Mesmo quando VAC/frequência não existirem para um dia/fonte,
+    # as features precisam continuar presentes para evitar erro de concatenação
+    # no dataset de treino (ex.: 17 vs 19 features por passo temporal).
+    if vac_raw is None:
+        vac_n = np.zeros(T, dtype=float)
+    else:
         vac_n = scaler.n_pos(_nan_to_0(vac_raw), getattr(scaler, "vac_p99", 1000.0))
 
-    freq_n = None
-    if freq_raw is not None:
-        f0 = _nan_to_0(freq_raw)
-        # normalização suave em torno de 50/60 Hz
-        base = 60.0 if np.nanmedian(f0[np.isfinite(f0)]) > 55.0 else 50.0
-        freq_n = np.clip((f0 - base) / 5.0, -1.0, 1.0)
+    if freq_raw is None:
+        freq_n = np.zeros(T, dtype=float)
+    else:
+        f0 = np.asarray(freq_raw, float)
+        finite_f = f0[np.isfinite(f0)]
+        if finite_f.size == 0:
+            freq_n = np.zeros(T, dtype=float)
+        else:
+            # normalização suave em torno de 50/60 Hz
+            base = 60.0 if np.nanmedian(finite_f) > 55.0 else 50.0
+            freq_n = np.clip((np.nan_to_num(f0, nan=base) - base) / 5.0, -1.0, 1.0)
 
     # peers (nanmedian/nansum)
     i_med = np.nanmedian(i_raw, axis=0)  # [T]
@@ -153,11 +163,9 @@ def build_node_features(
     add("dpac", np.tile(dpac[None, :], (N, 1)))
     add("dmm", np.tile(dmm[None, :], (N, 1)))
 
-    if vac_n is not None:
-        add("vac_n", np.tile(vac_n[None, :], (N, 1)))
-
-    if freq_n is not None:
-        add("freq_n", np.tile(freq_n[None, :], (N, 1)))
+    # Sempre presentes para manter schema fixo entre todas as janelas.
+    add("vac_n", np.tile(vac_n[None, :], (N, 1)))
+    add("freq_n", np.tile(freq_n[None, :], (N, 1)))
 
     X = np.stack(feats, axis=0)     # [F,N,T]
     X = np.transpose(X, (1, 2, 0))  # [N,T,F]
