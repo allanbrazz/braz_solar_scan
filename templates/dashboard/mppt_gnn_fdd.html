@@ -123,6 +123,72 @@
     .kpi .v{ font-size:1.15rem; font-weight:900; margin:0; }
     .kpi .s{ margin:.2rem 0 0; font-size:.82rem; opacity:.78; overflow-wrap:anywhere; }
 
+    .model-health-grid{
+      display:grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      gap:.75rem;
+    }
+    .model-health-tile{
+      padding:.9rem .95rem;
+      border-radius:16px;
+      border:1px solid rgba(255,255,255,.12);
+      background: rgba(255,255,255,.05);
+      min-width:0;
+    }
+    .model-health-tile .t{ font-size:.82rem; opacity:.78; margin:0 0 .2rem; }
+    .model-health-tile .v{ font-size:1.1rem; font-weight:900; margin:0; }
+    .model-health-tile .s{ margin:.2rem 0 0; font-size:.82rem; opacity:.78; overflow-wrap:anywhere; line-height:1.35; }
+    .model-health-status{
+      display:inline-flex; align-items:center; gap:.45rem;
+      padding:.28rem .7rem; border-radius:999px;
+      font-size:.88rem; font-weight:800;
+      border:1px solid rgba(255,255,255,.16); background: rgba(255,255,255,.06);
+    }
+    .model-health-status.ok{ border-color: rgba(70,230,140,.35); background: rgba(70,230,140,.12); }
+    .model-health-status.warn{ border-color: rgba(255,210,90,.35); background: rgba(255,210,90,.12); }
+    .model-health-status.crit{ border-color: rgba(255,90,110,.35); background: rgba(255,90,110,.12); }
+    .model-health-status.neutral{ border-color: rgba(255,255,255,.16); background: rgba(255,255,255,.06); }
+
+    .modal-overlay{
+      position:fixed; inset:0; z-index:65;
+      background: rgba(2,8,20,.72);
+      backdrop-filter: blur(6px);
+      display:none;
+      align-items:center; justify-content:center;
+      padding:18px;
+    }
+    .modal-overlay.open{ display:flex; }
+    .model-modal{
+      width:min(1180px, 96vw);
+      max-height:92vh;
+      border-radius:20px;
+      border:1px solid rgba(255,255,255,.12);
+      background: rgba(12,18,32,.98);
+      box-shadow:0 24px 60px rgba(0,0,0,.42);
+      overflow:hidden;
+      display:flex; flex-direction:column;
+    }
+    .model-modal .hd{
+      padding:14px 16px 12px;
+      border-bottom:1px solid rgba(255,255,255,.10);
+      display:flex; gap:12px; align-items:flex-start; justify-content:space-between; flex-wrap:wrap;
+    }
+    .model-modal .title{ margin:0; font-size:1.05rem; font-weight:900; }
+    .model-modal .meta{ margin:.25rem 0 0; opacity:.82; line-height:1.35; }
+    .model-modal .body{ padding:14px 16px 18px; overflow:auto; }
+    .matrix-wrap{ overflow:auto; border:1px solid rgba(255,255,255,.10); border-radius:14px; background: rgba(255,255,255,.03); }
+    table.matrix, table.report{
+      width:100%; border-collapse:collapse; min-width:560px;
+    }
+    table.matrix th, table.matrix td, table.report th, table.report td{
+      padding:.55rem .65rem; border-bottom:1px solid rgba(255,255,255,.08); text-align:right;
+    }
+    table.matrix th:first-child, table.matrix td:first-child, table.report th:first-child, table.report td:first-child{ text-align:left; }
+    table.matrix thead th, table.report thead th{
+      position:sticky; top:0; background: rgba(12,18,32,.98); z-index:1;
+    }
+    .report-note{ opacity:.8; margin:.2rem 0 0; line-height:1.35; }
+
     .hm-wrap{
       width:100%;
       border:1px solid rgba(255,255,255,.12);
@@ -263,6 +329,56 @@
       font-weight:800;
     }
 
+    .meteo-health{
+      border:1px solid rgba(255,255,255,.12);
+      border-radius:14px;
+      background: rgba(255,255,255,.035);
+      padding:.85rem .9rem;
+      display:grid;
+      gap:.75rem;
+    }
+    .meteo-health-main{
+      display:flex;
+      gap:.8rem;
+      align-items:flex-start;
+      justify-content:space-between;
+      flex-wrap:wrap;
+    }
+    .meteo-health-title{ margin:0; font-size:.96rem; font-weight:800; }
+    .meteo-health-sub{ margin:.18rem 0 0; opacity:.82; line-height:1.35; }
+    .meteo-health-score{ min-width:110px; text-align:right; }
+    .meteo-health-score .v{ font-size:1.15rem; font-weight:900; }
+    .meteo-health-score .k{ opacity:.75; font-size:.78rem; }
+    .meteo-chips{ display:flex; flex-wrap:wrap; gap:.45rem; }
+    .meteo-chip{
+      display:inline-flex; align-items:center; gap:.4rem;
+      padding:.26rem .6rem; border-radius:999px;
+      font-size:.84rem; font-weight:700;
+      border:1px solid rgba(255,255,255,.14); background: rgba(255,255,255,.06);
+    }
+    .meteo-chip.ok{ border-color: rgba(70,230,140,.35); background: rgba(70,230,140,.10); }
+    .meteo-chip.warn{ border-color: rgba(255,210,90,.35); background: rgba(255,210,90,.10); }
+    .meteo-chip.crit{ border-color: rgba(255,90,110,.35); background: rgba(255,90,110,.10); }
+    .meteo-chip.neutral{ border-color: rgba(255,255,255,.14); background: rgba(255,255,255,.06); }
+    .meteo-facts{
+      display:grid;
+      grid-template-columns: repeat(2, minmax(0,1fr));
+      gap:.6rem;
+    }
+    .meteo-fact{
+      border:1px solid rgba(255,255,255,.10);
+      border-radius:12px;
+      background: rgba(10,20,40,.22);
+      padding:.55rem .65rem;
+      min-width:0;
+    }
+    .meteo-fact .k{ display:block; opacity:.75; font-size:.78rem; }
+    .meteo-fact .v{ display:block; font-weight:800; margin-top:.12rem; overflow-wrap:anywhere; }
+    @media (max-width: 640px){
+      .meteo-facts{ grid-template-columns:1fr; }
+      .meteo-health-score{ text-align:left; }
+    }
+
     table.kv{
       width:100%;
       border-collapse:collapse;
@@ -297,6 +413,10 @@
 
     @media (max-width: 1100px){
       .kpi{ grid-template-columns: repeat(2, minmax(0,1fr)); }
+      .model-health-grid{ grid-template-columns: repeat(2, minmax(0,1fr)); }
+    }
+    @media (max-width: 680px){
+      .model-health-grid{ grid-template-columns: 1fr; }
     }
   </style>
 {% endblock %}
@@ -389,9 +509,15 @@
       </div>
 
       <div class="ctl sm">
-        <label for="model_version">model_version</label>
-        <input id="model_version" list="modelVersionList" type="text" value="{{ model_version|default:'event_rules_v2' }}">
-        <datalist id="modelVersionList"></datalist>
+        <label for="event_classifier_version">Classificador de evento</label>
+        <input id="event_classifier_version" list="eventClassifierVersionList" type="text" value="{{ event_classifier_version|default:'event_rules_v2' }}">
+      </div>
+
+      <div class="ctl">
+        <label for="trained_model_version">Modelo treinado (saúde)</label>
+        <input id="trained_model_version" list="trainedModelVersionList" type="text" value="{{ trained_model_version|default:'' }}">
+        <datalist id="eventClassifierVersionList"></datalist>
+  <datalist id="trainedModelVersionList"></datalist>
       </div>
 
       <div class="ctl sm">
@@ -422,7 +548,7 @@
             <span class="label">Atualizar</span>
           </button>
 
-          <button class="btn-glow secondary" id="btnTrain" type="button" title="No MVP event_rules_v2 o treino está desabilitado">
+          <button class="btn-glow secondary" id="btnTrain" type="button" title="O treino desta tela alimenta apenas o bundle do modelo treinado">
             <svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
               <path d="M4 20V8" stroke="rgba(233,246,255,.92)" stroke-width="2" stroke-linecap="round"/>
               <path d="M8 20V4" stroke="rgba(233,246,255,.92)" stroke-width="2" stroke-linecap="round"/>
@@ -467,8 +593,68 @@
       <div class="tile"><p class="t">Operativo normal</p><p class="v" id="kpiOk">—</p><p class="s">verde</p></div>
       <div class="tile"><p class="t">Operativo anômalo</p><p class="v" id="kpiFault">—</p><p class="s">vermelho</p></div>
       <div class="tile"><p class="t">Sem diagnóstico</p><p class="v" id="kpiNone">—</p><p class="s">cinza</p></div>
-      <div class="tile"><p class="t">Model</p><p class="v" id="kpiModel">—</p><p class="s">model_version</p></div>
+      <div class="tile"><p class="t">Detector</p><p class="v" id="kpiDetector">—</p><p class="s">plant-level</p></div>
+      <div class="tile"><p class="t">Classificador evento</p><p class="v" id="kpiEventClassifier">—</p><p class="s">FaultEventMPPT</p></div>
+      <div class="tile"><p class="t">Modelo treinado</p><p class="v" id="kpiTrainedModel">—</p><p class="s">health/meta.json</p></div>
       <div class="tile"><p class="t">Intervalo</p><p class="v" id="kpiRange">—</p><p class="s">start → end</p></div>
+    </div>
+  </div>
+
+  <div class="card glass span-12">
+    <div class="page-head">
+      <div style="min-width:0;">
+        <h3 style="margin:0;">Saúde do modelo</h3>
+        <div class="sub">
+          Resumo sintético do bundle de métricas salvo em <span class="mono">meta.json</span>
+          para o <b>trained_model_version</b> selecionado.
+        </div>
+      </div>
+      <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+        <button class="btn-glow secondary" id="btnModelMetrics" type="button" disabled>
+          <svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M4 19V5" stroke="rgba(233,246,255,.92)" stroke-width="2" stroke-linecap="round"/>
+            <path d="M10 19V9" stroke="rgba(233,246,255,.92)" stroke-width="2" stroke-linecap="round"/>
+            <path d="M16 19V13" stroke="rgba(233,246,255,.92)" stroke-width="2" stroke-linecap="round"/>
+            <path d="M22 19V3" stroke="rgba(233,246,255,.92)" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+          <span class="label">Ver métricas avançadas</span>
+        </button>
+      </div>
+    </div>
+
+    <div style="height:.8rem"></div>
+
+    <div class="model-health-grid">
+      <div class="model-health-tile">
+        <p class="t">Status visual</p>
+        <div id="modelHealthStatus" class="model-health-status neutral">Sem métricas</div>
+        <p class="s" id="modelHealthStatusNote">Atualize o painel para carregar a saúde do modelo.</p>
+      </div>
+      <div class="model-health-tile">
+        <p class="t">Versão do modelo</p>
+        <p class="v mono" id="modelHealthVersion">—</p>
+        <p class="s" id="modelHealthScope">Sem fonte de avaliação carregada</p>
+      </div>
+      <div class="model-health-tile">
+        <p class="t">Data do treino</p>
+        <p class="v mono" id="modelHealthTrainedAt">—</p>
+        <p class="s">Timestamp do bundle salvo</p>
+      </div>
+      <div class="model-health-tile">
+        <p class="t">F1 macro validado</p>
+        <p class="v mono" id="modelHealthF1">—</p>
+        <p class="s">Holdout temporal / validação</p>
+      </div>
+      <div class="model-health-tile">
+        <p class="t">Balanced accuracy</p>
+        <p class="v mono" id="modelHealthBalanced">—</p>
+        <p class="s">Média do recall por classe</p>
+      </div>
+      <div class="model-health-tile">
+        <p class="t">Cobertura da validação</p>
+        <p class="v mono" id="modelHealthCoverage">—</p>
+        <p class="s">Frações/dias/amostras do holdout</p>
+      </div>
     </div>
   </div>
 
@@ -539,6 +725,11 @@
     </div>
 
     <div class="detail-section">
+      <h4>Confiabilidade meteo</h4>
+      <div id="detailMeteoHealth" class="meteo-health"></div>
+    </div>
+
+    <div class="detail-section">
       <h4>Evento</h4>
       <table class="kv" id="detailEvent"></table>
     </div>
@@ -605,6 +796,45 @@
   </div>
 </aside>
 
+<div id="modelMetricsModal" class="modal-overlay" aria-hidden="true">
+  <div class="model-modal">
+    <div class="hd">
+      <div style="min-width:0;">
+        <h3 class="title">Métricas avançadas do modelo</h3>
+        <div class="meta" id="modelMetricsMeta">—</div>
+      </div>
+      <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+        <button class="btn-glow danger" type="button" id="btnCloseModelMetrics">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M6 6l12 12M18 6 6 18" stroke="rgba(233,246,255,.92)" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+          <span class="label">Fechar</span>
+        </button>
+      </div>
+    </div>
+    <div class="body">
+      <div class="detail-section">
+        <h4>Resumo técnico</h4>
+        <table class="kv" id="modelMetricsSummary"></table>
+      </div>
+      <div class="detail-section">
+        <h4>Matriz de confusão</h4>
+        <div class="report-note">Linhas = classe real • Colunas = classe prevista</div>
+        <div id="modelMetricsMatrix" class="matrix-wrap"></div>
+      </div>
+      <div class="detail-section">
+        <h4>Matriz de confusão normalizada</h4>
+        <div class="report-note">Normalização por classe real (linha).</div>
+        <div id="modelMetricsMatrixNorm" class="matrix-wrap"></div>
+      </div>
+      <div class="detail-section">
+        <h4>Relatório por classe</h4>
+        <div id="modelMetricsReport" class="matrix-wrap"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
   const $ = (id) => document.getElementById(id);
 
@@ -628,6 +858,11 @@
     t_air_c: "Temperatura do ar [°C]",
     wind_speed: "Velocidade do vento [m/s]",
     rh: "UR [%]",
+    meteo_qc_score: "Score de QC meteo",
+    flag_meteo_low_confidence: "Meteo baixa confiança",
+    flag_meteo_interpolated: "Fonte meteo interpolada",
+    flag_meteo_outlier: "Outlier meteo",
+    flag_meteo_artifact: "Artefato meteo",
     flag_meteo_missing: "Meteo missing",
 
     vdc_total_v: "Vdc total [V]",
@@ -704,7 +939,8 @@
     pred_label: "Pred label",
     proba: "Probabilidades",
     contribution: "Contribuições",
-    model_version: "Model version",
+    event_classifier_version: "Event classifier version",
+    trained_model_version: "Trained model version",
     policy: "Policy",
     p_ac_mppt_sum_w: "P AC ΣMPPT [W]",
     p_ac_agg_w: "P AC AGG [W]",
@@ -744,6 +980,119 @@
     return FIELD_LABELS[s] || `${humanizeKey(s)} (${s})`;
   }
 
+  function boolish(v){
+    if (typeof v === "boolean") return v;
+    if (typeof v === "number") return Number.isFinite(v) && v !== 0;
+    const s = String(v ?? "").trim().toLowerCase();
+    return ["1","true","yes","sim","on"].includes(s);
+  }
+
+  function numOrNull(v){
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  function meteoHealthSummary(data, sourceHint="—"){
+    const score = numOrNull(data?.meteo_qc_score);
+    const low = boolish(data?.flag_meteo_low_confidence);
+    const interp = boolish(data?.flag_meteo_interpolated);
+    const outlier = boolish(data?.flag_meteo_outlier);
+    const artifact = boolish(data?.flag_meteo_artifact);
+    const missing = boolish(data?.flag_meteo_missing);
+    const source = String(sourceHint || data?.source_meteo || "—") || "—";
+
+    let tone = "ok";
+    let title = "Alta confiança meteorológica";
+    let note = "Sem indícios relevantes de degradação da qualidade meteo neste bin.";
+
+    if (missing){
+      tone = "crit";
+      title = "Sem meteorologia utilizável";
+      note = "O bin não tem suporte meteorológico suficiente para sustentar o diagnóstico.";
+    } else if (interp && low){
+      tone = "crit";
+      title = "Baixa confiança meteorológica";
+      note = "A fonte 15 min parece interpolada para a região e o QC marcou baixa confiança.";
+    } else if (interp){
+      tone = "warn";
+      title = "Fonte interpolada em 15 min";
+      note = "Use cautela: a série solar de 15 min provavelmente não é nativa para esta região.";
+    } else if (low){
+      tone = "warn";
+      title = "Baixa confiança meteorológica";
+      note = "O QC sinalizou que este bin não é adequado para diagnóstico fino.";
+    } else if (outlier || artifact){
+      tone = "warn";
+      title = "Confiabilidade moderada";
+      note = "O QC detectou outlier ou artefato temporal na meteorologia deste bin.";
+    } else if (score !== null && score < 0.60){
+      tone = "warn";
+      title = "Confiabilidade reduzida";
+      note = "O score consolidado de QC ficou abaixo do intervalo recomendado.";
+    } else if (score !== null && score < 0.85){
+      tone = "warn";
+      title = "Confiabilidade moderada";
+      note = "O bin é utilizável, mas requer leitura prudente do diagnóstico.";
+    }
+
+    const chips = [
+      { cls: tone, txt: title },
+      { cls: "neutral", txt: `Fonte: ${source}` },
+    ];
+    if (interp) chips.push({ cls: "warn", txt: "15 min interpolado" });
+    if (low) chips.push({ cls: tone === "crit" ? "crit" : "warn", txt: "Baixa confiança" });
+    if (outlier) chips.push({ cls: "warn", txt: "Outlier tratado" });
+    if (artifact) chips.push({ cls: "warn", txt: "Artefato temporal" });
+    if (missing) chips.push({ cls: "crit", txt: "Sem meteo" });
+    if (!interp && !low && !outlier && !artifact && !missing) chips.push({ cls: "ok", txt: "QC favorável" });
+
+    return {
+      tone, title, note, score, source,
+      facts: {
+        source,
+        score,
+        interpolation: interp ? "Provável" : "Não sinalizada",
+        low_confidence: low ? "Sim" : "Não",
+        outlier: outlier ? "Sim" : "Não",
+        artifact: artifact ? "Sim" : "Não",
+      },
+      chips,
+    };
+  }
+
+  function renderMeteoHealth(el, summary){
+    if (!el) return;
+    if (!summary){
+      el.innerHTML = `<div class="meteo-health-sub">Selecione um bin para inspecionar a confiabilidade da meteorologia.</div>`;
+      return;
+    }
+    const scoreTxt = summary.score === null ? "—" : fmtAny(Number(summary.score.toFixed(2)));
+    const chipsHtml = (summary.chips || []).map(c => `<span class="meteo-chip ${c.cls}">${c.txt}</span>`).join("");
+    const facts = [
+      ["Fonte meteorológica", summary.facts.source],
+      ["QC score", scoreTxt],
+      ["Fonte 15 min interpolada", summary.facts.interpolation],
+      ["Baixa confiança", summary.facts.low_confidence],
+      ["Outlier detectado", summary.facts.outlier],
+      ["Artefato temporal", summary.facts.artifact],
+    ];
+    const factsHtml = facts.map(([k,v]) => `<div class="meteo-fact"><span class="k">${k}</span><span class="v mono">${fmtAny(v)}</span></div>`).join("");
+    el.innerHTML = `
+      <div class="meteo-health-main">
+        <div>
+          <div class="meteo-health-title">${summary.title}</div>
+          <div class="meteo-health-sub">${summary.note}</div>
+        </div>
+        <div class="meteo-health-score">
+          <div class="k">QC score</div>
+          <div class="v mono">${scoreTxt}</div>
+        </div>
+      </div>
+      <div class="meteo-chips">${chipsHtml}</div>
+      <div class="meteo-facts">${factsHtml}</div>
+    `;
+  }
+
   function fmtAny(v){
     if (v === null || v === undefined) return "—";
     if (typeof v === "number"){
@@ -753,6 +1102,192 @@
     if (typeof v === "boolean") return v ? "true" : "false";
     if (typeof v === "string") return v === "" ? "—" : v;
     try{ return JSON.stringify(v); }catch(_e){ return String(v); }
+  }
+
+  function fmtPct(v, digits=1){
+    const n = Number(v);
+    if (!Number.isFinite(n)) return "—";
+    return `${(n * 100).toFixed(digits)}%`;
+  }
+
+  function fmtIsoLocal(iso){
+    if (!iso) return "—";
+    try{
+      const d = new Date(String(iso));
+      if (Number.isNaN(d.getTime())) return String(iso);
+      return d.toLocaleString();
+    }catch(_e){
+      return String(iso);
+    }
+  }
+
+  function clearModelHealth(){
+    const statusEl = $("modelHealthStatus");
+    if (statusEl){
+      statusEl.className = "model-health-status neutral";
+      statusEl.textContent = "Sem métricas";
+    }
+    $("modelHealthStatusNote").textContent = "Atualize o painel para carregar a saúde do modelo.";
+    $("modelHealthVersion").textContent = "—";
+    $("modelHealthScope").textContent = "Sem fonte de avaliação carregada";
+    $("modelHealthTrainedAt").textContent = "—";
+    $("modelHealthF1").textContent = "—";
+    $("modelHealthBalanced").textContent = "—";
+    $("modelHealthCoverage").textContent = "—";
+    const btn = $("btnModelMetrics");
+    if (btn) btn.disabled = true;
+  }
+
+  function renderModelHealth(health){
+    hmState.modelHealth = health || null;
+    if (!health){
+      clearModelHealth();
+      return;
+    }
+
+    const statusEl = $("modelHealthStatus");
+    if (statusEl){
+      statusEl.className = `model-health-status ${health.status_tone || 'neutral'}`;
+      statusEl.textContent = health.status_label || "Sem métricas";
+    }
+
+    $("modelHealthStatusNote").textContent = health.status_note || "—";
+    $("modelHealthVersion").textContent = health.model_version || $("trained_model_version")?.value || "—";
+    $("modelHealthScope").textContent = health.metrics_source_label || "Sem fonte de avaliação carregada";
+    $("modelHealthTrainedAt").textContent = fmtIsoLocal(health.trained_at_utc);
+    $("modelHealthF1").textContent = fmtPct(health.validation_f1_macro);
+    $("modelHealthBalanced").textContent = fmtPct(health.validation_balanced_accuracy);
+    $("modelHealthCoverage").textContent = health.validation_coverage_label || "—";
+
+    const btn = $("btnModelMetrics");
+    if (btn) btn.disabled = !health.advanced_available;
+  }
+
+  function renderMatrixTable(el, matrix, labels, formatter){
+    if (!el) return;
+    if (!Array.isArray(matrix) || !matrix.length){
+      el.innerHTML = `<div class="report-note" style="padding:.8rem;">Sem matriz disponível para este modelo.</div>`;
+      return;
+    }
+    const cols = Array.isArray(labels) && labels.length ? labels.map(String) : matrix[0].map((_, i) => String(i));
+    const head = cols.map(lbl => `<th class="mono">${lbl}</th>`).join("");
+    const rows = matrix.map((row, i) => {
+      const tds = row.map(v => `<td class="mono">${formatter(v)}</td>`).join("");
+      return `<tr><td class="mono">${cols[i] ?? i}</td>${tds}</tr>`;
+    }).join("");
+    el.innerHTML = `
+      <table class="matrix">
+        <thead><tr><th>Real \ Prevista</th>${head}</tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    `;
+  }
+
+  function renderClassificationReport(el, report, labels){
+    if (!el) return;
+    if (!report || typeof report !== "object"){
+      el.innerHTML = `<div class="report-note" style="padding:.8rem;">Sem relatório por classe disponível.</div>`;
+      return;
+    }
+
+    const special = new Set(["accuracy", "macro avg", "weighted avg", "micro avg", "samples avg"]);
+    const order = Array.isArray(labels) && labels.length ? labels.map(String) : [];
+    const rows = [];
+
+    for (const key of order){
+      if (report[key] && typeof report[key] === "object") rows.push([key, report[key]]);
+    }
+    for (const [key, value] of Object.entries(report)){
+      if (special.has(key)) continue;
+      if (rows.some(([k]) => k === key)) continue;
+      if (value && typeof value === "object") rows.push([key, value]);
+    }
+    for (const key of ["macro avg", "weighted avg"]){
+      if (report[key] && typeof report[key] === "object") rows.push([key, report[key]]);
+    }
+
+    const body = rows.map(([name, obj]) => `
+      <tr>
+        <td class="mono">${name}</td>
+        <td class="mono">${fmtPct(obj.precision, 1)}</td>
+        <td class="mono">${fmtPct(obj.recall, 1)}</td>
+        <td class="mono">${fmtPct(obj["f1-score"], 1)}</td>
+        <td class="mono">${fmtAny(obj.support)}</td>
+      </tr>
+    `).join("");
+
+    const accuracy = (typeof report.accuracy === "number")
+      ? `<div class="report-note" style="padding:.75rem .85rem;">Accuracy global: <span class="mono">${fmtPct(report.accuracy, 1)}</span></div>`
+      : "";
+
+    el.innerHTML = `
+      ${accuracy}
+      <table class="report">
+        <thead>
+          <tr>
+            <th>Classe</th>
+            <th>Precision</th>
+            <th>Recall</th>
+            <th>F1-score</th>
+            <th>Support</th>
+          </tr>
+        </thead>
+        <tbody>${body}</tbody>
+      </table>
+    `;
+  }
+
+  function openModelMetricsModal(){
+    const health = hmState.modelHealth;
+    if (!health || !health.advanced){
+      setStatus(true, "Sem métricas avançadas disponíveis para o modelo treinado atual.");
+      return;
+    }
+
+    const adv = health.advanced || {};
+    const split = adv.dataset_split || {};
+    const labels = adv.target_names || adv.labels || [];
+    const trainedAt = fmtIsoLocal(adv.trained_at_utc || health.trained_at_utc);
+
+    $("modelMetricsMeta").textContent = `${health.model_version || $("trained_model_version")?.value || '—'} • ${health.metrics_source_label || 'Sem fonte'} • treino em ${trainedAt}`;
+    renderKvTable($("modelMetricsSummary"), {
+      trained_model_version: health.model_version || $("trained_model_version")?.value || "—",
+      status: health.status_label || "—",
+      trained_at_local: trainedAt,
+      metrics_source: adv.metrics_source_label || health.metrics_source_label || "—",
+      accuracy: adv.accuracy,
+      balanced_accuracy: adv.balanced_accuracy,
+      f1_macro: adv.f1_macro,
+      f1_weighted: adv.f1_weighted,
+      mean_confidence: adv.mean_confidence,
+      log_loss: adv.log_loss,
+      n_samples: adv.n_samples,
+      validation_coverage_fraction: split.coverage_fraction,
+      train_samples: split.train_samples,
+      validation_samples: split.validation_samples,
+      validation_days: Array.isArray(split.validation_days) ? split.validation_days.length : 0,
+      validation_day_start: split.validation_day_start,
+      validation_day_end: split.validation_day_end,
+      split_strategy: split.strategy,
+    });
+
+    renderMatrixTable($("modelMetricsMatrix"), adv.confusion_matrix, labels, (v) => fmtAny(v));
+    renderMatrixTable($("modelMetricsMatrixNorm"), adv.confusion_matrix_normalized_true, labels, (v) => fmtPct(v, 1));
+    renderClassificationReport($("modelMetricsReport"), adv.classification_report, labels);
+
+    const modal = $("modelMetricsModal");
+    if (modal){
+      modal.classList.add("open");
+      modal.setAttribute("aria-hidden", "false");
+    }
+  }
+
+  function closeModelMetricsModal(){
+    const modal = $("modelMetricsModal");
+    if (modal){
+      modal.classList.remove("open");
+      modal.setAttribute("aria-hidden", "true");
+    }
   }
 
   function setStatus(on, txt){
@@ -1049,6 +1584,7 @@
 
   const hmState = {
     payload: null,
+    modelHealth: null,
     selectedKey: null,
     selectedDump: null,
     selectedTkey: null,
@@ -1236,7 +1772,8 @@
     const mpptApi = (/^\d+$/.test(mpptRaw)) ? Number(mpptRaw) : 0;
 
     const view_mode = String($("view_mode")?.value || "full").trim() || "full";
-    const model_version = String($("model_version")?.value || "").trim() || "event_rules_v2";
+    const event_classifier_version = String($("event_classifier_version")?.value || "").trim() || "event_rules_v2";
+    const trained_model_version = String($("trained_model_version")?.value || "").trim();
     const detector_version = String($("detector_version")?.value || "").trim() || "hybrid_rules_v1";
     const source_oper = String($("source_oper")?.value || "").trim();
     const source_meteo = String($("source_meteo")?.value || "").trim();
@@ -1249,7 +1786,8 @@
       mppt: mpptApi,
       mppt_ui: mpptRaw,
       view_mode,
-      model_version,
+      event_classifier_version,
+      trained_model_version,
       detector_version,
       source_oper,
       source_meteo,
@@ -1280,7 +1818,8 @@
 
   function syncAvailableControls(av){
     if (!av) return;
-    syncDatalist("modelVersionList", av.model_versions || []);
+    syncDatalist("eventClassifierVersionList", av.event_classifier_versions || av.model_versions || []);
+    syncDatalist("trainedModelVersionList", av.trained_model_versions || []);
     syncDatalist("detectorVersionList", av.detector_versions || []);
     syncDatalist("sourceOperList", av.source_opers || []);
     syncDatalist("sourceMeteoList", av.source_meteos || []);
@@ -1301,10 +1840,13 @@
 
       const data = await fetchApi(apiUrl, payload);
       hmState.payload = data;
+      renderModelHealth(data.model_health || null);
       syncAvailableControls(data.available || {});
 
       $("kpiPred").textContent = String(data.pred_count ?? "—");
-      $("kpiModel").textContent = payload.model_version || "—";
+      $("kpiDetector").textContent = payload.detector_version || "—";
+      $("kpiEventClassifier").textContent = payload.event_classifier_version || "—";
+      $("kpiTrainedModel").textContent = payload.trained_model_version || "—";
       $("kpiRange").textContent = `${payload.start} → ${payload.end}`;
 
       if ((data.pred_count ?? 0) === 0){
@@ -1341,7 +1883,8 @@
       view_mode: $("view_mode")?.value || "full",
       mppt: (String(uiMppt).toLowerCase() === "all") ? "Todos" : `MPPT ${uiMppt}`,
       dt_minutes: $("dt_minutes")?.value || "—",
-      model_version: $("model_version")?.value || "—",
+      event_classifier_version: $("event_classifier_version")?.value || "—",
+      trained_model_version: $("trained_model_version")?.value || "—",
       detector_version: $("detector_version")?.value || "—",
       source_oper: ev.source_oper || $("source_oper")?.value || "—",
       source_meteo: ev.source_meteo || met.source_meteo || $("source_meteo")?.value || "—",
@@ -1357,8 +1900,11 @@
     const q = {
       plant_id: payload.plant_id,
       mppt: payload.mppt,
-      model_version: payload.model_version,
+      event_classifier_version: payload.event_classifier_version,
+      trained_model_version: payload.trained_model_version,
+      detector_version: payload.detector_version,
       source_oper: payload.source_oper,
+      source_meteo: payload.source_meteo,
       event_id: eventId || "",
       tkey: tkey || "",
     };
@@ -1368,6 +1914,7 @@
 
     const metaTxt = $("detailMeta");
     const metaTbl = $("detailMetaTbl");
+    const meteoHealthEl = $("detailMeteoHealth");
     const tblEvent = $("detailEvent");
     const tblEventSummary = $("detailEventSummary");
     const tblPred = $("detailPred");
@@ -1385,6 +1932,7 @@
     if (!data.found){
       metaTxt.textContent = `${hit.day} ${hit.ts} • sem registro`;
       renderKvTable(metaTbl, buildMetaBlock(hit));
+      renderMeteoHealth(meteoHealthEl, null);
       renderKvTable(tblEvent, {});
       renderKvTable(tblEventSummary, {});
       renderKvTable(tblPred, {});
@@ -1499,11 +2047,18 @@
     }
 
     const metaObj = buildMetaBlock(hit, d);
+    const sourceForMeteo = sourceSummary.event_source_meteo || sourceSummary.requested_source_meteo || metaObj.source_meteo || meteoRaw.source_meteo || "—";
+    const meteoSummary = meteoHealthSummary({
+      ...meteoRaw,
+      ...sbRaw,
+      ...(d.bin_flags || {}),
+    }, sourceForMeteo);
 
     metaTxt.textContent =
       `${hit.day} ${hit.ts} • event_id=${fmtAny(ev.id)} • final_label=${fmtAny(ev.final_label || evSummary.final_label)} • pred_label=${fmtAny(mp.pred_label)}`;
 
     renderKvTable(metaTbl, metaObj);
+    renderMeteoHealth(meteoHealthEl, meteoSummary);
     renderKvTable(tblEvent, ev);
     renderKvTable(tblEventSummary, evSummary);
     renderKvTable(tblPred, mp);
@@ -1518,7 +2073,17 @@
     renderKvTable(tblRawOper, rawOperFlat);
 
     hmState.selectedDump = d;
-    dumpEl.textContent = JSON.stringify(d, null, 2);
+    const dumpWithMeteoHealth = {
+      ...d,
+      meteo_health: {
+        title: meteoSummary.title,
+        note: meteoSummary.note,
+        tone: meteoSummary.tone,
+        source: meteoSummary.source,
+        score: meteoSummary.score,
+      },
+    };
+    dumpEl.textContent = JSON.stringify(dumpWithMeteoHealth, null, 2);
     openDetailDrawer();
   }
 
@@ -1620,7 +2185,7 @@
   }
 
   async function runTrain(){
-    setStatus(true, "No MVP event_rules_v1 o treino está desabilitado. Use 'Detectar + Inferir'.");
+    setStatus(true, "O treino desta tela afeta apenas o bundle do modelo treinado; a inferência operacional continua em Detectar + Inferir.");
   }
 
   async function runInfer(){
@@ -1637,7 +2202,8 @@
         plant_id: payload.plant_id,
         start: payload.start,
         end: payload.end,
-        model_version: payload.model_version,
+        event_classifier_version: payload.event_classifier_version,
+        trained_model_version: payload.trained_model_version,
         detector_version: payload.detector_version,
         source_oper: payload.source_oper,
         source_meteo: payload.source_meteo,
@@ -1686,9 +2252,12 @@
       $("kpiOk").textContent = "—";
       $("kpiFault").textContent = "—";
       $("kpiNone").textContent = "—";
-      $("kpiModel").textContent = "—";
+      $("kpiDetector").textContent = "—";
+      $("kpiEventClassifier").textContent = "—";
+      $("kpiTrainedModel").textContent = "—";
       $("kpiRange").textContent = "—";
       $("hmBadgeTxt").textContent = "—";
+      clearModelHealth();
       $("hmTip").textContent = "";
       setStatus(false);
     });
@@ -1712,16 +2281,25 @@
     });
 
     $("btnCloseDetail")?.addEventListener("click", closeDetailDrawer);
+    $("btnModelMetrics")?.addEventListener("click", openModelMetricsModal);
+    $("btnCloseModelMetrics")?.addEventListener("click", closeModelMetricsModal);
+    $("modelMetricsModal")?.addEventListener("click", (ev) => {
+      if (ev.target === $("modelMetricsModal")) closeModelMetricsModal();
+    });
 
     window.addEventListener("resize", fitHeatmapToWidth);
     document.addEventListener("keydown", (ev) => {
-      if (ev.key === "Escape") closeDetailDrawer();
+      if (ev.key === "Escape") {
+        closeDetailDrawer();
+        closeModelMetricsModal();
+      }
     });
   }
 
   document.addEventListener("DOMContentLoaded", async () => {
     bindControls();
     clearSelection();
+    clearModelHealth();
     try{
       await refreshHeatmap();
     }catch(err){

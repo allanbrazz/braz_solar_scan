@@ -10,6 +10,7 @@ import pandas as pd
 from django.db import transaction
 
 from core.models import MeteoRecord, MeteoSource, PVPlant
+from core.services.meteo_qc import MeteoQCConfig, apply_meteo_qc
 
 FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
@@ -321,6 +322,14 @@ def ingest_openmeteo_range(
         )
 
         df = res.df
+        qc_cfg = MeteoQCConfig(interval_min=int(interval_min), source=MeteoSource.OPENMETEO)
+        df, qc_meta = apply_meteo_qc(
+            df,
+            lat=float(plant.latitude),
+            lon=float(plant.longitude),
+            cfg=qc_cfg,
+        )
+        res.meta["qc"] = qc_meta
         metas.append(res.meta)
 
         if df.empty:
@@ -342,6 +351,11 @@ def ingest_openmeteo_range(
                     wind_speed=_to_float_or_none(row.wind_speed),
                     rh=_to_float_or_none(row.rh),
                     pressure=_to_float_or_none(row.pressure),
+                    meteo_qc_score=_to_float_or_none(getattr(row, "meteo_qc_score", None)),
+                    flag_meteo_low_confidence=bool(getattr(row, "flag_meteo_low_confidence", False)),
+                    flag_meteo_interpolated=bool(getattr(row, "flag_meteo_interpolated", False)),
+                    flag_meteo_outlier=bool(getattr(row, "flag_meteo_outlier", False)),
+                    flag_meteo_artifact=bool(getattr(row, "flag_meteo_artifact", False)),
                 )
             )
 
@@ -355,6 +369,8 @@ def ingest_openmeteo_range(
                     update_fields=[
                         "interval_min", "ghi", "dni", "dhi", "gti",
                         "temp_air", "wind_speed", "rh", "pressure",
+                        "meteo_qc_score", "flag_meteo_low_confidence", "flag_meteo_interpolated",
+                        "flag_meteo_outlier", "flag_meteo_artifact",
                     ],
                 )
                 total_count += len(objs)

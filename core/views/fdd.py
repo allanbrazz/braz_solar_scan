@@ -34,6 +34,15 @@ from core.models import (
 
 logger = logging.getLogger(__name__)
 
+MISMATCH_VERSION_SUMMARY = {
+    "detector_version": "mismatch_runtime_v1",
+    "event_classifier_version": None,
+    "trained_model_version": None,
+    "detector_note": "Detector runtime desta tela: modelo físico de potência + limiares/heurísticas de mismatch configurados na UI.",
+    "event_classifier_note": "Não aplicável no dashboard Mismatch.",
+    "trained_model_note": "Não aplicável no dashboard Mismatch.",
+}
+
 
 # ----------------------------
 # helpers source (MPPT vs AGG)
@@ -285,6 +294,7 @@ def mismatch_fdd_view(request: HttpRequest):
             "gpoa_min": float((request.GET.get("gpoa_min") or 50)),
             "pmin_w": float((request.GET.get("pmin_w") or 0)),
             "api_url": reverse("mismatch_fdd_api"),
+            "version_summary": MISMATCH_VERSION_SUMMARY,
         },
     )
 
@@ -387,6 +397,11 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
         "temp_air",
         "wind_speed",
         "rh",
+        "meteo_qc_score",
+        "flag_meteo_low_confidence",
+        "flag_meteo_interpolated",
+        "flag_meteo_outlier",
+        "flag_meteo_artifact",
         "flag_meteo_missing",
     ]
 
@@ -462,6 +477,11 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
     temp_air: List[Optional[float]] = [None] * n
     wind_speed: List[Optional[float]] = [None] * n
     rh: List[Optional[float]] = [None] * n
+    meteo_qc_score: List[Optional[float]] = [None] * n
+    flag_meteo_low_confidence: List[bool] = [False] * n
+    flag_meteo_interpolated: List[bool] = [False] * n
+    flag_meteo_outlier: List[bool] = [False] * n
+    flag_meteo_artifact: List[bool] = [False] * n
     flag_meteo_missing: List[bool] = [False] * n
 
     # comparativos (debug / UX)
@@ -527,6 +547,11 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
             temp_air[i] = _as_float(first_row.get("temp_air"))
             wind_speed[i] = _as_float(first_row.get("wind_speed"))
             rh[i] = _as_float(first_row.get("rh"))
+            meteo_qc_score[i] = _as_float(first_row.get("meteo_qc_score"))
+            flag_meteo_low_confidence[i] = bool(first_row.get("flag_meteo_low_confidence") or False)
+            flag_meteo_interpolated[i] = bool(first_row.get("flag_meteo_interpolated") or False)
+            flag_meteo_outlier[i] = bool(first_row.get("flag_meteo_outlier") or False)
+            flag_meteo_artifact[i] = bool(first_row.get("flag_meteo_artifact") or False)
             flag_meteo_missing[i] = bool(first_row.get("flag_meteo_missing") or False)
 
         # preenche series_by_source
@@ -897,6 +922,8 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
             g_poa_wm2=g_poa_used,
             valid_model=base_gate,
             flag_meteo_missing=flag_meteo_missing,
+            flag_meteo_low_confidence=flag_meteo_low_confidence,
+            flag_meteo_interpolated=flag_meteo_interpolated,
             flag_inv_missing=flag_inv_missing_all,
             inv_coverage=inv_cov,
             params=det_params,
@@ -920,6 +947,11 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
             "coarse_period": coarse_period,
             "fine_period": fine_period,
             "meteo_quality_ok": meteo_quality_ok,
+            "meteo_qc_score": meteo_qc_score,
+            "flag_meteo_low_confidence": flag_meteo_low_confidence,
+            "flag_meteo_interpolated": flag_meteo_interpolated,
+            "flag_meteo_outlier": flag_meteo_outlier,
+            "flag_meteo_artifact": flag_meteo_artifact,
             "irradiance_tier": irradiance_tier,
         }
 
@@ -1231,6 +1263,7 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
             "source_meteo": src_meteo,
             "selected_sources": selected_sources,
         },
+        "versions": MISMATCH_VERSION_SUMMARY,
         "sources": {
             "source_meteo": src_meteo,
             "source_oper_list": source_oper_list,   # ✅ disponíveis
@@ -1256,6 +1289,11 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
             "temp_air": temp_air,
             "wind_speed": wind_speed,
             "rh": rh,
+            "meteo_qc_score": meteo_qc_score,
+            "flag_meteo_low_confidence": flag_meteo_low_confidence,
+            "flag_meteo_interpolated": flag_meteo_interpolated,
+            "flag_meteo_outlier": flag_meteo_outlier,
+            "flag_meteo_artifact": flag_meteo_artifact,
             "flag_meteo_missing": flag_meteo_missing,
 
             # oper (TOTAL sem dupla contagem)

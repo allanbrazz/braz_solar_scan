@@ -14,6 +14,8 @@ MERGED_COLS = (
     "inv_n", "inv_coverage", "flag_low_coverage",
     "ghi", "dni", "dhi", "gti",
     "temp_air", "wind_speed", "rh", "pressure",
+    "meteo_qc_score", "flag_meteo_low_confidence", "flag_meteo_interpolated",
+    "flag_meteo_outlier", "flag_meteo_artifact",
     "flag_meteo_missing", "flag_inv_missing",
 )
 
@@ -127,6 +129,11 @@ def upsert_merged_15m_df(
             "wind_speed": _to_float(row.get("wind_speed")),
             "rh": _to_float(row.get("rh")),
             "pressure": _to_float(row.get("pressure")),
+            "meteo_qc_score": _to_float(row.get("meteo_qc_score")),
+            "flag_meteo_low_confidence": _to_bool(row.get("flag_meteo_low_confidence")),
+            "flag_meteo_interpolated": _to_bool(row.get("flag_meteo_interpolated")),
+            "flag_meteo_outlier": _to_bool(row.get("flag_meteo_outlier")),
+            "flag_meteo_artifact": _to_bool(row.get("flag_meteo_artifact")),
             "flag_meteo_missing": _to_bool(row.get("flag_meteo_missing")),
         }
 

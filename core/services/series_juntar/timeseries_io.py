@@ -37,6 +37,8 @@ class FetchConfig:
         "ts_utc",
         "ghi", "dni", "dhi", "gti",
         "temp_air", "wind_speed", "rh", "pressure",
+        "meteo_qc_score", "flag_meteo_low_confidence", "flag_meteo_interpolated",
+        "flag_meteo_outlier", "flag_meteo_artifact",
         "interval_min",
     )
     meteo_source: str = MeteoSource.OPENMETEO

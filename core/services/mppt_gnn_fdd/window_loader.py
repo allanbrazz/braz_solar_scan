@@ -11,6 +11,7 @@ from django.db.models import Count
 from core.models import PVPlant, PVPlantMergedRecord15m
 from core.services.mppt_gnn_fdd.features import WindowArrays
 from core.services.mppt_gnn_fdd.constants import T_STEPS_DEFAULT, DT_MIN_DEFAULT
+from core.services.meteo_qc import METEO_QC_BOOL_COLS, METEO_QC_SCORE_COLS
 
 
 def _plant_tz(plant: PVPlant) -> ZoneInfo:
@@ -273,6 +274,11 @@ def load_daily_window(
             "dni",
             "dhi",
             "temp_air",
+            "meteo_qc_score",
+            "flag_meteo_low_confidence",
+            "flag_meteo_interpolated",
+            "flag_meteo_outlier",
+            "flag_meteo_artifact",
             "mppt1_vdc_v",
             "mppt2_vdc_v",
             "mppt3_vdc_v",
@@ -313,12 +319,28 @@ def load_daily_window(
         pac_real=pac,
     )
 
+    meteo_qc = {}
+    if rows:
+        first = rows[0]
+        for c in METEO_QC_SCORE_COLS:
+            if c in first:
+                arr = _fill_on_grid(ts_grid, rows, c)
+                finite = arr[np.isfinite(arr)]
+                meteo_qc[c] = {
+                    "mean": None if finite.size == 0 else float(np.mean(finite)),
+                    "min": None if finite.size == 0 else float(np.min(finite)),
+                }
+        for c in METEO_QC_BOOL_COLS:
+            if c in first:
+                meteo_qc[c] = bool(any(bool(r.get(c, False)) for r in rows))
+
     meta = {
         "plant_id": plant_id,
         "source_oper": source_oper,
         "source_meteo": source_meteo,
         "day_local": day_local.isoformat(),
         "tz": str(tz),
+        "meteo_qc": meteo_qc,
     }
 
     win = WindowArrays(

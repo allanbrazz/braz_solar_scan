@@ -17,10 +17,23 @@ DEFAULT_INV_MEAN_COLS = (
     "mppt1_p_dc_w","mppt2_p_dc_w","mppt3_p_dc_w","mppt4_p_dc_w",
 )
 
-DEFAULT_METEO_COLS = (
+DEFAULT_METEO_VALUE_COLS = (
     "ghi", "dni", "dhi", "gti",
     "temp_air", "wind_speed", "rh", "pressure",
 )
+
+DEFAULT_METEO_QC_SCORE_COLS = (
+    "meteo_qc_score",
+)
+
+DEFAULT_METEO_QC_BOOL_COLS = (
+    "flag_meteo_low_confidence",
+    "flag_meteo_interpolated",
+    "flag_meteo_outlier",
+    "flag_meteo_artifact",
+)
+
+DEFAULT_METEO_COLS = DEFAULT_METEO_VALUE_COLS + DEFAULT_METEO_QC_SCORE_COLS + DEFAULT_METEO_QC_BOOL_COLS
 
 
 # =========================
@@ -53,7 +66,9 @@ class InverterAggregationConfig:
 class MeteoPreparationConfig:
     ts_col: str = "ts_utc"
     freq: str = "15min"
-    value_cols: Sequence[str] = DEFAULT_METEO_COLS
+    value_cols: Sequence[str] = DEFAULT_METEO_VALUE_COLS
+    score_cols: Sequence[str] = DEFAULT_METEO_QC_SCORE_COLS
+    flag_cols: Sequence[str] = DEFAULT_METEO_QC_BOOL_COLS
 
     # Open-Meteo costuma usar timestamps como "period_start".
     meteo_time_label: Literal["period_start", "period_end", "midpoint"] = "period_start"
@@ -200,24 +215,37 @@ def prepare_meteo_15min(
     df["_ts_adj"] = _shift_meteo_label(df[cfg.ts_col], cfg.freq, cfg.meteo_time_label)
     df["ts_15"] = _floor_bucket(df["_ts_adj"], cfg.freq)
 
-    cols = [c for c in cfg.value_cols if c in df.columns]
-    for c in cols:
-        df[c] = pd.to_numeric(df[c], errors="coerce")
+    value_cols = [c for c in cfg.value_cols if c in df.columns]
+    score_cols = [c for c in cfg.score_cols if c in df.columns]
+    flag_cols = [c for c in cfg.flag_cols if c in df.columns]
 
-    if not cols:
+    for c in value_cols + score_cols:
+        df[c] = pd.to_numeric(df[c], errors="coerce")
+    for c in flag_cols:
+        df[c] = df[c].fillna(False).astype(bool)
+
+    all_cols = value_cols + score_cols + flag_cols
+    if not all_cols:
         out = df[["ts_15"]].drop_duplicates(subset=["ts_15"]).set_index("ts_15").sort_index()
         out.index.name = "ts_15"
         return out
 
-    grouped = df.groupby("ts_15", observed=True)[cols]
-    if cfg.duplicate_agg == "median":
-        out = grouped.median()
-    elif cfg.duplicate_agg == "first":
-        out = grouped.first()
-    else:
-        out = grouped.mean()
+    grouped = df.groupby("ts_15", observed=True)
+    out_parts = []
+    if value_cols:
+        gval = grouped[value_cols]
+        if cfg.duplicate_agg == "median":
+            out_parts.append(gval.median())
+        elif cfg.duplicate_agg == "first":
+            out_parts.append(gval.first())
+        else:
+            out_parts.append(gval.mean())
+    if score_cols:
+        out_parts.append(grouped[score_cols].min())
+    if flag_cols:
+        out_parts.append(grouped[flag_cols].max())
 
-    out = out.sort_index()
+    out = pd.concat(out_parts, axis=1).sort_index()
     out.index.name = "ts_15"
     return out
 
@@ -267,7 +295,7 @@ def join_inverter_meteo_15min(
 
     # flag meteo missing (todas as colunas meteo NaN)
     if meteo_missing_cols is None:
-        meteo_missing_cols = [c for c in DEFAULT_METEO_COLS if c in df.columns]
+        meteo_missing_cols = [c for c in DEFAULT_METEO_VALUE_COLS if c in df.columns]
     else:
         meteo_missing_cols = [c for c in meteo_missing_cols if c in df.columns]
 
@@ -355,7 +383,7 @@ def densify_15min_grid(
     out["flag_low_coverage"] = out["flag_low_coverage"].fillna(False).astype(bool)
 
     if meteo_missing_cols is None:
-        meteo_missing_cols = [c for c in DEFAULT_METEO_COLS if c in out.columns]
+        meteo_missing_cols = [c for c in DEFAULT_METEO_VALUE_COLS if c in out.columns]
     else:
         meteo_missing_cols = [c for c in meteo_missing_cols if c in out.columns]
 
@@ -398,11 +426,11 @@ def rollup_15min_to_hour(
     df = df15.copy()
 
     # garante tipos coerentes p/ agregação
-    for c in DEFAULT_INV_MEAN_COLS + DEFAULT_METEO_COLS:
+    for c in DEFAULT_INV_MEAN_COLS + DEFAULT_METEO_VALUE_COLS + DEFAULT_METEO_QC_SCORE_COLS:
         if c in df.columns:
             df[c] = pd.to_numeric(df[c], errors="coerce")
 
-    for c in ("flag_low_coverage", "flag_meteo_missing", "flag_inv_missing"):
+    for c in ("flag_low_coverage", "flag_meteo_missing", "flag_inv_missing") + DEFAULT_METEO_QC_BOOL_COLS:
         if c in df.columns:
             df[c] = df[c].fillna(False).astype(bool)
 
@@ -421,11 +449,15 @@ def rollup_15min_to_hour(
     if "inv_coverage" in df.columns:
         agg["inv_coverage"] = "mean"
 
-    for c in DEFAULT_METEO_COLS:
+    for c in DEFAULT_METEO_VALUE_COLS:
         if c in df.columns:
             agg[c] = "mean"
 
-    for c in ("flag_low_coverage", "flag_meteo_missing", "flag_inv_missing"):
+    for c in DEFAULT_METEO_QC_SCORE_COLS:
+        if c in df.columns:
+            agg[c] = "min"
+
+    for c in ("flag_low_coverage", "flag_meteo_missing", "flag_inv_missing") + DEFAULT_METEO_QC_BOOL_COLS:
         if c in df.columns:
             agg[c] = "max"
 

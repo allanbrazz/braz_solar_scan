@@ -48,6 +48,12 @@ try:
 except Exception:
     load_event_window = None  # type: ignore
 
+try:
+    from core.services.mppt_gnn_fdd.storage import load_model_health, list_available_model_versions  # type: ignore
+except Exception:
+    load_model_health = None  # type: ignore
+    list_available_model_versions = None  # type: ignore
+
 
 # ============================================================
 # Configuração
@@ -133,6 +139,11 @@ DIAG_BASE_CANDIDATES = [
     "temp_inv_c",
     "flag_inv_missing",
     "flag_meteo_missing",
+    "meteo_qc_score",
+    "flag_meteo_low_confidence",
+    "flag_meteo_interpolated",
+    "flag_meteo_outlier",
+    "flag_meteo_artifact",
 ]
 
 MPPT_FIELD_CANDIDATES: List[str] = []
@@ -240,6 +251,71 @@ def _safe_float(x: Any, default: Optional[float] = 0.0) -> Optional[float]:
         return float(x)
     except Exception:
         return default
+
+
+def _resolve_event_classifier_version(params: Any, default: Optional[str] = None) -> Optional[str]:
+    raw = None
+    try:
+        raw = params.get("event_classifier_version")
+    except Exception:
+        raw = None
+    if raw in (None, ""):
+        try:
+            raw = params.get("model_version")
+        except Exception:
+            raw = None
+    val = str(raw or "").strip()
+    return val or default
+
+
+def _resolve_trained_model_version(params: Any, default: Optional[str] = None) -> Optional[str]:
+    raw = None
+    try:
+        raw = params.get("trained_model_version")
+    except Exception:
+        raw = None
+    val = str(raw or "").strip()
+    return val or default
+
+
+def _list_trained_model_versions() -> List[str]:
+    if list_available_model_versions is None:
+        return []
+    try:
+        return [str(v) for v in list_available_model_versions() if str(v or "").strip()]
+    except Exception:
+        logger.exception("trained model version listing failed")
+        return []
+
+
+def _build_version_summary(*, detector_version: Optional[str], event_classifier_version: Optional[str], trained_model_version: Optional[str], view_name: str) -> Dict[str, Any]:
+    detector = (detector_version or "").strip() or None
+    event_classifier = (event_classifier_version or "").strip() or None
+    trained = (trained_model_version or "").strip() or None
+    if view_name == "mppt_gnn_fdd":
+        event_note = "Classificador event-level/MPPT persistido em FaultEventMPPT."
+        trained_note = "Bundle treinado usado apenas para métricas e auditoria do bloco Saúde do modelo."
+    else:
+        event_note = "Não aplicável nesta tela."
+        trained_note = "Não aplicável nesta tela."
+    return {
+        "detector_version": detector,
+        "event_classifier_version": event_classifier,
+        "trained_model_version": trained,
+        "detector_note": "Detector plant-level que encontra bins/eventos suspeitos.",
+        "event_classifier_note": event_note,
+        "trained_model_note": trained_note,
+    }
+
+
+def _load_model_health_payload(trained_model_version: Optional[str]) -> Optional[Dict[str, Any]]:
+    if not trained_model_version or load_model_health is None:
+        return None
+    try:
+        return load_model_health(model_version=str(trained_model_version))
+    except Exception:
+        logger.exception("model health load failed", extra={"trained_model_version": trained_model_version})
+        return None
 
 
 def _has_useful_oper_data_from_diag_row(r: Dict[str, Any]) -> bool:
@@ -665,7 +741,7 @@ def _build_canonical_mppt_from_sources(
 def _best_pred_rows_for_events(
     event_ids: List[int],
     *,
-    model_version: Optional[str],
+    event_classifier_version: Optional[str],
     mppt: int,
 ) -> Dict[int, Dict[str, Any]]:
     """
@@ -678,8 +754,8 @@ def _best_pred_rows_for_events(
         return out
 
     q = FaultEventMPPT.objects.filter(event_id__in=event_ids)
-    if model_version:
-        q = q.filter(model_version=model_version)
+    if event_classifier_version:
+        q = q.filter(model_version=event_classifier_version)
     if mppt > 0:
         q = q.filter(mppt=mppt)
 
@@ -769,6 +845,8 @@ def _build_merged_snapshot_for_ts(*, plant_id: int, ts_utc: datetime) -> Dict[st
     for k in [
         "gti", "ghi", "dni", "dhi",
         "temp_air", "wind_speed", "rh",
+        "meteo_qc_score", "flag_meteo_low_confidence", "flag_meteo_interpolated",
+        "flag_meteo_outlier", "flag_meteo_artifact",
         "flag_meteo_missing", "source_meteo"
     ]:
         if k in first:
@@ -850,7 +928,7 @@ def _find_event_for_tkey(
     plant_id: int,
     dt_local: datetime,
     tz: ZoneInfo,
-    model_version: Optional[str],
+    event_classifier_version: Optional[str],
     detector_version: Optional[str],
     source_oper: Optional[str],
     source_meteo: Optional[str],
@@ -878,7 +956,7 @@ def _find_event_for_tkey(
         return None
 
     event_ids = [e.id for e in events]
-    pred_map = _best_pred_rows_for_events(event_ids, model_version=model_version, mppt=mppt)
+    pred_map = _best_pred_rows_for_events(event_ids, event_classifier_version=event_classifier_version, mppt=mppt)
 
     best_id = None
     best_score = None
@@ -914,7 +992,7 @@ def _build_event_bin_map(
     source_oper: Optional[str],
     source_meteo: Optional[str],
     detector_version: Optional[str],
-    model_version: Optional[str],
+    event_classifier_version: Optional[str],
     mppt: int,
 ) -> Tuple[Dict[Tuple[int, int], Dict[str, Any]], List[dict], List[str], List[str], List[str], List[str]]:
     best_info: Dict[Tuple[int, int], Dict[str, Any]] = {}
@@ -991,7 +1069,7 @@ def _build_event_bin_map(
 
     pred_map = _best_pred_rows_for_events(
         [int(e["id"]) for e in events],
-        model_version=model_version,
+        event_classifier_version=event_classifier_version,
         mppt=mppt,
     )
 
@@ -1066,8 +1144,9 @@ def mppt_gnn_fdd_view(request: HttpRequest):
     if not plant_id and plants:
         plant_id = str(plants[0].id)
 
-    model_version = request.GET.get("model_version") or "event_rules_v1"
-    detector_version = request.GET.get("detector_version") or "residual_v1"
+    event_classifier_version = _resolve_event_classifier_version(request.GET, default="event_rules_v2") or "event_rules_v2"
+    detector_version = (request.GET.get("detector_version") or "hybrid_rules_v1")
+    trained_model_version = _resolve_trained_model_version(request.GET, default="") or ""
     source_oper = request.GET.get("source_oper") or ""
     source_meteo = request.GET.get("source_meteo") or ""
     view_mode = request.GET.get("view_mode") or "full"
@@ -1132,7 +1211,8 @@ def mppt_gnn_fdd_view(request: HttpRequest):
             "mppt": request.GET.get("mppt") or "all",
             "dt_options": [15, 30, 60],
             "mppt_options": mppt_options,
-            "model_version": model_version,
+            "event_classifier_version": event_classifier_version,
+            "trained_model_version": trained_model_version,
             "detector_version": detector_version,
             "source_oper": source_oper,
             "source_meteo": source_meteo,
@@ -1176,7 +1256,8 @@ def mppt_gnn_fdd_api(request: HttpRequest) -> JsonResponse:
         if view_mode not in {"full", "events"}:
             view_mode = "full"
 
-        model_version = (request.GET.get("model_version") or "").strip() or None
+        event_classifier_version = _resolve_event_classifier_version(request.GET, default=None)
+        trained_model_version = _resolve_trained_model_version(request.GET, default=None)
         detector_version = (request.GET.get("detector_version") or "").strip() or None
         source_oper = (request.GET.get("source_oper") or "").strip() or None
         source_meteo = (request.GET.get("source_meteo") or "").strip() or None
@@ -1211,7 +1292,7 @@ def mppt_gnn_fdd_api(request: HttpRequest) -> JsonResponse:
             source_oper=source_oper,
             source_meteo=source_meteo,
             detector_version=detector_version,
-            model_version=model_version,
+            event_classifier_version=event_classifier_version,
             mppt=mppt,
         )
 
@@ -1224,12 +1305,15 @@ def mppt_gnn_fdd_api(request: HttpRequest) -> JsonResponse:
         )
 
         available_common = {
-            "model_versions": mv_list,
+            "event_classifier_versions": mv_list,
+            "trained_model_versions": _list_trained_model_versions(),
             "source_opers": so_list,
             "source_meteos": sm_list,
             "detector_versions": dv_list,
             "mppt_options": available_mppts,
         }
+        model_health = _load_model_health_payload(trained_model_version)
+        version_summary = _build_version_summary(detector_version=detector_version, event_classifier_version=event_classifier_version, trained_model_version=trained_model_version, view_name="mppt_gnn_fdd")
 
         if view_mode == "events":
             event_count = len(events)
@@ -1266,8 +1350,11 @@ def mppt_gnn_fdd_api(request: HttpRequest) -> JsonResponse:
                             "event_min_utc": avail["ts_min"].isoformat() if avail and avail["ts_min"] else None,
                             "event_max_utc": avail["ts_max"].isoformat() if avail and avail["ts_max"] else None,
                         },
+                        "model_health": model_health,
+                        "versions": version_summary,
                         "echo": {
-                            "model_version": model_version,
+                            "event_classifier_version": event_classifier_version,
+                            "trained_model_version": trained_model_version,
                             "detector_version": detector_version,
                             "source_oper": source_oper,
                             "source_meteo": source_meteo,
@@ -1320,8 +1407,11 @@ def mppt_gnn_fdd_api(request: HttpRequest) -> JsonResponse:
                     "counts_by_label": counts_by_label,
                     "counts_by_state": counts_by_state,
                     "available": available_common,
+                    "model_health": model_health,
+                    "versions": version_summary,
                     "echo": {
-                        "model_version": model_version,
+                        "event_classifier_version": event_classifier_version,
+                        "trained_model_version": trained_model_version,
                         "detector_version": detector_version,
                         "source_oper": source_oper,
                         "source_meteo": source_meteo,
@@ -1467,8 +1557,11 @@ def mppt_gnn_fdd_api(request: HttpRequest) -> JsonResponse:
                         "diag_min_utc": avail["ts_min"].isoformat() if avail["ts_min"] else None,
                         "diag_max_utc": avail["ts_max"].isoformat() if avail["ts_max"] else None,
                     },
+                    "model_health": model_health,
+                    "versions": version_summary,
                     "echo": {
-                        "model_version": model_version,
+                        "event_classifier_version": event_classifier_version,
+                        "trained_model_version": trained_model_version,
                         "detector_version": detector_version,
                         "source_oper": source_oper,
                         "source_meteo": source_meteo,
@@ -1628,8 +1721,11 @@ def mppt_gnn_fdd_api(request: HttpRequest) -> JsonResponse:
                 "counts_by_label": counts_by_label,
                 "counts_by_state": counts_by_state,
                 "available": available_common,
+                "model_health": model_health,
+                "versions": version_summary,
                 "echo": {
-                    "model_version": model_version,
+                    "event_classifier_version": event_classifier_version,
+                    "trained_model_version": trained_model_version or None,
                     "detector_version": detector_version,
                     "source_oper": source_oper,
                     "source_meteo": source_meteo,
@@ -1665,7 +1761,8 @@ def mppt_gnn_fdd_dump_api(request: HttpRequest) -> JsonResponse:
         tz = _plant_tz(plant)
 
         mppt = _parse_int(request.GET.get("mppt"), default=0, lo=0, hi=32)
-        model_version = (request.GET.get("model_version") or "").strip() or None
+        event_classifier_version = _resolve_event_classifier_version(request.GET, default=None)
+        trained_model_version = _resolve_trained_model_version(request.GET, default=None)
         detector_version = (request.GET.get("detector_version") or "").strip() or None
         source_oper = (request.GET.get("source_oper") or "").strip() or None
         source_meteo = (request.GET.get("source_meteo") or "").strip() or None
@@ -1697,7 +1794,7 @@ def mppt_gnn_fdd_dump_api(request: HttpRequest) -> JsonResponse:
                 plant_id=plant_id,
                 dt_local=dt_local,
                 tz=tz,
-                model_version=model_version,
+                event_classifier_version=event_classifier_version,
                 detector_version=detector_version,
                 source_oper=source_oper,
                 source_meteo=source_meteo,
@@ -1715,7 +1812,7 @@ def mppt_gnn_fdd_dump_api(request: HttpRequest) -> JsonResponse:
 
         pred = None
         if event is not None:
-            pred_map = _best_pred_rows_for_events([event.id], model_version=model_version, mppt=mppt)
+            pred_map = _best_pred_rows_for_events([event.id], event_classifier_version=event_classifier_version, mppt=mppt)
             pred = pred_map.get(event.id)
 
         selected_bin: Dict[str, Any] = {}
@@ -1885,6 +1982,11 @@ def mppt_gnn_fdd_dump_api(request: HttpRequest) -> JsonResponse:
             "diag_source_meteo": selected_bin.get("diag_source_meteo"),
             "flag_inv_missing": selected_bin.get("flag_inv_missing"),
             "flag_meteo_missing": selected_bin.get("flag_meteo_missing"),
+            "meteo_qc_score": selected_bin.get("meteo_qc_score"),
+            "flag_meteo_low_confidence": selected_bin.get("flag_meteo_low_confidence"),
+            "flag_meteo_interpolated": selected_bin.get("flag_meteo_interpolated"),
+            "flag_meteo_outlier": selected_bin.get("flag_meteo_outlier"),
+            "flag_meteo_artifact": selected_bin.get("flag_meteo_artifact"),
             "flag_inv_missing_all": selected_bin.get("flag_inv_missing_all"),
             "flag_inv_missing_partial": selected_bin.get("flag_inv_missing_partial"),
             "inv_coverage": selected_bin.get("inv_coverage"),
@@ -1894,7 +1996,8 @@ def mppt_gnn_fdd_dump_api(request: HttpRequest) -> JsonResponse:
             "requested_source_oper": source_oper,
             "requested_source_meteo": source_meteo,
             "requested_detector_version": detector_version,
-            "requested_model_version": model_version,
+            "requested_event_classifier_version": event_classifier_version,
+            "requested_trained_model_version": trained_model_version,
             "event_source_oper": event.source_oper if event else None,
             "event_source_meteo": event.source_meteo if event else None,
             "event_detector_version": event.detector_version if event else None,
@@ -1919,6 +2022,8 @@ def mppt_gnn_fdd_dump_api(request: HttpRequest) -> JsonResponse:
             "detector_score_mean": event.detector_score_mean if event else None,
             **_coerce_jsonish_deep(plant_summary),
         }
+
+        version_summary = _build_version_summary(detector_version=detector_version, event_classifier_version=event_classifier_version, trained_model_version=trained_model_version, view_name="mppt_gnn_fdd")
 
         dump = {
             "plant_id": plant_id,
@@ -1951,10 +2056,11 @@ def mppt_gnn_fdd_dump_api(request: HttpRequest) -> JsonResponse:
                 "novelty_score": None,
                 "proba": None,
                 "contribution": None,
-                "model_version": model_version,
                 "source_oper": source_oper,
                 "mppt": mppt,
+                "event_classifier_version": event_classifier_version,
             },
+            "versions": version_summary,
             "event_summary": _coerce_jsonish(event_summary),
             "mppt_feature_summary": _coerce_jsonish(feature_summary),
             "selected_mppt_summary": _coerce_jsonish(selected_mppt_summary),
@@ -1969,7 +2075,7 @@ def mppt_gnn_fdd_dump_api(request: HttpRequest) -> JsonResponse:
             "canonical_mppt": _coerce_jsonish(merged_snapshot.get("canonical_mppt") or {}),
         }
 
-        return JsonResponse({"ok": True, "found": True, "dump": dump}, status=200)
+        return JsonResponse({"ok": True, "found": True, "dump": dump, "versions": version_summary}, status=200)
 
     except Exception as e:
         logger.exception("mppt_gnn_fdd_dump_api failed")
@@ -2005,12 +2111,19 @@ def mppt_gnn_fdd_actions_api(request: HttpRequest) -> JsonResponse:
         if start > end:
             start, end = end, start
 
-        model_version = str(body.get("model_version") or "event_rules_v1").strip()
-        detector_version = str(body.get("detector_version") or "residual_v1").strip()
+        event_classifier_version = _resolve_event_classifier_version(body, default="event_rules_v2") or "event_rules_v2"
+        trained_model_version = _resolve_trained_model_version(body, default="") or ""
+        detector_version = str(body.get("detector_version") or "hybrid_rules_v1").strip()
         source_oper = str(body.get("source_oper") or "").strip()
         source_meteo = str(body.get("source_meteo") or "").strip()
         confidence_threshold = _parse_float(str(body.get("confidence_threshold") or "0.60"), 0.60)
         delete_existing = bool(int(body.get("delete_existing") or 1))
+        version_summary = _build_version_summary(
+            detector_version=detector_version,
+            event_classifier_version=event_classifier_version,
+            trained_model_version=trained_model_version,
+            view_name="mppt_gnn_fdd",
+        )
 
         tz = _plant_tz(plant)
         ts_start_utc = datetime.combine(start, time.min, tzinfo=tz).astimezone(dt_tz.utc)
@@ -2053,7 +2166,7 @@ def mppt_gnn_fdd_actions_api(request: HttpRequest) -> JsonResponse:
                     plant_id=plant_id,
                     event_ids=event_ids,
                     statuses=["open", "closed", "reviewed", "dismissed"],
-                    model_version=model_version,
+                    model_version=event_classifier_version,
                     confidence_threshold=confidence_threshold,
                     replace_existing=delete_existing,
                 )
@@ -2063,8 +2176,10 @@ def mppt_gnn_fdd_actions_api(request: HttpRequest) -> JsonResponse:
                     "ok": True,
                     "action": "infer",
                     "plant_id": plant_id,
-                    "model_version": model_version,
+                    "event_classifier_version": event_classifier_version,
+                    "trained_model_version": trained_model_version or None,
                     "detector_version": detector_version,
+                    "versions": version_summary,
                     "source_oper": source_oper or None,
                     "source_meteo": source_meteo or None,
                     "events_detected": int(det_out.get("events", 0)),
@@ -2081,7 +2196,8 @@ def mppt_gnn_fdd_actions_api(request: HttpRequest) -> JsonResponse:
                     "ok": True,
                     "action": "train",
                     "skipped": True,
-                    "message": "No modo event_rules_v1 o treino está desabilitado. Use o botão 'Detectar + Inferir'.",
+                    "message": "O treino nesta tela usa o trained_model_version apenas para auditoria do bundle. O classificador event-level continua sendo executado via 'Detectar + Inferir'.",
+                    "versions": version_summary,
                 },
                 status=200,
             )

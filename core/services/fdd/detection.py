@@ -101,6 +101,8 @@ def detect_anomalies(
     g_poa_wm2: List[Optional[float]],
     valid_model: List[bool],
     flag_meteo_missing: Optional[List[bool]] = None,
+    flag_meteo_low_confidence: Optional[List[bool]] = None,
+    flag_meteo_interpolated: Optional[List[bool]] = None,
     flag_inv_missing: Optional[List[bool]] = None,
     inv_coverage: Optional[List[Optional[float]]] = None,
     params: Optional[DetectionParams] = None,
@@ -120,6 +122,8 @@ def detect_anomalies(
 
     vm = np.asarray(valid_model, dtype=bool)
     met_miss = np.asarray(flag_meteo_missing, dtype=bool) if flag_meteo_missing is not None else np.zeros_like(vm)
+    met_low = np.asarray(flag_meteo_low_confidence, dtype=bool) if flag_meteo_low_confidence is not None else np.zeros_like(vm)
+    met_interp = np.asarray(flag_meteo_interpolated, dtype=bool) if flag_meteo_interpolated is not None else np.zeros_like(vm)
     inv_miss = np.asarray(flag_inv_missing, dtype=bool) if flag_inv_missing is not None else np.zeros_like(vm)
 
     if inv_coverage is not None:
@@ -131,13 +135,13 @@ def detect_anomalies(
     cv = _rolling_cv(g, int(p.stable_window_points))
     ramp = _rolling_abs_ramp(g)
     stable_sky = np.isfinite(cv) & (cv <= float(p.stable_cv_max))
-    meteo_quality_ok = stable_sky & np.isfinite(ramp) & (ramp <= float(p.stable_ramp_max_wm2))
+    meteo_quality_ok = stable_sky & np.isfinite(ramp) & (ramp <= float(p.stable_ramp_max_wm2)) & (~met_low)
 
     data_ok = np.isfinite(g) & (~met_miss) & (~inv_miss) & cov_ok
     valid_period = data_ok & (g >= float(p.sun_available_gpoa_wm2))
     coarse_period = valid_period & vm & np.isfinite(mm) & (g >= float(p.coarse_diag_gpoa_wm2))
     residual_ready = coarse_period & meteo_quality_ok
-    fine_period = valid_period & vm & np.isfinite(mm) & (g >= float(p.fine_diag_gpoa_wm2)) & meteo_quality_ok
+    fine_period = valid_period & vm & np.isfinite(mm) & (g >= float(p.fine_diag_gpoa_wm2)) & meteo_quality_ok & (~met_interp)
 
     base = mm[residual_ready]
     med, sig = _robust_loc_scale(base)
@@ -196,6 +200,8 @@ def detect_anomalies(
         "fine_period": fine_period.tolist(),
         "stable_sky": stable_sky.tolist(),
         "meteo_quality_ok": meteo_quality_ok.tolist(),
+        "meteo_low_confidence": met_low.tolist(),
+        "meteo_interpolated": met_interp.tolist(),
         "irradiance_tier": irr_tier,
         "gpoa_cv": [None if (not np.isfinite(v)) else float(v) for v in cv.tolist()],
         "gpoa_ramp_abs": [None if (not np.isfinite(v)) else float(v) for v in ramp.tolist()],

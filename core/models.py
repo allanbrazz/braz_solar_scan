@@ -517,6 +517,13 @@ class MeteoRecord(models.Model):
     rh = models.FloatField(null=True, blank=True)           # %
     pressure = models.FloatField(null=True, blank=True)     # Pa (armazenar em Pa para consistência)
 
+    # Qualidade meteo / audit trail para FDD
+    meteo_qc_score = models.FloatField(null=True, blank=True)
+    flag_meteo_low_confidence = models.BooleanField(default=False)
+    flag_meteo_interpolated = models.BooleanField(default=False)
+    flag_meteo_outlier = models.BooleanField(default=False)
+    flag_meteo_artifact = models.BooleanField(default=False)
+
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -763,6 +770,13 @@ class PVPlantMergedRecord15m(models.Model):
         help_text="Umidade relativa (%)",
     )
     pressure = models.FloatField(null=True, blank=True, help_text="Pressão (Pa)")
+
+    # Qualidade meteo derivada do QC da fonte
+    meteo_qc_score = models.FloatField(null=True, blank=True)
+    flag_meteo_low_confidence = models.BooleanField(default=False)
+    flag_meteo_interpolated = models.BooleanField(default=False)
+    flag_meteo_outlier = models.BooleanField(default=False)
+    flag_meteo_artifact = models.BooleanField(default=False)
 
     # Flags de integridade
     flag_meteo_missing = models.BooleanField(default=False)

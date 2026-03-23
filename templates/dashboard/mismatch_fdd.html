@@ -268,6 +268,59 @@
     td.k{ width: 52%; opacity:.85; }
     td.v{ font-weight: 800; }
 
+    .meteo-health{
+      border:1px solid rgba(255,255,255,.12);
+      border-radius:14px;
+      background: rgba(255,255,255,.035);
+      padding:.85rem .9rem;
+      display:grid;
+      gap:.75rem;
+    }
+    .meteo-health-main{
+      display:flex;
+      gap:.8rem;
+      align-items:flex-start;
+      justify-content:space-between;
+      flex-wrap:wrap;
+    }
+    .meteo-health-title{ margin:0; font-size:.96rem; font-weight:800; }
+    .meteo-health-sub{ margin:.18rem 0 0; opacity:.82; line-height:1.35; }
+    .meteo-health-score{
+      min-width:110px;
+      text-align:right;
+    }
+    .meteo-health-score .v{ font-size:1.15rem; font-weight:900; }
+    .meteo-health-score .k{ opacity:.75; font-size:.78rem; }
+    .meteo-chips{ display:flex; flex-wrap:wrap; gap:.45rem; }
+    .meteo-chip{
+      display:inline-flex; align-items:center; gap:.4rem;
+      padding:.26rem .6rem; border-radius:999px;
+      font-size:.84rem; font-weight:700;
+      border:1px solid rgba(255,255,255,.14); background: rgba(255,255,255,.06);
+    }
+    .meteo-chip.ok{ border-color: rgba(70,230,140,.35); background: rgba(70,230,140,.10); }
+    .meteo-chip.warn{ border-color: rgba(255,210,90,.35); background: rgba(255,210,90,.10); }
+    .meteo-chip.crit{ border-color: rgba(255,90,110,.35); background: rgba(255,90,110,.10); }
+    .meteo-chip.neutral{ border-color: rgba(255,255,255,.14); background: rgba(255,255,255,.06); }
+    .meteo-facts{
+      display:grid;
+      grid-template-columns: repeat(2, minmax(0,1fr));
+      gap:.6rem;
+    }
+    .meteo-fact{
+      border:1px solid rgba(255,255,255,.10);
+      border-radius:12px;
+      background: rgba(10,20,40,.22);
+      padding:.55rem .65rem;
+      min-width:0;
+    }
+    .meteo-fact .k{ display:block; opacity:.75; font-size:.78rem; }
+    .meteo-fact .v{ display:block; font-weight:800; margin-top:.12rem; overflow-wrap:anywhere; }
+    @media (max-width: 640px){
+      .meteo-facts{ grid-template-columns: 1fr; }
+      .meteo-health-score{ text-align:left; }
+    }
+
     pre.dump{
       margin:0;
       padding:.75rem;
@@ -401,6 +454,15 @@
     </div>
   </div>
 
+
+  <div class="card glass span-12">
+    <div class="kpi">
+      <div class="tile"><p class="t">Detector</p><p class="v mono">{{ version_summary.detector_version|default:"—" }}</p><p class="s">modelo físico + limiares runtime</p></div>
+      <div class="tile"><p class="t">Classificador evento</p><p class="v mono">N/A</p><p class="s">não aplicável nesta tela</p></div>
+      <div class="tile"><p class="t">Modelo treinado</p><p class="v mono">N/A</p><p class="s">não aplicável nesta tela</p></div>
+    </div>
+  </div>
+
   <div class="card glass span-12">
     <div class="kpi" id="kpiGrid">
       <div class="tile"><p class="t">Pontos</p><p class="v" id="kpiPts">—</p><p class="s">na série</p></div>
@@ -482,6 +544,11 @@
   </div>
 
   <div class="body">
+    <h4 style="margin:.2rem 0 .6rem;">Confiabilidade meteo</h4>
+    <div id="detailMeteoHealth" class="meteo-health"></div>
+
+    <div style="height:.8rem"></div>
+
     <h4 style="margin:.2rem 0 .6rem;">Principais variáveis</h4>
     <table class="kv" id="detailAll"></table>
 
@@ -611,6 +678,11 @@
     temp_air:     "Temp. ar [°C]",
     wind_speed:   "Vento [m/s]",
     rh:           "UR [%]",
+    meteo_qc_score: "Score de QC meteo",
+    flag_meteo_low_confidence: "Meteo baixa confiança",
+    flag_meteo_interpolated: "Fonte meteo interpolada",
+    flag_meteo_outlier: "Outlier meteo",
+    flag_meteo_artifact: "Artefato meteo",
     flag_meteo_missing: "Flag meteo missing",
     flag_inv_missing:   "Flag inversor missing",
 
@@ -636,6 +708,119 @@
   function prettyKeyCompact(k){
     const s = String(k || "");
     return FIELD_LABELS[s] || humanizeKey(s);
+  }
+
+  function boolish(v){
+    if (typeof v === "boolean") return v;
+    if (typeof v === "number") return Number.isFinite(v) && v !== 0;
+    const s = String(v ?? "").trim().toLowerCase();
+    return ["1","true","yes","sim","on"].includes(s);
+  }
+
+  function numOrNull(v){
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  function meteoHealthSummary(data, sourceHint="—"){
+    const score = numOrNull(data?.meteo_qc_score);
+    const low = boolish(data?.flag_meteo_low_confidence);
+    const interp = boolish(data?.flag_meteo_interpolated);
+    const outlier = boolish(data?.flag_meteo_outlier);
+    const artifact = boolish(data?.flag_meteo_artifact);
+    const missing = boolish(data?.flag_meteo_missing);
+    const source = String(sourceHint || data?.source_meteo || "—") || "—";
+
+    let tone = "ok";
+    let title = "Alta confiança meteorológica";
+    let note = "Sem indícios relevantes de baixa confiabilidade para este bin.";
+
+    if (missing){
+      tone = "crit";
+      title = "Sem meteorologia utilizável";
+      note = "O bin está sem variáveis meteorológicas suficientes para suportar o diagnóstico.";
+    } else if (interp && low){
+      tone = "crit";
+      title = "Baixa confiança meteorológica";
+      note = "A fonte de 15 min parece interpolada para a região e o QC marcou o bin como baixa confiança.";
+    } else if (interp){
+      tone = "warn";
+      title = "Fonte interpolada em 15 min";
+      note = "Use cautela: a série solar de 15 min provavelmente não é nativa para esta região.";
+    } else if (low){
+      tone = "warn";
+      title = "Baixa confiança meteorológica";
+      note = "O QC sinalizou que este bin não é suficientemente confiável para diagnóstico fino.";
+    } else if (outlier || artifact){
+      tone = "warn";
+      title = "Confiabilidade moderada";
+      note = "O QC encontrou indícios de outlier ou artefato na meteorologia deste bin.";
+    } else if (score !== null && score < 0.60){
+      tone = "warn";
+      title = "Confiabilidade reduzida";
+      note = "O score consolidado de QC ficou abaixo do intervalo recomendado.";
+    } else if (score !== null && score < 0.85){
+      tone = "warn";
+      title = "Confiabilidade moderada";
+      note = "O bin é utilizável, mas com cautela para interpretação diagnóstica.";
+    }
+
+    const chips = [
+      { cls: tone, txt: title },
+      { cls: "neutral", txt: `Fonte: ${source}` },
+    ];
+    if (interp) chips.push({ cls: "warn", txt: "15 min interpolado" });
+    if (low) chips.push({ cls: tone === "crit" ? "crit" : "warn", txt: "Baixa confiança" });
+    if (outlier) chips.push({ cls: "warn", txt: "Outlier tratado" });
+    if (artifact) chips.push({ cls: "warn", txt: "Artefato temporal" });
+    if (missing) chips.push({ cls: "crit", txt: "Sem meteo" });
+    if (!interp && !low && !outlier && !artifact && !missing) chips.push({ cls: "ok", txt: "QC favorável" });
+
+    return {
+      tone, title, note, score, source,
+      facts: {
+        source,
+        score: score,
+        interpolation: interp ? "Provável" : "Não sinalizada",
+        low_confidence: low ? "Sim" : "Não",
+        outlier: outlier ? "Sim" : "Não",
+        artifact: artifact ? "Sim" : "Não",
+      },
+      chips,
+    };
+  }
+
+  function renderMeteoHealth(el, summary){
+    if (!el) return;
+    if (!summary){
+      el.innerHTML = `<div class="meteo-health-sub">Selecione um bin para inspecionar a confiabilidade da meteorologia.</div>`;
+      return;
+    }
+    const scoreTxt = summary.score === null ? "—" : fmtN(summary.score, 2);
+    const chipsHtml = (summary.chips || []).map(c => `<span class="meteo-chip ${c.cls}">${c.txt}</span>`).join("");
+    const facts = [
+      ["Fonte meteorológica", summary.facts.source],
+      ["QC score", scoreTxt],
+      ["Fonte 15 min interpolada", summary.facts.interpolation],
+      ["Baixa confiança", summary.facts.low_confidence],
+      ["Outlier detectado", summary.facts.outlier],
+      ["Artefato temporal", summary.facts.artifact],
+    ];
+    const factsHtml = facts.map(([k,v]) => `<div class="meteo-fact"><span class="k">${k}</span><span class="v mono">${fmtAny(v)}</span></div>`).join("");
+    el.innerHTML = `
+      <div class="meteo-health-main">
+        <div>
+          <div class="meteo-health-title">${summary.title}</div>
+          <div class="meteo-health-sub">${summary.note}</div>
+        </div>
+        <div class="meteo-health-score">
+          <div class="k">QC score</div>
+          <div class="v mono">${scoreTxt}</div>
+        </div>
+      </div>
+      <div class="meteo-chips">${chipsHtml}</div>
+      <div class="meteo-facts">${factsHtml}</div>
+    `;
   }
 
   function prettyKeyVerbose(k){
@@ -1356,12 +1541,14 @@
     const meta = $("detailMeta");
     const tblAll = $("detailAll");
     const dump = $("detailDump");
-    if (!meta || !tblAll || !dump) return;
+    const meteoHealth = $("detailMeteoHealth");
+    if (!meta || !tblAll || !dump || !meteoHealth) return;
 
     if (!payload || !cellObj){
       meta.textContent = "—";
       tblAll.innerHTML = "";
       dump.textContent = "{}";
+      renderMeteoHealth(meteoHealth, null);
       closeDetailDrawer();
       return;
     }
@@ -1388,6 +1575,19 @@
 
     // snapshot base (com chaves mesmo quando idx=-1)
     const raw = pointSnapshot(payload, idx);
+    const tkey = `${ds}T${ts}`;
+    const dumpPoint = (payload?.dump_by_tkey && payload.dump_by_tkey[tkey]) ? payload.dump_by_tkey[tkey] : null;
+    const sourceMeteo = dumpPoint?.source_meteo || payload?.sources?.source_meteo || payload?.range?.source_meteo || "—";
+
+    if (dumpPoint?.chosen_total && typeof dumpPoint.chosen_total === "object") {
+      Object.assign(raw, dumpPoint.chosen_total);
+    }
+    if (dumpPoint?.meteo && typeof dumpPoint.meteo === "object") {
+      Object.assign(raw, dumpPoint.meteo);
+    }
+    if (sourceMeteo && !Object.prototype.hasOwnProperty.call(raw, "source_meteo")) {
+      raw.source_meteo = sourceMeteo;
+    }
 
     // MPPT por source (DC only; com linhas mesmo sem valor)
     const mpptItems = collectMpptItems(payload, idx);
@@ -1406,7 +1606,24 @@
       metaRows.map(renderRow).join("") +
       (items.map(renderRow).join("") || `<tr><td class="k mono">—</td><td class="v mono">—</td></tr>`);
 
+    const meteoSummary = meteoHealthSummary(raw, sourceMeteo);
+    renderMeteoHealth(meteoHealth, meteoSummary);
+
     const dumpObj = snapshotVerbose(raw);
+    dumpObj.__meteo_health = {
+      title: meteoSummary.title,
+      note: meteoSummary.note,
+      tone: meteoSummary.tone,
+      source: meteoSummary.source,
+      score: meteoSummary.score,
+      flags: {
+        flag_meteo_missing: boolish(raw.flag_meteo_missing),
+        flag_meteo_low_confidence: boolish(raw.flag_meteo_low_confidence),
+        flag_meteo_interpolated: boolish(raw.flag_meteo_interpolated),
+        flag_meteo_outlier: boolish(raw.flag_meteo_outlier),
+        flag_meteo_artifact: boolish(raw.flag_meteo_artifact),
+      },
+    };
     const mpptDump = collectMpptDump(payload, idx);
     if (mpptDump) dumpObj.__mppt_by_source = mpptDump;
 

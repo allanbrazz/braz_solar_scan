@@ -1,7 +1,7 @@
-# core/management/commands/mppt_gnn_train.py
 from __future__ import annotations
 
 from datetime import date
+import json
 from django.core.management.base import BaseCommand
 
 from core.services.mppt_gnn_fdd.train_pipeline import train_mppt_gnn_sklearn
@@ -44,4 +44,4 @@ class Command(BaseCommand):
             ds_cfg=ds_cfg,
             mlp_cfg=mlp_cfg,
         )
-        self.stdout.write(str(out))
+        self.stdout.write(json.dumps(out, ensure_ascii=False, indent=2))

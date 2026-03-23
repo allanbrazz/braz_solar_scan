@@ -44,6 +44,11 @@ _MET_MAP: Dict[str, List[str]] = {
     "wind_speed":  ["wind_speed", "vento", "wind"],
     "rh":          ["rh", "humidity"],
     "pressure":    ["pressure", "pressao"],
+    "meteo_qc_score": ["meteo_qc_score"],
+    "flag_meteo_low_confidence": ["flag_meteo_low_confidence"],
+    "flag_meteo_interpolated": ["flag_meteo_interpolated"],
+    "flag_meteo_outlier": ["flag_meteo_outlier"],
+    "flag_meteo_artifact": ["flag_meteo_artifact"],
 }
 
 
