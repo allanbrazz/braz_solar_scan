@@ -755,6 +755,11 @@
     </div>
 
     <div class="detail-section">
+      <h4>Confiabilidade</h4>
+      <table class="kv" id="detailConfidence"></table>
+    </div>
+
+    <div class="detail-section">
       <h4>Predição MPPT</h4>
       <table class="kv" id="detailPred"></table>
     </div>
@@ -917,6 +922,20 @@
     diag_domain_label: "Domain",
     diag_diagnosis_label: "Diagnosis",
     diag_diagnosis_confidence: "Diagnosis confidence",
+    diag_data_reliability_score: "Data reliability",
+    diag_data_reliability_level: "Data reliability level",
+    diag_detection_confidence_score: "Detection confidence",
+    diag_detection_confidence_level: "Detection confidence level",
+    diag_diagnosis_confidence_score: "Diagnosis confidence",
+    diag_diagnosis_confidence_level: "Diagnosis confidence level",
+    diag_confidence_notes_json: "Confidence notes",
+    data_reliability_score: "Data reliability",
+    data_reliability_level: "Data reliability level",
+    detection_confidence_score: "Detection confidence",
+    detection_confidence_level: "Detection confidence level",
+    diagnosis_confidence_score: "Diagnosis confidence",
+    diagnosis_confidence_level: "Diagnosis confidence level",
+    confidence_notes_json: "Confidence notes",
     diag_irradiance_tier: "Irradiance tier",
     diag_fine_diag_allowed: "Fine diagnosis allowed",
     diag_meteo_quality_ok: "Meteo quality OK",
@@ -1939,6 +1958,7 @@
     const meteoHealthEl = $("detailMeteoHealth");
     const tblEvent = $("detailEvent");
     const tblEventSummary = $("detailEventSummary");
+    const tblConfidence = $("detailConfidence");
     const tblPred = $("detailPred");
     const tblFeat = $("detailFeat");
     const tblMpptSummary = $("detailMpptSummary");
@@ -1957,6 +1977,7 @@
       renderMeteoHealth(meteoHealthEl, null);
       renderKvTable(tblEvent, {});
       renderKvTable(tblEventSummary, {});
+      renderKvTable(tblConfidence, {});
       renderKvTable(tblPred, {});
       renderKvTable(tblFeat, {});
       renderKvTable(tblMpptSummary, {});
@@ -2083,6 +2104,7 @@
     renderMeteoHealth(meteoHealthEl, meteoSummary);
     renderKvTable(tblEvent, ev);
     renderKvTable(tblEventSummary, evSummary);
+    renderKvTable(tblConfidence, buildConfidenceBlock(ev, evSummary, sb));
     renderKvTable(tblPred, mp);
     renderKvTable(tblFeat, featSummary);
     renderKvTable(tblMpptSummary, mpptSummary);

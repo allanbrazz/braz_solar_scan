@@ -338,7 +338,7 @@
 {% endblock %}
 
 {% block content %}
-<div id="fddPage" class="dash" data-api="{% url 'mismatch_fdd_api' %}">
+<div id="fddPage" class="dash" data-api="{% url 'mismatch_fdd_api' %}" data-export="{{ export_pdf_url|default:'' }}">
   <div class="card glass span-12">
     <div class="page-head">
       <div style="min-width:0;">
@@ -433,6 +433,15 @@
               <path d="M9 14h6" stroke="rgba(233,246,255,.92)" stroke-width="2" stroke-linecap="round"/>
             </svg>
             <span class="label">Executar + Salvar</span>
+          </button>
+
+          <button class="btn-glow secondary" id="btnExportPdf" type="button" title="Exportar relatório PDF do FDD Mismatch">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M12 3v12" stroke="rgba(233,246,255,.92)" stroke-width="2" stroke-linecap="round"/>
+              <path d="m7 10 5 5 5-5" stroke="rgba(233,246,255,.92)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M5 19h14" stroke="rgba(233,246,255,.92)" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+            <span class="label">Exportar PDF</span>
           </button>
 
           <button class="btn-glow danger" id="btnReset" type="button" title="Limpar gráficos/seleção">
@@ -546,6 +555,11 @@
   <div class="body">
     <h4 style="margin:.2rem 0 .6rem;">Confiabilidade meteo</h4>
     <div id="detailMeteoHealth" class="meteo-health"></div>
+
+    <div style="height:.8rem"></div>
+
+    <h4 style="margin:.2rem 0 .6rem;">Confiabilidade do diagnóstico</h4>
+    <table class="kv" id="detailConfidence"></table>
 
     <div style="height:.8rem"></div>
 
@@ -679,6 +693,18 @@
     wind_speed:   "Vento [m/s]",
     rh:           "UR [%]",
     meteo_qc_score: "Score de QC meteo",
+    data_reliability_score: "Confiabilidade dos dados",
+    data_reliability_level: "Nível de confiabilidade dos dados",
+    detection_confidence_score: "Confiança da detecção",
+    detection_confidence_level: "Nível de confiança da detecção",
+    diagnosis_confidence_score: "Confiança do diagnóstico",
+    diagnosis_confidence_level: "Nível de confiança do diagnóstico",
+    state_label: "Estado operativo",
+    domain_label: "Domínio provável",
+    diagnosis_label: "Diagnóstico final",
+    direct_grid_evidence: "Evidência direta de rede",
+    zero_injection_flag: "Sem injeção sob sol",
+    irradiance_tier: "Tier de irradiância",
     flag_meteo_low_confidence: "Meteo baixa confiança",
     flag_meteo_interpolated: "Fonte meteo interpolada",
     flag_meteo_outlier: "Outlier meteo",
@@ -1537,16 +1563,51 @@
     dr.setAttribute("aria-hidden", "true");
   }
 
+
+  function confidenceLevelPt(level){
+    const m = { very_high: "muito alta", high: "alta", moderate: "moderada", low: "baixa", very_low: "muito baixa" };
+    return m[String(level || "")] || (level || "—");
+  }
+
+  function confidenceReasonText(block){
+    const reasons = Array.isArray(block?.reasons) ? block.reasons.filter(Boolean) : [];
+    return reasons.length ? reasons.join("; ") : "—";
+  }
+
+  function buildConfidenceRows(raw, dumpPoint){
+    const conf = dumpPoint?.confidence || {};
+    const notes = conf.notes || {};
+    return [
+      { label: "Confiabilidade dos dados", value: fmtPct(raw.data_reliability_score), key: "data_reliability_score" },
+      { label: "Nível dos dados", value: confidenceLevelPt(raw.data_reliability_level), key: "data_reliability_level" },
+      { label: "Razões (dados)", value: confidenceReasonText(notes.data_reliability), key: "data_reliability_reasons" },
+      { label: "Confiança da detecção", value: fmtPct(raw.detection_confidence_score), key: "detection_confidence_score" },
+      { label: "Nível da detecção", value: confidenceLevelPt(raw.detection_confidence_level), key: "detection_confidence_level" },
+      { label: "Razões (detecção)", value: confidenceReasonText(notes.detection_confidence), key: "detection_confidence_reasons" },
+      { label: "Confiança do diagnóstico", value: fmtPct(raw.diagnosis_confidence_score), key: "diagnosis_confidence_score" },
+      { label: "Nível do diagnóstico", value: confidenceLevelPt(raw.diagnosis_confidence_level), key: "diagnosis_confidence_level" },
+      { label: "Razões (diagnóstico)", value: confidenceReasonText(notes.diagnosis_confidence), key: "diagnosis_confidence_reasons" },
+      { label: "Estado operativo", value: fmtAny(raw.state_label), key: "state_label" },
+      { label: "Domínio provável", value: fmtAny(raw.domain_label), key: "domain_label" },
+      { label: "Diagnóstico final", value: fmtAny(raw.diagnosis_label), key: "diagnosis_label" },
+      { label: "Evidência direta de rede", value: fmtAny(raw.direct_grid_evidence), key: "direct_grid_evidence" },
+      { label: "Sem injeção sob sol", value: fmtAny(raw.zero_injection_flag), key: "zero_injection_flag" },
+      { label: "Tier de irradiância", value: fmtAny(raw.irradiance_tier), key: "irradiance_tier" },
+    ];
+  }
+
   function renderDetail(payload, cellObj){
     const meta = $("detailMeta");
     const tblAll = $("detailAll");
+    const tblConfidence = $("detailConfidence");
     const dump = $("detailDump");
     const meteoHealth = $("detailMeteoHealth");
-    if (!meta || !tblAll || !dump || !meteoHealth) return;
+    if (!meta || !tblAll || !tblConfidence || !dump || !meteoHealth) return;
 
     if (!payload || !cellObj){
       meta.textContent = "—";
       tblAll.innerHTML = "";
+      tblConfidence.innerHTML = "";
       dump.textContent = "{}";
       renderMeteoHealth(meteoHealth, null);
       closeDetailDrawer();
@@ -1579,6 +1640,9 @@
     const dumpPoint = (payload?.dump_by_tkey && payload.dump_by_tkey[tkey]) ? payload.dump_by_tkey[tkey] : null;
     const sourceMeteo = dumpPoint?.source_meteo || payload?.sources?.source_meteo || payload?.range?.source_meteo || "—";
 
+    const confRows = buildConfidenceRows(raw, dumpPoint);
+    tblConfidence.innerHTML = confRows.map((it) => `<tr><td class="k mono">${String(it.label)}</td><td class="v mono">${fmtAny(it.value)}</td></tr>`).join("");
+
     if (dumpPoint?.chosen_total && typeof dumpPoint.chosen_total === "object") {
       Object.assign(raw, dumpPoint.chosen_total);
     }
@@ -1610,6 +1674,7 @@
     renderMeteoHealth(meteoHealth, meteoSummary);
 
     const dumpObj = snapshotVerbose(raw);
+    if (dumpPoint?.confidence) dumpObj.__confidence = dumpPoint.confidence;
     dumpObj.__meteo_health = {
       title: meteoSummary.title,
       note: meteoSummary.note,
@@ -1763,6 +1828,28 @@
     };
   }
 
+  function exportPdf(){
+    const page = $("fddPage");
+    const exportUrl = page ? page.dataset.export : null;
+    if (!exportUrl){
+      alert("URL de exportação PDF não configurada.");
+      return;
+    }
+    try{
+      const payload = currentPayloadBase();
+      const params = new URLSearchParams();
+      for (const [k, v] of Object.entries(payload)){
+        if (v === undefined || v === null || v === "") continue;
+        params.set(k, String(v));
+      }
+      params.set("plant_pk", String(payload.plant_id));
+      params.set("pk", String(payload.plant_id));
+      window.location.href = `${exportUrl}?${params.toString()}`;
+    }catch(err){
+      setStatus(true, `Erro exportação PDF: ${String(err.message || err)}`);
+    }
+  }
+
   async function runFdd(opts = { save:false }){
     const page = $("fddPage");
     const apiUrl = page ? page.dataset.api : null;
@@ -1847,6 +1934,7 @@
 
     $("btnRun")?.addEventListener("click", () => runFdd({ save:false }));
     $("btnRunSave")?.addEventListener("click", () => runFdd({ save:true }));
+    $("btnExportPdf")?.addEventListener("click", exportPdf);
     $("btnReset")?.addEventListener("click", resetUi);
 
     $("dt_minutes")?.addEventListener("change", () => {

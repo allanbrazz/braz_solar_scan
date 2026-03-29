@@ -876,6 +876,13 @@ class PlantDiagnostic15m(models.Model):
     diagnosis_label = models.CharField(max_length=64, default="invalid", blank=True)
     diagnosis_confidence = models.FloatField(null=True, blank=True, validators=[MinValueValidator(0.0), MaxValueValidator(1.0)])
 
+    data_reliability_score = models.FloatField(null=True, blank=True, validators=[MinValueValidator(0.0), MaxValueValidator(1.0)])
+    data_reliability_level = models.CharField(max_length=16, default="", blank=True)
+    detection_confidence_score = models.FloatField(null=True, blank=True, validators=[MinValueValidator(0.0), MaxValueValidator(1.0)])
+    detection_confidence_level = models.CharField(max_length=16, default="", blank=True)
+    diagnosis_confidence_score = models.FloatField(null=True, blank=True, validators=[MinValueValidator(0.0), MaxValueValidator(1.0)])
+    diagnosis_confidence_level = models.CharField(max_length=16, default="", blank=True)
+
     v_ac_v = models.FloatField(null=True, blank=True)
     i_ac_a = models.FloatField(null=True, blank=True)
     freq_hz = models.FloatField(null=True, blank=True)
@@ -883,6 +890,7 @@ class PlantDiagnostic15m(models.Model):
     alarm_sev_oper = models.PositiveSmallIntegerField(null=True, blank=True)
 
     evidence_json = models.JSONField(null=True, blank=True)
+    confidence_notes_json = models.JSONField(null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -1013,9 +1021,16 @@ class FaultEvent(models.Model):
         blank=True,
         validators=[MinValueValidator(0.0), MaxValueValidator(1.0)],
     )
+    data_reliability_score = models.FloatField(null=True, blank=True, validators=[MinValueValidator(0.0), MaxValueValidator(1.0)])
+    data_reliability_level = models.CharField(max_length=16, default="", blank=True)
+    detection_confidence_score = models.FloatField(null=True, blank=True, validators=[MinValueValidator(0.0), MaxValueValidator(1.0)])
+    detection_confidence_level = models.CharField(max_length=16, default="", blank=True)
+    diagnosis_confidence_score = models.FloatField(null=True, blank=True, validators=[MinValueValidator(0.0), MaxValueValidator(1.0)])
+    diagnosis_confidence_level = models.CharField(max_length=16, default="", blank=True)
     novelty_score = models.FloatField(null=True, blank=True)
 
     meta = models.JSONField(null=True, blank=True)
+    confidence_notes_json = models.JSONField(null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

@@ -12,6 +12,11 @@ from core.models import PVPlant, PVPlantMergedRecord15m, PlantDiagnostic15m
 from core.services.fdd.detection import DetectionParams, detect_anomalies
 from core.services.fdd.events import EventBuildParams, build_fault_events_for_range
 from core.services.fdd.rca import RCAParams, diagnose_rca_series
+from core.services.fdd.reliability import (
+    compute_data_reliability,
+    compute_detection_confidence,
+    compute_diagnosis_confidence,
+)
 from core.services.mppt_gnn_fdd.window_loader import compute_pac_model_and_mismatch
 
 
@@ -394,6 +399,9 @@ def run_detection_pipeline(
     for i, row in enumerate(rows):
         ewma_z = det["ewma_z"][i]
         cusum = det["cusum"][i]
+        mismatch_i = None if not np.isfinite(mismatch[i]) else float(mismatch[i])
+        pac_real_i = None if not np.isfinite(pac_real[i]) else float(pac_real[i])
+        pac_model_i = None if not np.isfinite(pac_model[i]) else float(pac_model[i])
         detector_score = max(
             abs(float(ewma_z)) if ewma_z is not None else 0.0,
             float(cusum) if cusum is not None else 0.0,
@@ -405,6 +413,41 @@ def run_detection_pipeline(
         direct_grid = bool(rca["direct_grid_evidence"][i])
         zero_inj = bool(rca["zero_injection_flag"][i])
         anomaly_final = bool(det["anomaly"][i]) or direct_grid or diagnosis_label not in {"ok", "invalid"}
+
+        data_rel = compute_data_reliability(
+            row=row,
+            pac_real_w=pac_real_i,
+            pac_model_w=pac_model_i,
+            mismatch_rel=mismatch_i,
+        )
+        detection_rel = compute_detection_confidence(
+            data_reliability_score=data_rel["score"],
+            valid_period=bool(det["valid_period"][i]),
+            coarse_period=bool(det["coarse_period"][i]),
+            fine_period=bool(det["fine_period"][i]),
+            meteo_quality_ok=bool(det["meteo_quality_ok"][i]),
+            stable_sky=bool(det["stable_sky"][i]),
+            anomaly_flag=bool(anomaly_final),
+            mismatch_rel=mismatch_i,
+            ewma_z=ewma_z,
+            cusum_score=cusum,
+        )
+        diagnosis_rel = compute_diagnosis_confidence(
+            diagnosis_label=diagnosis_label,
+            base_diagnosis_confidence=rca["diagnosis_confidence"][i],
+            data_reliability_score=data_rel["score"],
+            detection_confidence_score=detection_rel["score"],
+            fine_diag_allowed=bool(det["fine_period"][i]),
+            meteo_quality_ok=bool(det["meteo_quality_ok"][i]),
+            direct_grid_evidence=direct_grid,
+            zero_injection_flag=zero_inj,
+            irradiance_tier=str(det["irradiance_tier"][i]),
+        )
+        confidence_notes = {
+            "data_reliability": data_rel,
+            "detection_confidence": detection_rel,
+            "diagnosis_confidence": diagnosis_rel,
+        }
 
         objs.append(
             PlantDiagnostic15m(
@@ -423,9 +466,9 @@ def run_detection_pipeline(
                 detector_version=detector_version,
                 g_poa=None if not np.isfinite(g_used[i]) else float(g_used[i]),
                 tcell_c=None,
-                pac_real_w=None if not np.isfinite(pac_real[i]) else float(pac_real[i]),
-                pac_model_w=None if not np.isfinite(pac_model[i]) else float(pac_model[i]),
-                mismatch_rel=None if not np.isfinite(mismatch[i]) else float(mismatch[i]),
+                pac_real_w=pac_real_i,
+                pac_model_w=pac_model_i,
+                mismatch_rel=mismatch_i,
                 irradiance_tier=str(det["irradiance_tier"][i]),
                 fine_diag_allowed=bool(det["fine_period"][i]),
                 meteo_quality_ok=bool(det["meteo_quality_ok"][i]),
@@ -434,13 +477,20 @@ def run_detection_pipeline(
                 state_label=state_label,
                 domain_label=domain_label,
                 diagnosis_label=diagnosis_label,
-                diagnosis_confidence=rca["diagnosis_confidence"][i],
+                diagnosis_confidence=diagnosis_rel["score"],
+                data_reliability_score=data_rel["score"],
+                data_reliability_level=data_rel["level"],
+                detection_confidence_score=detection_rel["score"],
+                detection_confidence_level=detection_rel["level"],
+                diagnosis_confidence_score=diagnosis_rel["score"],
+                diagnosis_confidence_level=diagnosis_rel["level"],
                 v_ac_v=None if not np.isfinite(vac[i]) else float(vac[i]),
                 i_ac_a=None if not np.isfinite(iac[i]) else float(iac[i]),
                 freq_hz=None if not np.isfinite(freq[i]) else float(freq[i]),
                 alarm_code_oper=None if not np.isfinite(alarm_code[i]) else int(alarm_code[i]),
                 alarm_sev_oper=None if not np.isfinite(alarm_sev[i]) else int(alarm_sev[i]),
                 evidence_json=rca["evidence_json"][i],
+                confidence_notes_json=confidence_notes,
             )
         )
 

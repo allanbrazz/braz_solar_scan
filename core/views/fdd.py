@@ -6,6 +6,7 @@ from datetime import date, datetime, time, timedelta, timezone as dt_tz
 from dataclasses import asdict, is_dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
+import json
 import logging
 import inspect
 import math
@@ -14,7 +15,7 @@ from zoneinfo import ZoneInfo
 from django.db.models import Count
 from django.db import transaction
 from django.utils import timezone
-from django.http import HttpRequest, JsonResponse
+from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import render
 from django.urls import reverse
 from django.views.decorators.http import require_GET, require_http_methods
@@ -31,6 +32,16 @@ from core.models import (
     PVPlantMergedRecord15m,
     PlantDiagnostic15m,
 )
+from core.services.fdd.reliability import (
+    compute_data_reliability,
+    compute_detection_confidence,
+    compute_diagnosis_confidence,
+)
+
+try:
+    from core.services.fdd.report_pdf import build_mismatch_pdf_report  # type: ignore
+except Exception:
+    build_mismatch_pdf_report = None  # type: ignore
 
 logger = logging.getLogger(__name__)
 
@@ -294,6 +305,7 @@ def mismatch_fdd_view(request: HttpRequest):
             "gpoa_min": float((request.GET.get("gpoa_min") or 50)),
             "pmin_w": float((request.GET.get("pmin_w") or 0)),
             "api_url": reverse("mismatch_fdd_api"),
+            "export_pdf_url": reverse("mismatch_fdd_export_pdf"),
             "version_summary": MISMATCH_VERSION_SUMMARY,
         },
     )
@@ -840,6 +852,25 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
     # ----------------------------
     # PIPELINE: Detecção + RCA
     # ----------------------------
+    coarse_period = [False] * n
+    fine_period = [False] * n
+    meteo_quality_ok = [False] * n
+    irradiance_tier = ["N"] * n
+    rca: Dict[str, Any] = {}
+
+    def _pick_diag_row_for_ts(ts_utc: datetime) -> Optional[Dict[str, Any]]:
+        by_src = per_ts.get(ts_utc, {})
+        if not by_src:
+            return None
+        for s in selected_sources:
+            rr = by_src.get(s)
+            if rr is not None:
+                return rr
+        try:
+            return next(iter(by_src.values()))
+        except Exception:
+            return None
+
     use_legacy = (data.get("legacy") or data.get("use_legacy") or "").strip().lower() in ("1", "true", "yes", "on")
 
     # ✅ gate usa flag_inv_missing_all (não “any”), para não matar pontos parcialmente disponíveis
@@ -867,6 +898,10 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
         valid_period = [bool(v) for v in base_gate]
         anomaly = [False] * n
         stable_sky = [False] * n
+        coarse_period = valid_period[:]
+        fine_period = valid_period[:]
+        meteo_quality_ok = [not bool(v) for v in flag_meteo_missing]
+        irradiance_tier = ["C" if bool(v) else "N" for v in valid_period]
         det_dbg = {}
         rca_dbg = {}
         pipeline_name = "legacy_mismatch_classifier"
@@ -1098,6 +1133,111 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
         pipeline_name = "ewma_cusum_detection + rca_patterns"
 
     # ----------------------------
+    # Camada explícita de confiabilidade (runtime da view)
+    # ----------------------------
+    diag_state_labels = [str(v) for v in (rca.get("state_labels") or (["unknown"] * n))]
+    diag_domain_labels = [str(v) for v in (rca.get("domain_labels") or (["unknown"] * n))]
+    diag_diagnosis_labels = [str(v) for v in (rca.get("diagnosis_labels") or labels)]
+    diag_base_conf = list(rca.get("diagnosis_confidence") or [None] * n)
+    diag_direct_grid = [bool(v) for v in (rca.get("direct_grid_evidence") or ([False] * n))]
+    diag_zero_inj = [bool(v) for v in (rca.get("zero_injection_flag") or ([False] * n))]
+    diag_evidence_json = list(rca.get("evidence_json") or ([{}] * n))
+
+    data_reliability_score: List[Optional[float]] = [None] * n
+    data_reliability_level: List[str] = [""] * n
+    detection_confidence_score: List[Optional[float]] = [None] * n
+    detection_confidence_level: List[str] = [""] * n
+    diagnosis_confidence_score: List[Optional[float]] = [None] * n
+    diagnosis_confidence_level: List[str] = [""] * n
+    confidence_notes: List[Dict[str, Any]] = [{} for _ in range(n)]
+
+    for i, ts_utc in enumerate(times_utc):
+        row_ref = _pick_diag_row_for_ts(ts_utc) or {}
+        mismatch_i = mismatch_rel[i]
+        pac_real_i = p_ac_w[i]
+        pac_model_i = pac_model_w[i]
+        ewma_i = None
+        cusum_i = None
+        try:
+            ewma_seq = det_dbg.get("ewma_z") if isinstance(det_dbg, dict) else None
+            if isinstance(ewma_seq, list) and i < len(ewma_seq):
+                ewma_i = ewma_seq[i]
+        except Exception:
+            ewma_i = None
+        try:
+            cusum_seq = det_dbg.get("cusum") if isinstance(det_dbg, dict) else None
+            if isinstance(cusum_seq, list) and i < len(cusum_seq):
+                cusum_i = cusum_seq[i]
+        except Exception:
+            cusum_i = None
+
+        row_runtime = dict(row_ref)
+        row_runtime.setdefault("flag_inv_missing", flag_inv_missing_all[i])
+        row_runtime.setdefault("flag_low_coverage", flag_inv_missing_partial[i])
+        row_runtime.setdefault("flag_meteo_missing", flag_meteo_missing[i])
+        row_runtime.setdefault("flag_meteo_low_confidence", flag_meteo_low_confidence[i])
+        row_runtime.setdefault("flag_meteo_interpolated", flag_meteo_interpolated[i])
+        row_runtime.setdefault("flag_meteo_outlier", flag_meteo_outlier[i])
+        row_runtime.setdefault("flag_meteo_artifact", flag_meteo_artifact[i])
+        row_runtime.setdefault("inv_coverage", inv_cov[i])
+        row_runtime.setdefault("meteo_qc_score", meteo_qc_score[i])
+        row_runtime.setdefault("gti", gti[i])
+        row_runtime.setdefault("ghi", ghi[i])
+
+        anomaly_final = bool(anomaly[i]) or bool(diag_direct_grid[i]) or str(diag_diagnosis_labels[i] or "") not in {"normal", "ok", "invalid"}
+
+        data_rel = compute_data_reliability(
+            row=row_runtime,
+            pac_real_w=pac_real_i,
+            pac_model_w=pac_model_i,
+            mismatch_rel=mismatch_i,
+        )
+        det_rel = compute_detection_confidence(
+            data_reliability_score=data_rel["score"],
+            valid_period=bool(valid_period[i]),
+            coarse_period=bool(coarse_period[i]),
+            fine_period=bool(fine_period[i]),
+            meteo_quality_ok=bool(meteo_quality_ok[i]),
+            stable_sky=bool(stable_sky[i]),
+            anomaly_flag=bool(anomaly_final),
+            mismatch_rel=mismatch_i,
+            ewma_z=ewma_i,
+            cusum_score=cusum_i,
+        )
+        diag_rel = compute_diagnosis_confidence(
+            diagnosis_label=str(diag_diagnosis_labels[i] or labels[i] or "invalid"),
+            base_diagnosis_confidence=(diag_base_conf[i] if i < len(diag_base_conf) else None),
+            data_reliability_score=data_rel["score"],
+            detection_confidence_score=det_rel["score"],
+            fine_diag_allowed=bool(fine_period[i]),
+            meteo_quality_ok=bool(meteo_quality_ok[i]),
+            direct_grid_evidence=bool(diag_direct_grid[i]),
+            zero_injection_flag=bool(diag_zero_inj[i]),
+            irradiance_tier=str(irradiance_tier[i] or "N"),
+        )
+
+        data_reliability_score[i] = data_rel["score"]
+        data_reliability_level[i] = str(data_rel["level"] or "")
+        detection_confidence_score[i] = det_rel["score"]
+        detection_confidence_level[i] = str(det_rel["level"] or "")
+        diagnosis_confidence_score[i] = diag_rel["score"]
+        diagnosis_confidence_level[i] = str(diag_rel["level"] or "")
+        confidence_notes[i] = {
+            "data_reliability": data_rel,
+            "detection_confidence": det_rel,
+            "diagnosis_confidence": diag_rel,
+            "diagnostic_context": {
+                "state_label": diag_state_labels[i],
+                "domain_label": diag_domain_labels[i],
+                "diagnosis_label": diag_diagnosis_labels[i],
+                "direct_grid_evidence": bool(diag_direct_grid[i]),
+                "zero_injection_flag": bool(diag_zero_inj[i]),
+                "irradiance_tier": str(irradiance_tier[i] or "N"),
+                "evidence_json": diag_evidence_json[i] if i < len(diag_evidence_json) else {},
+            },
+        }
+
+    # ----------------------------
     # Série de plot do mismatch (visual)
     # Evita explosões em baixa irradiância / baixa potência
     # e preserva gaps reais quando faltam dados operativos.
@@ -1221,6 +1361,15 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
             "ts_utc": ts_utc.astimezone(dt_tz.utc).isoformat(),
             "source_meteo": src_meteo,
             "policy": policy_used[i],
+            "confidence": {
+                "data_reliability_score": data_reliability_score[i],
+                "data_reliability_level": data_reliability_level[i],
+                "detection_confidence_score": detection_confidence_score[i],
+                "detection_confidence_level": detection_confidence_level[i],
+                "diagnosis_confidence_score": diagnosis_confidence_score[i],
+                "diagnosis_confidence_level": diagnosis_confidence_level[i],
+                "notes": confidence_notes[i],
+            },
             "chosen_total": {
                 "p_ac_w": p_ac_w[i],
                 "p_ac_mppt_sum_w": p_ac_mppt_sum_w[i],
@@ -1264,6 +1413,11 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
             "selected_sources": selected_sources,
         },
         "versions": MISMATCH_VERSION_SUMMARY,
+        "confidence_summary": {
+            "data_reliability_mean": _mean_none(data_reliability_score),
+            "detection_confidence_mean": _mean_none(detection_confidence_score),
+            "diagnosis_confidence_mean": _mean_none(diagnosis_confidence_score),
+        },
         "sources": {
             "source_meteo": src_meteo,
             "source_oper_list": source_oper_list,   # ✅ disponíveis
@@ -1323,6 +1477,20 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
             "mismatch_rel": mismatch_rel_plot,
             "mismatch_rel_raw": mismatch_rel_raw,
             "gpoa_plot_min": [float(gpoa_plot_min)] * n,
+
+            # confiabilidade em camadas
+            "data_reliability_score": data_reliability_score,
+            "data_reliability_level": data_reliability_level,
+            "detection_confidence_score": detection_confidence_score,
+            "detection_confidence_level": detection_confidence_level,
+            "diagnosis_confidence_score": diagnosis_confidence_score,
+            "diagnosis_confidence_level": diagnosis_confidence_level,
+            "state_label": diag_state_labels,
+            "domain_label": diag_domain_labels,
+            "diagnosis_label": diag_diagnosis_labels,
+            "direct_grid_evidence": diag_direct_grid,
+            "zero_injection_flag": diag_zero_inj,
+            "irradiance_tier": irradiance_tier,
             "pmodel_plot_min": [float(pmodel_plot_min)] * n,
 
             # detecção + validade
@@ -1362,3 +1530,66 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
     }
 
     return _json_response_strict(payload)
+
+@require_GET
+@login_required
+def mismatch_fdd_export_pdf(request: HttpRequest) -> HttpResponse:
+    try:
+        if build_mismatch_pdf_report is None:
+            return HttpResponse("Serviço de geração PDF não disponível.", content_type="text/plain; charset=utf-8", status=500)
+
+        plant_id = int(request.GET.get("plant_id") or request.GET.get("plant_pk") or request.GET.get("pk") or 0)
+        if not plant_id:
+            return HttpResponse("plant_id obrigatório", content_type="text/plain; charset=utf-8", status=400)
+
+        plant = PVPlant.objects.filter(id=plant_id).first()
+        if plant is None:
+            return HttpResponse("Planta não encontrada", content_type="text/plain; charset=utf-8", status=404)
+        if (not request.user.is_superuser) and plant.owner_id and (plant.owner_id != request.user.id):
+            return HttpResponse("Sem permissão para esta planta", content_type="text/plain; charset=utf-8", status=403)
+
+        api_response = mismatch_fdd_api(request)
+        payload = json.loads(api_response.content.decode("utf-8"))
+        if not payload.get("ok"):
+            return HttpResponse(str(payload.get("error") or "Falha ao montar payload do relatório."), content_type="text/plain; charset=utf-8", status=400)
+
+        tz_name = getattr(plant, "timezone", "UTC") or "UTC"
+        try:
+            tz = ZoneInfo(tz_name)
+        except Exception:
+            tz = ZoneInfo("UTC")
+
+        d0 = _parse_date((request.GET.get("start") or "").strip())
+        d1 = _parse_date((request.GET.get("end") or "").strip())
+        if not d0 or not d1:
+            return HttpResponse("start/end são obrigatórios", content_type="text/plain; charset=utf-8", status=400)
+        if d1 < d0:
+            d0, d1 = d1, d0
+
+        filters = {
+            "warn_abs": request.GET.get("warn_abs") or payload.get("thresholds", {}).get("warn_abs"),
+            "fault_abs": request.GET.get("fault_abs") or payload.get("thresholds", {}).get("fault_abs"),
+            "gpoa_min": request.GET.get("gpoa_min") or payload.get("thresholds", {}).get("gpoa_gate"),
+            "pmin_w": request.GET.get("pmin_w") or payload.get("thresholds", {}).get("pmin_w"),
+            "dt_minutes": request.GET.get("dt_minutes") or payload.get("series", {}).get("dt_minutes") or request.GET.get("bin_minutes"),
+            "source_oper": request.GET.get("source_oper") or request.GET.get("src_oper") or None,
+            "source_meteo": request.GET.get("source_meteo") or request.GET.get("src_meteo") or payload.get("sources", {}).get("source_meteo"),
+            "pipeline": payload.get("pipeline"),
+        }
+
+        generated_at_local = datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S %Z")
+        pdf_bytes = build_mismatch_pdf_report(
+            plant_name=str(getattr(plant, "nome", f"Plant {plant_id}")),
+            payload=payload,
+            filters=filters,
+            generated_at_local=generated_at_local,
+            user_label=str(getattr(request.user, "username", "") or getattr(request.user, "email", "") or request.user.pk),
+        )
+
+        filename = f"mismatch_fdd_report_plant{plant_id}_{d0.isoformat()}_{d1.isoformat()}.pdf"
+        resp = HttpResponse(pdf_bytes, content_type="application/pdf")
+        resp["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return resp
+    except Exception as e:
+        logger.exception("mismatch_fdd_export_pdf failed")
+        return HttpResponse(f"Erro ao gerar PDF: {e}", content_type="text/plain; charset=utf-8", status=500)

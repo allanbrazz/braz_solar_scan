@@ -9,6 +9,7 @@ from django.db import transaction
 from django.db.models import QuerySet
 
 from core.models import FaultEvent, PlantDiagnostic15m
+from core.services.fdd.reliability import aggregate_event_confidence
 
 
 COARSE_EVENT_BY_DIAGNOSIS = {
@@ -157,6 +158,14 @@ def build_fault_events_for_range(
         for g in groups:
             event_label_prelim, domain_prelim, state_prelim = _event_label_prelim(g)
             diagnosis_counter = Counter(str((getattr(r, "diagnosis_label", None) or getattr(r, "rca_label", None) or "unknown")) for r in g)
+            event_conf = aggregate_event_confidence(
+                data_scores=(getattr(r, "data_reliability_score", None) for r in g),
+                detection_scores=(getattr(r, "detection_confidence_score", None) for r in g),
+                diagnosis_scores=(getattr(r, "diagnosis_confidence_score", getattr(r, "diagnosis_confidence", None)) for r in g),
+                diagnosis_labels=(getattr(r, "diagnosis_label", None) for r in g),
+                per_bin_notes=(getattr(r, "confidence_notes_json", None) for r in g),
+                n_bins=len(g),
+            )
             defaults = {
                 "source_oper": p.source_oper,
                 "source_meteo": p.source_meteo,
@@ -168,7 +177,14 @@ def build_fault_events_for_range(
                 "event_label_prelim": event_label_prelim,
                 "known_vs_unknown": "pending",
                 "final_label": "",
-                "confidence": _safe_mean(getattr(r, "diagnosis_confidence", None) for r in g),
+                "confidence": event_conf.get("diagnosis_confidence_score"),
+                "data_reliability_score": event_conf.get("data_reliability_score"),
+                "data_reliability_level": event_conf.get("data_reliability_level", ""),
+                "detection_confidence_score": event_conf.get("detection_confidence_score"),
+                "detection_confidence_level": event_conf.get("detection_confidence_level", ""),
+                "diagnosis_confidence_score": event_conf.get("diagnosis_confidence_score"),
+                "diagnosis_confidence_level": event_conf.get("diagnosis_confidence_level", ""),
+                "confidence_notes_json": event_conf.get("confidence_notes_json"),
                 "novelty_score": None,
                 "meta": {
                     "n_bins": len(g),
@@ -183,6 +199,7 @@ def build_fault_events_for_range(
                     "source_meteo": p.source_meteo,
                     "detector_version": p.detector_version,
                     "irradiance_tier_counts": dict(Counter(str(getattr(r, "irradiance_tier", "N")) for r in g)),
+                    "confidence_summary": event_conf,
                 },
             }
             obj, was_created = FaultEvent.objects.update_or_create(

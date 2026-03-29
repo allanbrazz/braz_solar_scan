@@ -422,7 +422,7 @@ def build_mppt_gnn_pdf_report(*, plant_name: str, filters: Dict[str, Any], paylo
     story.append(PageBreak())
     story.append(_paragraph("Histórico de eventos operativos", styles["section"]))
     if event_rows:
-        evt_rows = [["ID", "Início local", "Fim local", "Status", "Final label", "MPPT/pred", "Conf.", "Sev.", "Loss [Wh]"]]
+        evt_rows = [["ID", "Início local", "Fim local", "Status", "Final label", "MPPT/pred", "Conf.", "Dados", "Detec.", "Diag.", "Sev.", "Loss [Wh]"]]
         for r in event_rows:
             evt_rows.append([
                 _fmt_int(r.get("event_id")),
@@ -432,10 +432,13 @@ def build_mppt_gnn_pdf_report(*, plant_name: str, filters: Dict[str, Any], paylo
                 _safe_text(r.get("final_label")),
                 _safe_text(r.get("mppt_pred")),
                 _fmt_pct(r.get("confidence")),
+                _fmt_pct(r.get("event_data_reliability")),
+                _fmt_pct(r.get("event_detection_confidence")),
+                _fmt_pct(r.get("event_diagnosis_confidence")),
                 _fmt_float(r.get("severity_score"), 2),
                 _fmt_float(r.get("energy_loss_wh"), 1),
             ])
-        story.append(_make_table(evt_rows, widths=[14 * mm, 34 * mm, 34 * mm, 22 * mm, 40 * mm, 54 * mm, 16 * mm, 16 * mm, 20 * mm], font_size=7.0, left_cols=(1, 2, 3, 4, 5)))
+        story.append(_make_table(evt_rows, widths=[12 * mm, 27 * mm, 27 * mm, 16 * mm, 31 * mm, 40 * mm, 13 * mm, 13 * mm, 13 * mm, 13 * mm, 14 * mm, 18 * mm], font_size=6.6, left_cols=(1, 2, 3, 4, 5)))
     else:
         story.append(_paragraph("Não há eventos persistidos para os filtros e o intervalo selecionados.", styles["body"]))
 

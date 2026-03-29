@@ -49,6 +49,7 @@ from core.views.inversor import (
 from core.views.fdd import (
     mismatch_fdd_api, 
     mismatch_fdd_view,
+    mismatch_fdd_export_pdf,
 )
 
 from core.views.mppt_gnn_fdd import (
@@ -118,6 +119,7 @@ urlpatterns = [
     # FDD (Mismatch)
     path("dashboard/fdd/mismatch/", mismatch_fdd_view, name="mismatch_fdd"),
     path("dashboard/fdd/mismatch/api/", mismatch_fdd_api, name="mismatch_fdd_api"),
+    path("dashboard/fdd/mismatch/export-pdf/", mismatch_fdd_export_pdf, name="mismatch_fdd_export_pdf"),
     path("dashboard/fdd/mppt-gnn/", mppt_gnn_fdd_view, name="mppt_gnn_fdd_view"),
     path("dashboard/fdd/mppt-gnn/api/", mppt_gnn_fdd_api, name="mppt_gnn_fdd_api"),
     path("dashboard/fdd/mppt-gnn/dump/", mppt_gnn_fdd_dump_api, name="mppt_gnn_fdd_dump_api"),
