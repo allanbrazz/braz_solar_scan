@@ -6,7 +6,7 @@ from datetime import date, datetime, time, timedelta, timezone as dt_tz
 from typing import Any, Dict, List, Optional
 
 from zoneinfo import ZoneInfo
-from django.db.models import Count, Min, Max
+from django.db.models import Count, Min, Max, Q
 from django.utils import timezone
 
 from core.models import PVPlant, PVPlantMergedRecord15m, MPPTDiagnostic15m
@@ -25,6 +25,24 @@ def _plant_tz(plant: PVPlant) -> ZoneInfo:
         return ZoneInfo("UTC")
 
 
+
+
+def _is_mppt_source(src: str) -> bool:
+    return "|MPPT" in str(src or "").upper()
+
+
+def _source_base(src: str) -> str:
+    s = str(src or "").strip()
+    if not s:
+        return ""
+    u = s.upper()
+    pos = u.find("|MPPT")
+    if pos >= 0:
+        return s[:pos].strip()
+    if u.endswith("|AGG"):
+        return s[:-4].strip()
+    return s
+
 def _pick_best_source_meteo(plant_id: int, dt0_utc: datetime, dt1_utc: datetime) -> Optional[str]:
     row = (
         PVPlantMergedRecord15m.objects.filter(plant_id=plant_id, ts_utc__gte=dt0_utc, ts_utc__lt=dt1_utc)
@@ -37,7 +55,7 @@ def _pick_best_source_meteo(plant_id: int, dt0_utc: datetime, dt1_utc: datetime)
 
 
 def _list_source_oper(plant_id: int, source_meteo: str, dt0_utc: datetime, dt1_utc: datetime) -> list[str]:
-    rows = (
+    rows = list(
         PVPlantMergedRecord15m.objects.filter(
             plant_id=plant_id,
             source_meteo=source_meteo,
@@ -48,7 +66,20 @@ def _list_source_oper(plant_id: int, source_meteo: str, dt0_utc: datetime, dt1_u
         .annotate(n=Count("id"))
         .order_by("-n")
     )
-    return [r["source_oper"] for r in rows if r.get("source_oper")]
+    if not rows:
+        return []
+
+    agg = [str(r["source_oper"]) for r in rows if r.get("source_oper") and (not _is_mppt_source(r.get("source_oper")))]
+    if agg:
+        return agg
+
+    collapsed: Dict[str, int] = {}
+    for r in rows:
+        base = _source_base(r.get("source_oper"))
+        if not base:
+            continue
+        collapsed[base] = collapsed.get(base, 0) + int(r.get("n") or 0)
+    return [k for k, _v in sorted(collapsed.items(), key=lambda kv: (-kv[1], kv[0]))]
 
 
 def _bucket_15m_utc(tsu: datetime) -> datetime:
@@ -192,6 +223,10 @@ def seed_mppt_predictions(
         "p_ac_w",
         "i_dc_a",
         "temp_air",
+        "mppt1_idc_a",
+        "mppt2_idc_a",
+        "mppt3_idc_a",
+        "mppt4_idc_a",
     ]
 
     created_attempt = 0
@@ -208,29 +243,48 @@ def seed_mppt_predictions(
     for src in sources:
         src_key = str(src)
 
-        qs = (
+        raw_rows = list(
             PVPlantMergedRecord15m.objects.filter(
                 plant_id=plant_id,
                 source_meteo=source_meteo,
-                source_oper=src,
                 ts_utc__gte=dt0_utc,
                 ts_utc__lt=dt1_utc,
             )
-            .order_by("ts_utc")
+            .filter(Q(source_oper=src_key) | Q(source_oper__startswith=f"{src_key}|MPPT"))
+            .order_by("ts_utc", "source_oper")
             .values(*fields)
         )
 
-        dk = source_to_device.get(src_key)
-        raw_map = raw_all.get(dk) if dk else None
-
-        for r in qs.iterator(chunk_size=2000):
-            rows_scanned += 1
-
+        # Consolida layout legado (...|MPPTk) e layout canônico (row única com mppt embutido)
+        rows_by_ts: Dict[datetime, Dict[str, Any]] = {}
+        legacy_by_ts: Dict[datetime, Dict[int, Dict[str, Any]]] = {}
+        for r in raw_rows:
             tsu = r.get("ts_utc")
             if tsu is None:
                 continue
             if tsu.tzinfo is None:
                 tsu = tsu.replace(tzinfo=dt_tz.utc)
+            src_name = str(r.get("source_oper") or "")
+            if _is_mppt_source(src_name):
+                try:
+                    mppt_idx = int(src_name.upper().split("|MPPT", 1)[1])
+                except Exception:
+                    mppt_idx = None
+                if mppt_idx is not None:
+                    legacy_by_ts.setdefault(tsu, {})[mppt_idx] = r
+            else:
+                rows_by_ts[tsu] = r
+
+        dk = source_to_device.get(src_key)
+        raw_map = raw_all.get(dk) if dk else None
+
+        for tsu in sorted(set(rows_by_ts.keys()) | set(legacy_by_ts.keys())):
+            rows_scanned += 1
+            base = rows_by_ts.get(tsu)
+            legacy = legacy_by_ts.get(tsu, {})
+            r = base or (next(iter(legacy.values())) if legacy else None)
+            if r is None:
+                continue
 
             # irradiância (usa GTI se existir, senão GHI)
             gti = _safe_float(r.get("gti"))
@@ -242,9 +296,17 @@ def seed_mppt_predictions(
             # potência
             pdc = _safe_float(r.get("p_dc_w"))
             pac = _safe_float(r.get("p_ac_w"))
+            if base is None and legacy:
+                if pdc is None:
+                    vals = [_safe_float(rr.get("p_dc_w")) for rr in legacy.values()]
+                    vals = [v for v in vals if v is not None]
+                    pdc = sum(vals) if vals else None
+                if pac is None:
+                    vals = [_safe_float(rr.get("p_ac_w")) for rr in legacy.values()]
+                    vals = [v for v in vals if v is not None]
+                    pac = sum(vals) if vals else None
             p_val = pdc if pdc is not None else pac
 
-            # daylight
             daylight = False
             if gpoa_val is not None and gpoa_val >= cfg.daylight_min_wm2:
                 daylight = True
@@ -254,7 +316,6 @@ def seed_mppt_predictions(
                 continue
             rows_daylight += 1
 
-            # correntes MPPT: prefer RAW
             I_mppt: list[Optional[float]] = [None, None, None, None]
             has_mppt_real = False
 
@@ -266,11 +327,18 @@ def seed_mppt_predictions(
                     for k in (1, 2, 3, 4):
                         I_mppt[k - 1] = _safe_float(raw_row.get(f"mppt{k}_idc_a"))
 
+            if not any(v is not None for v in I_mppt):
+                if base is not None:
+                    for k in (1, 2, 3, 4):
+                        I_mppt[k - 1] = _safe_float(base.get(f"mppt{k}_idc_a"))
+                for k in (1, 2, 3, 4):
+                    if I_mppt[k - 1] is None and legacy.get(k) is not None:
+                        I_mppt[k - 1] = _safe_float(legacy[k].get("i_dc_a"))
+
             has_mppt_real = any(v is not None for v in I_mppt)
             if has_mppt_real:
                 rows_have_mppt_current += 1
 
-            # fallback agregado
             i_dc = _safe_float(r.get("i_dc_a"))
             if i_dc is not None:
                 rows_have_agg_current += 1
@@ -279,11 +347,8 @@ def seed_mppt_predictions(
                 if not (cfg.allow_agg_fallback and (i_dc is not None)):
                     continue
                 I_mppt = [i_dc / float(cfg.nmax_mppt) for _ in range(cfg.nmax_mppt)]
-                has_mppt_real = False  # fallback
+                has_mppt_real = False
 
-            # ---------------------------
-            # Classes globais (afetam todos MPPTs)
-            # ---------------------------
             off_under_sun = (
                 (gpoa_val is not None)
                 and (gpoa_val >= cfg.off_gate_wm2)
@@ -293,13 +358,6 @@ def seed_mppt_predictions(
                 )
             )
 
-            # ---------------------------
-            # Classificação por MPPT
-            # pred_code: 0 normal
-            #           1 mppt_disconnected
-            #           2 inverter_off_under_sun
-            #           3 mppt_imbalance
-            # ---------------------------
             for k in range(1, cfg.nmax_mppt + 1):
                 ik = I_mppt[k - 1]
                 if ik is None:
@@ -319,7 +377,6 @@ def seed_mppt_predictions(
                     peer_sorted = sorted(peer)
                     peer_med = peer_sorted[len(peer_sorted)//2] if peer_sorted else 0.0
 
-                    # 1) disconnected (severo)
                     can_disc = (has_mppt_real is True) and (gpoa_val is not None) and (gpoa_val >= cfg.disc_gate_wm2)
                     if can_disc and (peer_max >= cfg.i_peer_a):
                         if (ik <= cfg.i_zero_a) or (peer_max > 0 and ik <= cfg.i_disc_ratio * peer_max):
@@ -327,7 +384,6 @@ def seed_mppt_predictions(
                             pred_label = "mppt_disconnected"
                             pred_pmax = 0.95
 
-                    # 2) imbalance (parcial)
                     if pred_code == 0:
                         can_imb = (has_mppt_real is True) and (gpoa_val is not None) and (gpoa_val >= cfg.imb_gate_wm2)
                         if can_imb and (peer_med >= cfg.imb_peer_a) and (peer_med > 0):

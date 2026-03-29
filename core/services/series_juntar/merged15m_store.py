@@ -10,6 +10,8 @@ from core.models import PVPlant, PVPlantMergedRecord15m
 
 MERGED_COLS = (
     "p_dc_w", "p_ac_w", "v_dc_v", "i_dc_a", "v_ac_v", "i_ac_a", "freq_hz",
+    "mppt1_vdc_v", "mppt2_vdc_v", "mppt3_vdc_v", "mppt4_vdc_v",
+    "mppt1_idc_a", "mppt2_idc_a", "mppt3_idc_a", "mppt4_idc_a",
     "e_ac_wh_15",
     "inv_n", "inv_coverage", "flag_low_coverage",
     "ghi", "dni", "dhi", "gti",
@@ -66,8 +68,24 @@ def _row_getf(row, key: str) -> Optional[float]:
 def _has_any_mppt_cols(df: pd.DataFrame) -> bool:
     want = []
     for k in MPPT_KS:
-        want += [f"mppt{k}_p_dc_w", f"mppt{k}_v_dc_v", f"mppt{k}_i_dc_a"]
+        want += [
+            f"mppt{k}_p_dc_w",
+            f"mppt{k}_v_dc_v", f"mppt{k}_vdc_v",
+            f"mppt{k}_i_dc_a", f"mppt{k}_idc_a",
+        ]
     return any(c in df.columns for c in want)
+
+
+def _row_alias_float(row, *keys: str) -> Optional[float]:
+    for key in keys:
+        try:
+            val = row.get(key)
+        except Exception:
+            val = None
+        out = _to_float(val)
+        if out is not None:
+            return out
+    return None
 
 
 @transaction.atomic

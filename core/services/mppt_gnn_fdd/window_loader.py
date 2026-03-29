@@ -6,7 +6,7 @@ from typing import Any, Dict, Optional, Tuple, List
 
 import numpy as np
 from zoneinfo import ZoneInfo
-from django.db.models import Count
+from django.db.models import Count, Q
 
 from core.models import PVPlant, PVPlantMergedRecord15m
 from core.services.mppt_gnn_fdd.features import WindowArrays
@@ -21,6 +21,32 @@ def _plant_tz(plant: PVPlant) -> ZoneInfo:
     except Exception:
         return ZoneInfo("UTC")
 
+
+
+
+def _is_mppt_source(src: str) -> bool:
+    return "|MPPT" in str(src or "").upper()
+
+
+def _source_base(src: str) -> str:
+    s = str(src or "").strip()
+    if not s:
+        return ""
+    u = s.upper()
+    pos = u.find("|MPPT")
+    if pos >= 0:
+        return s[:pos].strip()
+    if u.endswith("|AGG"):
+        return s[:-4].strip()
+    return s
+
+
+def _is_agg_source(src: str) -> bool:
+    s = str(src or "").strip()
+    if not s:
+        return False
+    u = s.upper()
+    return ("|" not in u) or u.endswith("|AGG")
 
 def _pick_best_source_meteo(
     plant_id: int,
@@ -47,7 +73,7 @@ def _pick_best_source_oper(
     dt0_utc: datetime,
     dt1_utc: datetime,
 ) -> Optional[str]:
-    row = (
+    rows = list(
         PVPlantMergedRecord15m.objects.filter(
             plant_id=plant_id,
             source_meteo=source_meteo,
@@ -57,9 +83,24 @@ def _pick_best_source_oper(
         .values("source_oper")
         .annotate(n=Count("id"))
         .order_by("-n")
-        .first()
     )
-    return (row or {}).get("source_oper")
+    if not rows:
+        return None
+
+    agg_rows = [r for r in rows if _is_agg_source((r or {}).get("source_oper"))]
+    if agg_rows:
+        return (agg_rows[0] or {}).get("source_oper")
+
+    # legado: só existem rows ...|MPPTk no intervalo; colapsa para o source base.
+    collapsed: Dict[str, int] = {}
+    for r in rows:
+        base = _source_base((r or {}).get("source_oper"))
+        if not base:
+            continue
+        collapsed[base] = collapsed.get(base, 0) + int((r or {}).get("n") or 0)
+    if not collapsed:
+        return None
+    return max(collapsed.items(), key=lambda kv: kv[1])[0]
 
 
 def _grid_utc(
