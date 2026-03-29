@@ -273,13 +273,27 @@ def _severity_from_point(code: Any, valid: Any, rca_code_to_sev: Dict[str, str])
     return {"ok": STATE_OK, "warn": STATE_WARN, "crit": STATE_CRIT}.get(severity, STATE_NONE)
 
 
+def _severity_from_runtime(value: Any) -> Optional[int]:
+    s = _safe_text(value, "").strip().lower()
+    if s == "ok":
+        return STATE_OK
+    if s == "warn":
+        return STATE_WARN
+    if s == "crit":
+        return STATE_CRIT
+    if s == "none":
+        return STATE_NONE
+    return None
+
+
 def _iter_points(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
     t_local = _series(payload, "t_local")
     hm_day = _series(payload, "hm_day_local")
     hm_min = _series(payload, "hm_minute_local")
-    labels = _series(payload, "labels") or _series(payload, "rca_label")
-    codes = _series(payload, "codes") or _series(payload, "rca_code")
+    labels = _series(payload, "diagnosis_label") or _series(payload, "label") or _series(payload, "labels") or _series(payload, "rca_label")
+    codes = _series(payload, "code") or _series(payload, "codes") or _series(payload, "rca_code")
     valid = _series(payload, "valid") or _series(payload, "valid_period")
+    sev_runtime = _series(payload, "sev_runtime") or _series(payload, "cls") or _series(payload, "hm_class")
     mismatch = _series(payload, "mismatch_rel_raw") or _series(payload, "mismatch_rel")
     pac_real = _series(payload, "p_ac_real_w") or _series(payload, "p_ac_w")
     pac_model = _series(payload, "p_ac_model_w")
@@ -303,7 +317,9 @@ def _iter_points(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
     for i in range(n):
         code = codes[i] if i < len(codes) else None
         val = valid[i] if i < len(valid) else None
-        state = _severity_from_point(code, val, rca_code_to_sev)
+        state = _severity_from_runtime(sev_runtime[i] if i < len(sev_runtime) else None)
+        if state is None:
+            state = _severity_from_point(code, val, rca_code_to_sev)
         label = labels[i] if i < len(labels) else None
         points.append(
             {

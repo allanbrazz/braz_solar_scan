@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from core.views._imports import *  # mantém o teu padrão
+from collections import Counter
 from datetime import date, datetime, time, timedelta, timezone as dt_tz
 from dataclasses import asdict, is_dataclass
 from typing import Any, Dict, List, Optional, Tuple
@@ -37,6 +38,7 @@ from core.services.fdd.reliability import (
     compute_detection_confidence,
     compute_diagnosis_confidence,
 )
+from core.services.fdd.events import EventBuildParams, build_fault_events_for_range
 
 try:
     from core.services.fdd.report_pdf import build_mismatch_pdf_report  # type: ignore
@@ -78,6 +80,68 @@ def _is_agg_source(src: str) -> bool:
     if u.endswith("|AGG"):
         return True
     return False
+
+
+def _source_root(src: str) -> str:
+    s = (src or "").strip()
+    if not s:
+        return ""
+    return s.split("|", 1)[0].strip()
+
+
+def _canonical_source_oper(selected_sources: List[str]) -> str:
+    for s in selected_sources:
+        if _is_agg_source(s):
+            return s
+    if selected_sources:
+        return _source_root(selected_sources[0])
+    return ""
+
+
+def _runtime_severity(
+    *,
+    state_label: str,
+    diagnosis_label: str,
+    direct_grid_evidence: bool,
+    anomaly_flag: bool,
+) -> str:
+    state = str(state_label or "").strip().lower()
+    diag = str(diagnosis_label or "").strip().lower()
+
+    if diag in {"ok", "normal"} or state == "injecting_normal":
+        return "ok"
+
+    if diag in {
+        "grid_overvoltage_trip",
+        "grid_undervoltage_trip",
+        "grid_overfrequency_trip",
+        "grid_underfrequency_trip",
+        "inverter_off_under_sun",
+        "unknown_shutdown_with_sun",
+    }:
+        return "crit"
+
+    if diag in {
+        "grid_overvoltage_derating",
+        "grid_undervoltage_derating",
+        "partial_generation_loss_probable",
+        "persistent_underperformance",
+        "dc_side_partial_loss_probable",
+        "dc_side_voltage_anomaly_probable",
+        "curtailment_clipping",
+    } or state == "injecting_degraded":
+        return "warn"
+
+    if direct_grid_evidence and state == "sun_available_not_injecting":
+        return "crit"
+
+    if diag == "invalid" or state in {"telemetry_invalid", "unknown", "low_irradiance"}:
+        return "none"
+
+    if anomaly_flag:
+        return "warn"
+
+    return "none"
 
 
 # ----------------------------
@@ -187,90 +251,145 @@ def _pick_best_sources(plant_id: int, dt0_utc: datetime, dt1_utc: datetime) -> T
 def _upsert_diag15m(
     *,
     plant: PVPlant,
+    source_oper: str,
+    source_meteo: str,
+    detector_version: str,
     times_utc: List[datetime],
-    codes: List[int],
-    labels: List[str],
+    rca_codes: List[int],
+    rca_labels: List[str],
     valid: List[bool],
+    anomaly_flags: List[bool],
+    detector_scores: List[Optional[float]],
+    ewma_z: List[Optional[float]],
+    cusum_scores: List[Optional[float]],
+    stable_sky: List[bool],
     g_poa: List[Optional[float]],
     tcell_c: List[Optional[float]],
     pac_real_w: List[Optional[float]],
     pac_model_w: List[Optional[float]],
     mismatch_rel: List[Optional[float]],
+    irradiance_tier: List[str],
+    fine_diag_allowed: List[bool],
+    meteo_quality_ok: List[bool],
+    direct_grid_evidence: List[bool],
+    zero_injection_flag: List[bool],
+    state_labels: List[str],
+    domain_labels: List[str],
+    diagnosis_labels: List[str],
+    diagnosis_confidence_score: List[Optional[float]],
+    data_reliability_score: List[Optional[float]],
+    data_reliability_level: List[str],
+    detection_confidence_score: List[Optional[float]],
+    detection_confidence_level: List[str],
+    diagnosis_confidence_level: List[str],
+    v_ac_v: List[Optional[float]],
+    i_ac_a: List[Optional[float]],
+    freq_hz: List[Optional[float]],
+    alarm_code_oper: List[Optional[int]],
+    alarm_sev_oper: List[Optional[int]],
+    evidence_json: List[dict],
+    confidence_notes_json: List[dict],
 ) -> Dict[str, Any]:
     """
-    Upsert em PlantDiagnostic15m para o range.
-    FIX:
-      - bulk_create/bulk_update NÃO disparam auto_now/auto_now_add
-      - setamos updated_at/created_at manualmente.
+    Persiste exatamente o diagnóstico runtime exibido na tela do Mismatch.
+
+    Importante:
+      - a fonte canônica é um único source_oper agregado por bin;
+      - remove registros antigos deste detector/range/fonte antes de recriar;
+      - mantém PlantDiagnostic15m sincronizado com dump_by_tkey / PDF.
     """
-    assert (
-        len(times_utc)
-        == len(codes)
-        == len(labels)
-        == len(valid)
-        == len(g_poa)
-        == len(tcell_c)
-        == len(pac_real_w)
-        == len(pac_model_w)
-        == len(mismatch_rel)
+    n = len(times_utc)
+    seqs = [
+        rca_codes, rca_labels, valid, anomaly_flags, detector_scores, ewma_z,
+        cusum_scores, stable_sky, g_poa, tcell_c, pac_real_w, pac_model_w,
+        mismatch_rel, irradiance_tier, fine_diag_allowed, meteo_quality_ok,
+        direct_grid_evidence, zero_injection_flag, state_labels, domain_labels,
+        diagnosis_labels, diagnosis_confidence_score, data_reliability_score,
+        data_reliability_level, detection_confidence_score, detection_confidence_level,
+        diagnosis_confidence_level, v_ac_v, i_ac_a, freq_hz, alarm_code_oper,
+        alarm_sev_oper, evidence_json, confidence_notes_json,
+    ]
+    if not all(len(seq) == n for seq in seqs):
+        raise ValueError("_upsert_diag15m: sequências com tamanhos inconsistentes")
+
+    if not times_utc:
+        return {"deleted": 0, "created": 0, "source_oper": source_oper, "source_meteo": source_meteo, "detector_version": detector_version}
+
+    root = _source_root(source_oper)
+    delete_qs = PlantDiagnostic15m.objects.filter(
+        plant=plant,
+        ts_utc__in=times_utc,
+        source_meteo=source_meteo,
+        detector_version=detector_version,
     )
+    if root:
+        delete_qs = delete_qs.filter(source_oper__startswith=root)
+    else:
+        delete_qs = delete_qs.filter(source_oper=source_oper)
 
-    existing: Dict[datetime, PlantDiagnostic15m] = {}
-    chunk = 1000
-    for i in range(0, len(times_utc), chunk):
-        ts_chunk = times_utc[i : i + chunk]
-        qs = PlantDiagnostic15m.objects.filter(plant=plant, ts_utc__in=ts_chunk)
-        for obj in qs:
-            existing[obj.ts_utc] = obj
-
-    to_create: List[PlantDiagnostic15m] = []
-    to_update: List[PlantDiagnostic15m] = []
-
+    deleted = 0
+    objs: List[PlantDiagnostic15m] = []
     now = timezone.now()
 
     for i, ts in enumerate(times_utc):
-        obj = existing.get(ts)
-        is_new = obj is None
-        if is_new:
-            obj = PlantDiagnostic15m(plant=plant, ts_utc=ts)
-            to_create.append(obj)
-        else:
-            to_update.append(obj)
-
-        obj.rca_code = int(codes[i])
-        obj.rca_label = str(labels[i] or "invalid")
-        obj.valid = bool(valid[i])
-
-        obj.g_poa = g_poa[i]
-        obj.tcell_c = tcell_c[i]
-        obj.pac_real_w = pac_real_w[i]
-        obj.pac_model_w = pac_model_w[i]
-        obj.mismatch_rel = mismatch_rel[i]
-
-        if hasattr(obj, "updated_at"):
-            setattr(obj, "updated_at", now)
-        if is_new and hasattr(obj, "created_at") and getattr(obj, "created_at", None) is None:
-            setattr(obj, "created_at", now)
+        objs.append(
+            PlantDiagnostic15m(
+                plant=plant,
+                ts_utc=ts,
+                source_oper=source_oper,
+                source_meteo=source_meteo,
+                detector_version=detector_version,
+                rca_code=int(rca_codes[i]),
+                rca_label=str(diagnosis_labels[i] or rca_labels[i] or "invalid"),
+                valid=bool(valid[i]),
+                anomaly_flag=bool(anomaly_flags[i]),
+                detector_score=detector_scores[i],
+                ewma_z=ewma_z[i],
+                cusum_score=cusum_scores[i],
+                stable_sky=bool(stable_sky[i]),
+                g_poa=g_poa[i],
+                tcell_c=tcell_c[i],
+                pac_real_w=pac_real_w[i],
+                pac_model_w=pac_model_w[i],
+                mismatch_rel=mismatch_rel[i],
+                irradiance_tier=str(irradiance_tier[i] or "N"),
+                fine_diag_allowed=bool(fine_diag_allowed[i]),
+                meteo_quality_ok=bool(meteo_quality_ok[i]),
+                direct_grid_evidence=bool(direct_grid_evidence[i]),
+                zero_injection_flag=bool(zero_injection_flag[i]),
+                state_label=str(state_labels[i] or "unknown"),
+                domain_label=str(domain_labels[i] or "unknown"),
+                diagnosis_label=str(diagnosis_labels[i] or rca_labels[i] or "invalid"),
+                diagnosis_confidence=diagnosis_confidence_score[i],
+                data_reliability_score=data_reliability_score[i],
+                data_reliability_level=str(data_reliability_level[i] or ""),
+                detection_confidence_score=detection_confidence_score[i],
+                detection_confidence_level=str(detection_confidence_level[i] or ""),
+                diagnosis_confidence_score=diagnosis_confidence_score[i],
+                diagnosis_confidence_level=str(diagnosis_confidence_level[i] or ""),
+                v_ac_v=v_ac_v[i],
+                i_ac_a=i_ac_a[i],
+                freq_hz=freq_hz[i],
+                alarm_code_oper=alarm_code_oper[i],
+                alarm_sev_oper=alarm_sev_oper[i],
+                evidence_json=evidence_json[i] if i < len(evidence_json) else None,
+                confidence_notes_json=confidence_notes_json[i] if i < len(confidence_notes_json) else None,
+                created_at=now,
+                updated_at=now,
+            )
+        )
 
     with transaction.atomic():
-        if to_create:
-            PlantDiagnostic15m.objects.bulk_create(to_create, ignore_conflicts=True)
-        if to_update:
-            fields = [
-                "rca_code",
-                "rca_label",
-                "valid",
-                "g_poa",
-                "tcell_c",
-                "pac_real_w",
-                "pac_model_w",
-                "mismatch_rel",
-            ]
-            if hasattr(PlantDiagnostic15m, "updated_at"):
-                fields.append("updated_at")
-            PlantDiagnostic15m.objects.bulk_update(to_update, fields=fields)
+        deleted, _ = delete_qs.delete()
+        PlantDiagnostic15m.objects.bulk_create(objs, batch_size=1000)
 
-    return {"created": len(to_create), "updated": len(to_update)}
+    return {
+        "deleted": int(deleted),
+        "created": len(objs),
+        "source_oper": source_oper,
+        "source_meteo": source_meteo,
+        "detector_version": detector_version,
+    }
 
 
 @require_GET
@@ -621,8 +740,20 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
         vdc_l = [_as_float(by_src[s].get("v_dc_v")) for s in chosen] if chosen else []
         idc_l = [_as_float(by_src[s].get("i_dc_a")) for s in chosen] if chosen else []
         vac_l = [_as_float(by_src[s].get("v_ac_v")) for s in chosen] if chosen else []
-        iac_l = [_as_float(by_src[s].get("i_ac_a")) for s in chosen] if chosen else []
         cov_l = [_as_float(by_src[s].get("inv_coverage")) for s in chosen] if chosen else []
+
+        # Grandezas AC do inversor (como i_ac_a) não devem ser somadas entre pseudo-fontes MPPT.
+        # O valor exibido ao usuário deve preservar a aquisição original do inversor, priorizando
+        # a fonte agregada quando ela existir.
+        agg_ref_src = present_agg[0] if present_agg else None
+        agg_ref_row = by_src.get(agg_ref_src) if agg_ref_src else None
+        agg_iac = _as_float(agg_ref_row.get("i_ac_a")) if agg_ref_row is not None else None
+
+        if agg_iac is not None:
+            iac_value = agg_iac
+        else:
+            iac_candidates = [_as_float(by_src[s].get("i_ac_a")) for s in chosen] if chosen else []
+            iac_value = next((x for x in iac_candidates if x is not None), None)
 
         miss_flags = [bool(by_src[s].get("flag_inv_missing") or False) for s in chosen] if chosen else []
 
@@ -632,7 +763,7 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
         v_dc_v[i] = _mean_none(vdc_l)
         i_dc_a[i] = _sum_none(idc_l)
         v_ac_v[i] = _mean_none(vac_l)
-        i_ac_a[i] = _sum_none(iac_l)
+        i_ac_a[i] = iac_value
         inv_cov[i] = _mean_none(cov_l)
 
         if not miss_flags:
@@ -974,10 +1105,21 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
         meteo_quality_ok = [bool(v) for v in (det.get("meteo_quality_ok") or stable_sky)]
         irradiance_tier = [str(v) for v in (det.get("irradiance_tier") or ["N"] * n)]
 
+        ewma_z: List[Optional[float]] = list(det.get("ewma_z") or ([None] * n))
+        cusum_score: List[Optional[float]] = list(det.get("cusum") or ([None] * n))
+        if len(ewma_z) < n:
+            ewma_z.extend([None] * (n - len(ewma_z)))
+        elif len(ewma_z) > n:
+            ewma_z = ewma_z[:n]
+        if len(cusum_score) < n:
+            cusum_score.extend([None] * (n - len(cusum_score)))
+        elif len(cusum_score) > n:
+            cusum_score = cusum_score[:n]
+
         det_dbg = {
             "z": det.get("z"),
-            "ewma_z": det.get("ewma_z"),
-            "cusum": det.get("cusum"),
+            "ewma_z": ewma_z,
+            "cusum": cusum_score,
             "baseline": det.get("baseline"),
             "coarse_period": coarse_period,
             "fine_period": fine_period,
@@ -1074,8 +1216,9 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
             diag_kwargs["i_ac_a"] = i_ac_a
 
         # frequência pode nem existir nesta tela; envia nulo se necessário
+        freq_hz: List[Optional[float]] = [None] * n
         if "freq_hz" in diag_param_names:
-            diag_kwargs["freq_hz"] = [None] * n
+            diag_kwargs["freq_hz"] = freq_hz
 
         def _pick_diag_row_for_ts(ts_utc: datetime) -> Optional[Dict[str, Any]]:
             by_src = per_ts.get(ts_utc, {})
@@ -1090,19 +1233,18 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
             except Exception:
                 return None
 
+        alarm_code: List[Optional[int]] = []
+        alarm_sev: List[Optional[int]] = []
+        for ts_utc in times_utc:
+            row = _pick_diag_row_for_ts(ts_utc)
+            alarm_code.append(None if row is None or row.get("alarm_code") is None else int(row.get("alarm_code")))
+            alarm_sev.append(None if row is None or row.get("alarm_sev") is None else int(row.get("alarm_sev")))
+
         if "alarm_code" in diag_param_names:
-            alarm_code_series = []
-            for ts_utc in times_utc:
-                row = _pick_diag_row_for_ts(ts_utc)
-                alarm_code_series.append(None if row is None else row.get("alarm_code"))
-            diag_kwargs["alarm_code"] = alarm_code_series
+            diag_kwargs["alarm_code"] = alarm_code
 
         if "alarm_sev" in diag_param_names:
-            alarm_sev_series = []
-            for ts_utc in times_utc:
-                row = _pick_diag_row_for_ts(ts_utc)
-                alarm_sev_series.append(None if row is None else row.get("alarm_sev"))
-            diag_kwargs["alarm_sev"] = alarm_sev_series
+            diag_kwargs["alarm_sev"] = alarm_sev
 
         rca = diagnose_rca_series(**diag_kwargs) or {}
 
@@ -1281,18 +1423,74 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
     persist = (data.get("persist") or data.get("save") or "").strip().lower() in ("1", "true", "yes", "on")
     upsert = None
     if persist:
-        upsert = _upsert_diag15m(
+        detector_version = str(MISMATCH_VERSION_SUMMARY.get("detector_version") or "mismatch_runtime_v1")
+        canonical_source_oper = _canonical_source_oper(selected_sources)
+
+        detector_scores_runtime: List[Optional[float]] = []
+        alarm_code_runtime: List[Optional[int]] = []
+        alarm_sev_runtime: List[Optional[int]] = []
+        for i in range(n):
+            detector_scores_runtime.append(max(
+                abs(float(ewma_z[i])) if ewma_z[i] is not None else 0.0,
+                float(cusum_score[i]) if cusum_score[i] is not None else 0.0,
+                abs(float(mismatch_rel[i])) if mismatch_rel[i] is not None and str(diag_diagnosis_labels[i] or "") not in {"ok", "invalid"} else 0.0,
+            ))
+            alarm_code_runtime.append(int(alarm_code[i]) if alarm_code[i] is not None else None)
+            alarm_sev_runtime.append(int(alarm_sev[i]) if alarm_sev[i] is not None else None)
+
+        upsert_diag = _upsert_diag15m(
             plant=plant,
+            source_oper=canonical_source_oper,
+            source_meteo=str(src_meteo or ""),
+            detector_version=detector_version,
             times_utc=times_utc,
-            codes=codes,
-            labels=labels,
+            rca_codes=codes,
+            rca_labels=labels,
             valid=valid_period,
+            anomaly_flags=[bool(a) or bool(g) or str(d or "") not in {"ok", "invalid"} for a, g, d in zip(anomaly, diag_direct_grid, diag_diagnosis_labels)],
+            detector_scores=detector_scores_runtime,
+            ewma_z=ewma_z,
+            cusum_scores=cusum_score,
+            stable_sky=stable_sky,
             g_poa=g_poa_used,
             tcell_c=tcell_c,
             pac_real_w=p_ac_w,
             pac_model_w=pac_model_w,
             mismatch_rel=mismatch_rel,
+            irradiance_tier=irradiance_tier,
+            fine_diag_allowed=fine_period,
+            meteo_quality_ok=meteo_quality_ok,
+            direct_grid_evidence=diag_direct_grid,
+            zero_injection_flag=diag_zero_inj,
+            state_labels=diag_state_labels,
+            domain_labels=diag_domain_labels,
+            diagnosis_labels=diag_diagnosis_labels,
+            diagnosis_confidence_score=diagnosis_confidence_score,
+            data_reliability_score=data_reliability_score,
+            data_reliability_level=data_reliability_level,
+            detection_confidence_score=detection_confidence_score,
+            detection_confidence_level=detection_confidence_level,
+            diagnosis_confidence_level=diagnosis_confidence_level,
+            v_ac_v=v_ac_v,
+            i_ac_a=i_ac_a,
+            freq_hz=freq_hz,
+            alarm_code_oper=alarm_code_runtime,
+            alarm_sev_oper=alarm_sev_runtime,
+            evidence_json=diag_evidence_json,
+            confidence_notes_json=confidence_notes,
         )
+        upsert_events = build_fault_events_for_range(
+            plant_id=plant.id,
+            ts_start_utc=dt0_utc,
+            ts_end_utc=dt1_utc,
+            params=EventBuildParams(
+                detector_version=detector_version,
+                source_oper=canonical_source_oper,
+                source_meteo=str(src_meteo or ""),
+                replace_existing=True,
+            ),
+        )
+        upsert = {"diagnostics": upsert_diag, "events": upsert_events}
 
     # ----------------------------
     # DUMP por tkey (usa dump_by_tkey no template)
@@ -1382,7 +1580,7 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
             "meteo": meteo_dump,
         }
 
-    # severidade (para heatmap)
+    # severidade (para heatmap / resumo)
     rca_code_to_sev = {
         str(CODE_INVALID): "none",
         "0": "ok",
@@ -1392,12 +1590,16 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
         "4": "crit",
     }
 
+    sev_runtime: List[str] = []
     sev_counts = {"none": 0, "ok": 0, "warn": 0, "crit": 0}
-    for c, v in zip(codes, valid_period):
-        if not v or int(c) == int(CODE_INVALID):
-            sev_counts["none"] += 1
-            continue
-        sev = rca_code_to_sev.get(str(int(c)), "warn")
+    for i in range(n):
+        sev = _runtime_severity(
+            state_label=diag_state_labels[i],
+            diagnosis_label=diag_diagnosis_labels[i],
+            direct_grid_evidence=bool(diag_direct_grid[i]),
+            anomaly_flag=bool(anomaly[i]),
+        )
+        sev_runtime.append(sev)
         sev_counts[sev] = sev_counts.get(sev, 0) + 1
 
     payload = {
@@ -1505,6 +1707,7 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
             "rca_label": labels,
             "codes": codes,
             "labels": labels,
+            "sev_runtime": sev_runtime,
 
             # heatmap helpers (local)
             "hm_day_local": hm_day_local,
@@ -1515,6 +1718,8 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
             "counts": sev_counts,
             "events": [],
             "n_points": n,
+            "state_label_counts": dict(Counter(str(v or "unknown") for v in diag_state_labels)),
+            "diagnosis_label_counts": dict(Counter(str(v or "invalid") for v in diag_diagnosis_labels)),
         },
         "thresholds": {
             "gpoa_gate": gpoa_gate,
