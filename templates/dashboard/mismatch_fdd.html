@@ -338,7 +338,7 @@
 {% endblock %}
 
 {% block content %}
-<div id="fddPage" class="dash" data-api="{% url 'mismatch_fdd_api' %}" data-export="{{ export_pdf_url|default:'' }}">
+<div id="fddPage" class="dash" data-api="{% url 'mismatch_fdd_api' %}" data-export="{% url 'mismatch_fdd_export_pdf' %}">
   <div class="card glass span-12">
     <div class="page-head">
       <div style="min-width:0;">
@@ -415,6 +415,14 @@
         <input id="pmin_w" type="number" step="1" min="0" value="{{ pmin_w|default_if_none:0 }}">
       </div>
 
+      <div class="ctl sm">
+        <label for="heatmap_mode">Coloração do heatmap</label>
+        <select id="heatmap_mode">
+          <option value="fault_type" {% if heatmap_mode == 'fault_type' %}selected{% endif %}>Tipologia de falha</option>
+          <option value="mismatch" {% if heatmap_mode == 'mismatch' %}selected{% endif %}>Mismatch de potência</option>
+        </select>
+      </div>
+
       <div class="ctl" style="min-width: 320px;">
         <label>&nbsp;</label>
         <div class="ctl-actions">
@@ -435,15 +443,15 @@
             <span class="label">Executar + Salvar</span>
           </button>
 
-          <button class="btn-glow secondary" id="btnExportPdf" type="button" title="Exportar relatório PDF do FDD Mismatch">
+
+          <button class="btn-glow secondary" id="btnExportPdf" type="button" title="Exportar relatório PDF do intervalo atual">
             <svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
               <path d="M12 3v12" stroke="rgba(233,246,255,.92)" stroke-width="2" stroke-linecap="round"/>
               <path d="m7 10 5 5 5-5" stroke="rgba(233,246,255,.92)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-              <path d="M5 19h14" stroke="rgba(233,246,255,.92)" stroke-width="2" stroke-linecap="round"/>
+              <path d="M4 20h16" stroke="rgba(233,246,255,.92)" stroke-width="2" stroke-linecap="round"/>
             </svg>
             <span class="label">Exportar PDF</span>
           </button>
-
           <button class="btn-glow danger" id="btnReset" type="button" title="Limpar gráficos/seleção">
             <svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
               <path d="M21 12a9 9 0 1 1-2.64-6.36" stroke="rgba(233,246,255,.92)" stroke-width="2" stroke-linecap="round"/>
@@ -466,19 +474,31 @@
 
   <div class="card glass span-12">
     <div class="kpi">
-      <div class="tile"><p class="t">Detector</p><p class="v mono">{{ version_summary.detector_version|default:"—" }}</p><p class="s">modelo físico + limiares runtime</p></div>
-      <div class="tile"><p class="t">Classificador evento</p><p class="v mono">N/A</p><p class="s">não aplicável nesta tela</p></div>
-      <div class="tile"><p class="t">Modelo treinado</p><p class="v mono">N/A</p><p class="s">não aplicável nesta tela</p></div>
+      <div class="tile">
+        <p class="t">Modo atual do heatmap</p>
+        <p class="v" id="modeCurrentTitle">—</p>
+        <p class="s" id="modeCurrentDesc">A exportação PDF usa o mesmo modo de coloração selecionado na interface.</p>
+      </div>
+      <div class="tile">
+        <p class="t">Modo 1 — Mismatch de potência</p>
+        <p class="v mono">|Preal−Pmodelo|</p>
+        <p class="s" id="modeMismatchDesc">Verde quando o desvio está dentro dos limiares; amarelo/vermelho quando o mismatch e a condição de não geração sob sol disponível excedem os limiares configurados.</p>
+      </div>
+      <div class="tile">
+        <p class="t">Modo 2 — Tipologia de falha</p>
+        <p class="v mono">RCA / severidade</p>
+        <p class="s" id="modeTypologyDesc">A cor reflete a tipologia diagnóstica consolidada no bin: none, ok, warn ou crit a partir de state_label, diagnosis_label e evidência de rede.</p>
+      </div>
     </div>
   </div>
 
   <div class="card glass span-12">
     <div class="kpi" id="kpiGrid">
       <div class="tile"><p class="t">Pontos</p><p class="v" id="kpiPts">—</p><p class="s">na série</p></div>
-      <div class="tile"><p class="t">Normal</p><p class="v" id="kpiOk">—</p><p class="s">verde</p></div>
-      <div class="tile"><p class="t">Warn</p><p class="v" id="kpiWarn">—</p><p class="s">amarelo</p></div>
-      <div class="tile"><p class="t">Falha</p><p class="v" id="kpiCrit">—</p><p class="s">vermelho</p></div>
-      <div class="tile"><p class="t">Sem operativos</p><p class="v" id="kpiNoData">—</p><p class="s">cinza</p></div>
+      <div class="tile"><p class="t">Normal</p><p class="v" id="kpiOk">—</p><p class="s">classe do modo atual</p></div>
+      <div class="tile"><p class="t">Warn</p><p class="v" id="kpiWarn">—</p><p class="s">classe do modo atual</p></div>
+      <div class="tile"><p class="t">Falha</p><p class="v" id="kpiCrit">—</p><p class="s">classe do modo atual</p></div>
+      <div class="tile"><p class="t">Sem diag. útil</p><p class="v" id="kpiNoData">—</p><p class="s">cinza / fora do gate</p></div>
       <div class="tile"><p class="t">Intervalo</p><p class="v" id="kpiRange">—</p><p class="s">start → end</p></div>
     </div>
   </div>
@@ -497,14 +517,14 @@
     <div class="hm-head">
       <div style="min-width:0;">
         <h3 style="margin-top:0">Heatmap — dia × bin (canvas)</h3>
-        <div class="hm-sub">
+        <div class="hm-sub" id="hmModeNote">
           Linhas = dias • Colunas = bins de <b id="hmBinLbl">15</b> min •
-          cinza=sem dados operativos do inversor, verde=normal, amarelo=warn, vermelho=falha.
+          a coloração segue o modo selecionado pelo usuário.
         </div>
       </div>
 
       <div class="legend">
-        <span class="badge"><span class="dot" style="background:var(--hm-none)"></span>sem operativos</span>
+        <span class="badge"><span class="dot" style="background:var(--hm-none)"></span>sem diag. útil</span>
         <span class="badge"><span class="dot" style="background:var(--hm-ok)"></span>normal</span>
         <span class="badge"><span class="dot" style="background:var(--hm-warn)"></span>warn</span>
         <span class="badge"><span class="dot" style="background:var(--hm-crit)"></span>falha</span>
@@ -555,11 +575,6 @@
   <div class="body">
     <h4 style="margin:.2rem 0 .6rem;">Confiabilidade meteo</h4>
     <div id="detailMeteoHealth" class="meteo-health"></div>
-
-    <div style="height:.8rem"></div>
-
-    <h4 style="margin:.2rem 0 .6rem;">Confiabilidade do diagnóstico</h4>
-    <table class="kv" id="detailConfidence"></table>
 
     <div style="height:.8rem"></div>
 
@@ -631,6 +646,38 @@
     try{ return JSON.stringify(v); }catch(_e){ return String(v); }
   }
 
+
+  function normalizeHeatmapMode(v){
+    const s = String(v || "").trim().toLowerCase();
+    if (["mismatch", "mismatch_power", "power"].includes(s)) return "mismatch";
+    return "fault_type";
+  }
+
+  function heatmapModeLabel(mode){
+    return normalizeHeatmapMode(mode) === "mismatch" ? "Mismatch de potência" : "Tipologia de falha";
+  }
+
+  function heatmapModeDescription(mode){
+    return normalizeHeatmapMode(mode) === "mismatch"
+      ? "A cor do bin segue o desvio de potência: verde dentro dos limiares, amarelo/vermelho quando o mismatch e a condição de não geração sob sol disponível excedem os limiares configurados."
+      : "A cor do bin segue a tipologia diagnóstica consolidada (RCA), isto é, a severidade runtime derivada de state_label, diagnosis_label e evidência direta de rede.";
+  }
+
+  function currentHeatmapMode(payload=null){
+    const fromPayload = payload?.heatmap_mode?.selected || payload?.series?.heatmap_mode?.[0] || null;
+    const fromDom = $("heatmap_mode")?.value || null;
+    return normalizeHeatmapMode(fromPayload || fromDom || "fault_type");
+  }
+
+  function setHeatmapModeCards(payload=null){
+    const mode = currentHeatmapMode(payload);
+    const label = heatmapModeLabel(mode);
+    const desc = heatmapModeDescription(mode);
+    if ($("modeCurrentTitle")) $("modeCurrentTitle").textContent = label;
+    if ($("modeCurrentDesc")) $("modeCurrentDesc").textContent = desc + " A exportação PDF usa o mesmo modo selecionado.";
+    if ($("hmModeNote")) $("hmModeNote").innerHTML = `Linhas = dias • Colunas = bins de <b id="hmBinLbl">${String(hmState?.dtm || Number($("dt_minutes")?.value || 15))}</b> min • ${desc}`;
+  }
+
   function normalizeNumberInput(id, def){
     const el = $(id);
     if (!el) return;
@@ -693,18 +740,6 @@
     wind_speed:   "Vento [m/s]",
     rh:           "UR [%]",
     meteo_qc_score: "Score de QC meteo",
-    data_reliability_score: "Confiabilidade dos dados",
-    data_reliability_level: "Nível de confiabilidade dos dados",
-    detection_confidence_score: "Confiança da detecção",
-    detection_confidence_level: "Nível de confiança da detecção",
-    diagnosis_confidence_score: "Confiança do diagnóstico",
-    diagnosis_confidence_level: "Nível de confiança do diagnóstico",
-    state_label: "Estado operativo",
-    domain_label: "Domínio provável",
-    diagnosis_label: "Diagnóstico final",
-    direct_grid_evidence: "Evidência direta de rede",
-    zero_injection_flag: "Sem injeção sob sol",
-    irradiance_tier: "Tier de irradiância",
     flag_meteo_low_confidence: "Meteo baixa confiança",
     flag_meteo_interpolated: "Fonte meteo interpolada",
     flag_meteo_outlier: "Outlier meteo",
@@ -938,7 +973,7 @@
       ],
 
       code:         ["rca_code","codes","diag_code","diagnostic_code"],
-      label:        ["rca_label","label_t","labels","diag_label","diagnostic_label"],
+      label:        ["label_display","diagnosis_label","diagnosis_label_display","rca_label","label_t","labels","diag_label","diagnostic_label"],
 
       anomaly:      ["anomaly_iv","iv_anomaly","iv_ran_anomaly","iv_flag","anom","is_anomaly","anomalous","anomaly_flag"],
 
@@ -1079,43 +1114,46 @@
   }
 
   function pointClass(payload, idx){
+    const explicitHeatmap = seriesAt(payload, "heatmap_class", idx);
+    if (explicitHeatmap != null && String(explicitHeatmap).trim() !== ""){
+      return { cls: normalizeClass(explicitHeatmap), reason: `backend_heatmap:${currentHeatmapMode(payload)}` };
+    }
+
     const rawCls = seriesAt(payload, "cls", idx);
-    let base = null;
-
     if (rawCls != null && String(rawCls).trim() !== ""){
-      base = { cls: normalizeClass(rawCls), reason: "backend_class", raw: rawCls };
-    } else {
-      const code = seriesAt(payload, "code", idx);
-      if (code != null && String(code).trim() !== ""){
-        base = { cls: classFromCode(payload, code), reason: "rca_code", code };
-      } else {
-        const an = seriesAt(payload, "anomaly", idx);
-        if (isExplicitTrue(an)){
-          base = { cls: "warn", reason: "anomaly/IV=true" };
-        } else {
-          base = { cls: "ok", reason: "default_ok" };
-        }
-      }
+      return { cls: normalizeClass(rawCls), reason: "backend_class", raw: rawCls };
     }
 
-    const ov = overrideByMismatchOrPower(payload, idx);
-    if (ov && classRank(ov.cls) > classRank(base.cls)){
-      return { cls: ov.cls, reason: ov.reason, override: true, base: base.cls };
+    const code = seriesAt(payload, "code", idx);
+    if (code != null && String(code).trim() !== ""){
+      return { cls: classFromCode(payload, code), reason: "rca_code", code };
     }
-    return base;
+
+    const an = seriesAt(payload, "anomaly", idx);
+    if (isExplicitTrue(an)) return { cls: "warn", reason: "anomaly/IV=true" };
+    return { cls: "ok", reason: "default_ok" };
   }
 
   function setKpis(payload){
+    const summaryCounts = payload?.summary?.heatmap_counts || payload?.summary?.counts || {};
     const s = payload?.series || {};
     const t = s.t_local || s.x_local || payload?.x_local || [];
-    const pts = Array.isArray(t) ? t.length : 0;
+    const pts = Number(payload?.summary?.n_points ?? (Array.isArray(t) ? t.length : 0));
 
-    let ok = 0, warn = 0, crit = 0;
-    for (let i=0; i<pts; i++){
-      const cls = pointClass(payload, i).cls;
-      if (cls === "ok") ok++;
-      else if (cls === "warn") warn++;
-      else if (cls === "crit") crit++;
+    let ok = Number(summaryCounts.ok ?? 0);
+    let warn = Number(summaryCounts.warn ?? 0);
+    let crit = Number(summaryCounts.crit ?? 0);
+    let none = Number(summaryCounts.none ?? 0);
+
+    if (!Number.isFinite(ok) || !Number.isFinite(warn) || !Number.isFinite(crit) || !Number.isFinite(none) || (ok + warn + crit + none) <= 0){
+      ok = 0; warn = 0; crit = 0; none = 0;
+      for (let i=0; i<pts; i++){
+        const cls = pointClass(payload, i).cls;
+        if (cls === "ok") ok++;
+        else if (cls === "warn") warn++;
+        else if (cls === "crit") crit++;
+        else none++;
+      }
     }
 
     const rs = (payload?.range?.start || $("start")?.value || "—");
@@ -1125,6 +1163,7 @@
     $("kpiOk").textContent = pts ? String(ok) : "—";
     $("kpiWarn").textContent = pts ? String(warn) : "—";
     $("kpiCrit").textContent = pts ? String(crit) : "—";
+    $("kpiNoData").textContent = pts ? String(none) : "—";
     $("kpiRange").textContent = `${rs} → ${re}`;
   }
 
@@ -1391,12 +1430,18 @@
       else none++;
     }
 
-    $("hmBadgeTxt").textContent =
-      `normal=${ok} | warn=${warn} | falha=${crit} | cinza=${none} | bins com ponto=${any} | bins com operativos=${oper}`;
+    const summaryCounts = payload?.summary?.heatmap_counts || payload?.summary?.counts || null;
+    const badgeOk = Number(summaryCounts?.ok ?? ok);
+    const badgeWarn = Number(summaryCounts?.warn ?? warn);
+    const badgeCrit = Number(summaryCounts?.crit ?? crit);
+    const badgeNone = Number(summaryCounts?.none ?? none);
+    const modeLbl = heatmapModeLabel(currentHeatmapMode(payload));
 
-    $("kpiNoData").textContent = (hmState.days.length && hmState.nBins) ? String(none) : "—";
+    $("hmBadgeTxt").textContent =
+      `${modeLbl} • normal=${badgeOk} | warn=${badgeWarn} | falha=${badgeCrit} | cinza=${badgeNone} | bins com ponto=${any}`;
 
     drawHeatmapCanvas();
+    setHeatmapModeCards(payload);
   }
 
   function binTimeStr(mins){
@@ -1563,51 +1608,16 @@
     dr.setAttribute("aria-hidden", "true");
   }
 
-
-  function confidenceLevelPt(level){
-    const m = { very_high: "muito alta", high: "alta", moderate: "moderada", low: "baixa", very_low: "muito baixa" };
-    return m[String(level || "")] || (level || "—");
-  }
-
-  function confidenceReasonText(block){
-    const reasons = Array.isArray(block?.reasons) ? block.reasons.filter(Boolean) : [];
-    return reasons.length ? reasons.join("; ") : "—";
-  }
-
-  function buildConfidenceRows(raw, dumpPoint){
-    const conf = dumpPoint?.confidence || {};
-    const notes = conf.notes || {};
-    return [
-      { label: "Confiabilidade dos dados", value: fmtPct(raw.data_reliability_score), key: "data_reliability_score" },
-      { label: "Nível dos dados", value: confidenceLevelPt(raw.data_reliability_level), key: "data_reliability_level" },
-      { label: "Razões (dados)", value: confidenceReasonText(notes.data_reliability), key: "data_reliability_reasons" },
-      { label: "Confiança da detecção", value: fmtPct(raw.detection_confidence_score), key: "detection_confidence_score" },
-      { label: "Nível da detecção", value: confidenceLevelPt(raw.detection_confidence_level), key: "detection_confidence_level" },
-      { label: "Razões (detecção)", value: confidenceReasonText(notes.detection_confidence), key: "detection_confidence_reasons" },
-      { label: "Confiança do diagnóstico", value: fmtPct(raw.diagnosis_confidence_score), key: "diagnosis_confidence_score" },
-      { label: "Nível do diagnóstico", value: confidenceLevelPt(raw.diagnosis_confidence_level), key: "diagnosis_confidence_level" },
-      { label: "Razões (diagnóstico)", value: confidenceReasonText(notes.diagnosis_confidence), key: "diagnosis_confidence_reasons" },
-      { label: "Estado operativo", value: fmtAny(raw.state_label), key: "state_label" },
-      { label: "Domínio provável", value: fmtAny(raw.domain_label), key: "domain_label" },
-      { label: "Diagnóstico final", value: fmtAny(raw.diagnosis_label), key: "diagnosis_label" },
-      { label: "Evidência direta de rede", value: fmtAny(raw.direct_grid_evidence), key: "direct_grid_evidence" },
-      { label: "Sem injeção sob sol", value: fmtAny(raw.zero_injection_flag), key: "zero_injection_flag" },
-      { label: "Tier de irradiância", value: fmtAny(raw.irradiance_tier), key: "irradiance_tier" },
-    ];
-  }
-
   function renderDetail(payload, cellObj){
     const meta = $("detailMeta");
     const tblAll = $("detailAll");
-    const tblConfidence = $("detailConfidence");
     const dump = $("detailDump");
     const meteoHealth = $("detailMeteoHealth");
-    if (!meta || !tblAll || !tblConfidence || !dump || !meteoHealth) return;
+    if (!meta || !tblAll || !dump || !meteoHealth) return;
 
     if (!payload || !cellObj){
       meta.textContent = "—";
       tblAll.innerHTML = "";
-      tblConfidence.innerHTML = "";
       dump.textContent = "{}";
       renderMeteoHealth(meteoHealth, null);
       closeDetailDrawer();
@@ -1640,9 +1650,6 @@
     const dumpPoint = (payload?.dump_by_tkey && payload.dump_by_tkey[tkey]) ? payload.dump_by_tkey[tkey] : null;
     const sourceMeteo = dumpPoint?.source_meteo || payload?.sources?.source_meteo || payload?.range?.source_meteo || "—";
 
-    const confRows = buildConfidenceRows(raw, dumpPoint);
-    tblConfidence.innerHTML = confRows.map((it) => `<tr><td class="k mono">${String(it.label)}</td><td class="v mono">${fmtAny(it.value)}</td></tr>`).join("");
-
     if (dumpPoint?.chosen_total && typeof dumpPoint.chosen_total === "object") {
       Object.assign(raw, dumpPoint.chosen_total);
     }
@@ -1674,7 +1681,6 @@
     renderMeteoHealth(meteoHealth, meteoSummary);
 
     const dumpObj = snapshotVerbose(raw);
-    if (dumpPoint?.confidence) dumpObj.__confidence = dumpPoint.confidence;
     dumpObj.__meteo_health = {
       title: meteoSummary.title,
       note: meteoSummary.note,
@@ -1696,6 +1702,8 @@
       day: ds,
       time_bin: ts,
       dt_minutes: hmState.dtm,
+      mode: currentHeatmapMode(payload),
+      mode_label: heatmapModeLabel(currentHeatmapMode(payload)),
       has_any: !!cellObj.has_any,
       idx: (idx >= 0 ? idx : null),
       has_oper: !!cellObj.has_oper,
@@ -1824,30 +1832,9 @@
       fault_abs: getNum("fault_abs", 0.90),
       gpoa_min: getNum("gpoa_min", 50),
       pmin_w: getNum("pmin_w", 0),
+      heatmap_mode: currentHeatmapMode(),
       dt_minutes: Math.max(1, Number($("dt_minutes")?.value || 15)),
     };
-  }
-
-  function exportPdf(){
-    const page = $("fddPage");
-    const exportUrl = page ? page.dataset.export : null;
-    if (!exportUrl){
-      alert("URL de exportação PDF não configurada.");
-      return;
-    }
-    try{
-      const payload = currentPayloadBase();
-      const params = new URLSearchParams();
-      for (const [k, v] of Object.entries(payload)){
-        if (v === undefined || v === null || v === "") continue;
-        params.set(k, String(v));
-      }
-      params.set("plant_pk", String(payload.plant_id));
-      params.set("pk", String(payload.plant_id));
-      window.location.href = `${exportUrl}?${params.toString()}`;
-    }catch(err){
-      setStatus(true, `Erro exportação PDF: ${String(err.message || err)}`);
-    }
   }
 
   async function runFdd(opts = { save:false }){
@@ -1929,6 +1916,20 @@
     }
   }
 
+
+  function exportPdf(){
+    const page = $("fddPage");
+    const exportUrl = page ? page.dataset.export : null;
+    if (!exportUrl){ alert("URL de exportação PDF não configurada."); return; }
+    try{
+      const payload = currentPayloadBase();
+      const url = exportUrl + "?" + buildQuery(payload);
+      window.open(url, "_blank", "noopener");
+    }catch(err){
+      alert(String(err.message || err));
+    }
+  }
+
   document.addEventListener("DOMContentLoaded", () => {
     prefillDefaultsIfEmpty();
 
@@ -1939,8 +1940,14 @@
 
     $("dt_minutes")?.addEventListener("change", () => {
       if (hmState.payload) renderHeatmapCanvas(hmState.payload);
+      else setHeatmapModeCards();
+    });
+    $("heatmap_mode")?.addEventListener("change", () => {
+      setHeatmapModeCards();
+      if (hmState.payload) renderHeatmapCanvas(hmState.payload);
     });
 
+    setHeatmapModeCards();
     bindDetailButtons();
     bindHeatmapFit();
 

@@ -25,7 +25,7 @@ STATE_WARN = 2
 STATE_CRIT = 3
 
 STATE_LABELS = {
-    STATE_NONE: "Sem operativos",
+    STATE_NONE: "Sem diag. útil",
     STATE_OK: "Normal",
     STATE_WARN: "Warn",
     STATE_CRIT: "Falha",
@@ -115,6 +115,31 @@ def _classify_level(score: Optional[float]) -> str:
         return "baixa"
     return "muito baixa"
 
+
+
+
+def _normalize_heatmap_mode(mode: Any) -> str:
+    s = str(mode or "fault_type").strip().lower()
+    if s in {"mismatch", "mismatch_power", "power_mismatch"}:
+        return "mismatch"
+    return "fault_type"
+
+
+def _display_label_for_report(*, heatmap_mode: str, state: int, label: Any, diagnosis_label: Any) -> str:
+    diag = str(diagnosis_label or "").strip()
+    base = str(label or diag or "invalid").strip() or "invalid"
+    base_norm = base.lower()
+    mode = _normalize_heatmap_mode(heatmap_mode)
+
+    if state == STATE_NONE:
+        return "invalid" if base_norm in {"ok", "normal", "", "-"} else base
+    if state == STATE_OK:
+        return "ok" if base_norm in {"normal", "ok", "", "-"} else base
+    if state in {STATE_WARN, STATE_CRIT} and base_norm in {"normal", "ok", "invalid", "", "-"}:
+        if mode == "mismatch":
+            return "severe_power_mismatch" if state == STATE_CRIT else "power_mismatch_warning"
+        return "critical_operational_anomaly" if state == STATE_CRIT else "operational_anomaly_warning"
+    return base
 
 # ---------------------------------------------------------------------------
 # Styles / layout
@@ -273,27 +298,25 @@ def _severity_from_point(code: Any, valid: Any, rca_code_to_sev: Dict[str, str])
     return {"ok": STATE_OK, "warn": STATE_WARN, "crit": STATE_CRIT}.get(severity, STATE_NONE)
 
 
-def _severity_from_runtime(value: Any) -> Optional[int]:
-    s = _safe_text(value, "").strip().lower()
+def _state_from_class_name(cls: Any) -> int:
+    s = str(cls or "").strip().lower()
     if s == "ok":
         return STATE_OK
     if s == "warn":
         return STATE_WARN
     if s == "crit":
         return STATE_CRIT
-    if s == "none":
-        return STATE_NONE
-    return None
+    return STATE_NONE
 
 
 def _iter_points(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
     t_local = _series(payload, "t_local")
     hm_day = _series(payload, "hm_day_local")
     hm_min = _series(payload, "hm_minute_local")
-    labels = _series(payload, "diagnosis_label") or _series(payload, "label") or _series(payload, "labels") or _series(payload, "rca_label")
-    codes = _series(payload, "code") or _series(payload, "codes") or _series(payload, "rca_code")
+    labels = _series(payload, "label_display") or _series(payload, "diagnosis_label") or _series(payload, "diagnosis_label_display") or _series(payload, "labels") or _series(payload, "rca_label")
+    diagnosis_labels = _series(payload, "diagnosis_label") or _series(payload, "diagnosis_label_display") or []
+    codes = _series(payload, "codes") or _series(payload, "rca_code")
     valid = _series(payload, "valid") or _series(payload, "valid_period")
-    sev_runtime = _series(payload, "sev_runtime") or _series(payload, "cls") or _series(payload, "hm_class")
     mismatch = _series(payload, "mismatch_rel_raw") or _series(payload, "mismatch_rel")
     pac_real = _series(payload, "p_ac_real_w") or _series(payload, "p_ac_w")
     pac_model = _series(payload, "p_ac_model_w")
@@ -310,17 +333,27 @@ def _iter_points(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
     irr_tier = _series(payload, "irradiance_tier")
     direct_grid = _series(payload, "direct_grid_evidence")
     zero_inj = _series(payload, "zero_injection_flag")
+    heatmap_cls = _series(payload, "heatmap_class")
+    heatmap_mode = (payload.get("heatmap_mode") or {}).get("selected") or None
     rca_code_to_sev = payload.get("rca_code_to_sev") or {}
 
-    n = max(len(t_local), len(codes), len(valid), len(mismatch))
+    n = max(len(t_local), len(codes), len(valid), len(mismatch), len(heatmap_cls))
     points: List[Dict[str, Any]] = []
     for i in range(n):
         code = codes[i] if i < len(codes) else None
         val = valid[i] if i < len(valid) else None
-        state = _severity_from_runtime(sev_runtime[i] if i < len(sev_runtime) else None)
-        if state is None:
+        if i < len(heatmap_cls) and str(heatmap_cls[i] or "").strip() != "":
+            state = _state_from_class_name(heatmap_cls[i])
+        else:
             state = _severity_from_point(code, val, rca_code_to_sev)
-        label = labels[i] if i < len(labels) else None
+        raw_label = labels[i] if i < len(labels) else None
+        diagnosis_label = diagnosis_labels[i] if i < len(diagnosis_labels) else None
+        label = _display_label_for_report(
+            heatmap_mode=heatmap_mode or "fault_type",
+            state=state,
+            label=raw_label,
+            diagnosis_label=diagnosis_label,
+        )
         points.append(
             {
                 "idx": i,
@@ -347,6 +380,7 @@ def _iter_points(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
                 "irradiance_tier": _safe_text(irr_tier[i] if i < len(irr_tier) else None, "-"),
                 "direct_grid": bool(direct_grid[i]) if i < len(direct_grid) else False,
                 "zero_injection": bool(zero_inj[i]) if i < len(zero_inj) else False,
+                "heatmap_mode": heatmap_mode or "fault_type",
             }
         )
     return points
@@ -721,9 +755,10 @@ def build_mismatch_pdf_report(
         ["Planta", plant_name, "Período", f"{_safe_text(rng.get('start'))} -> {_safe_text(rng.get('end'))}"],
         ["Bin [min]", _safe_text(filters.get("dt_minutes")), "Pipeline", _safe_text(filters.get("pipeline") or payload.get("pipeline"))],
         ["Detector", _safe_text(versions.get("detector_version")), "source_meteo", _safe_text(sources.get("source_meteo"))],
+        ["Heatmap", _safe_text(filters.get("heatmap_mode") or (payload.get("heatmap_mode") or {}).get("selected_label") or (payload.get("heatmap_mode") or {}).get("selected") or "Tipologia de falha"), "política total", _safe_text(sources.get("total_policy"))],
         ["warn_abs", _safe_text(filters.get("warn_abs") or thresholds.get("warn_abs")), "fault_abs", _safe_text(filters.get("fault_abs") or thresholds.get("fault_abs"))],
         ["gpoa_min", _safe_text(filters.get("gpoa_min") or thresholds.get("gpoa_gate")), "pmin_w", _safe_text(filters.get("pmin_w") or thresholds.get("pmin_w"))],
-        ["source_oper", _safe_text(filters.get("source_oper")), "política total", _safe_text(sources.get("total_policy"))],
+        ["source_oper", _safe_text(filters.get("source_oper")), "Heatmap nota", _safe_text((payload.get("heatmap_mode") or {}).get("selected_note"))],
     ]
     story.append(_make_table(scope_rows, widths=[34 * mm, 76 * mm, 34 * mm, 120 * mm], font_size=8.0, left_cols=(0, 1, 2, 3)))
     story.append(Spacer(1, 4 * mm))
@@ -734,7 +769,7 @@ def build_mismatch_pdf_report(
         ["Indicador", "Valor", "Indicador", "Valor"],
         ["Pontos na série", _fmt_int(summary["n_points"]), "Bins válidos", _fmt_int(summary["valid_points"])],
         ["Normal", _fmt_int(summary["state_counts"].get(STATE_OK)), "Warn", _fmt_int(summary["state_counts"].get(STATE_WARN))],
-        ["Falha", _fmt_int(summary["state_counts"].get(STATE_CRIT)), "Sem operativos", _fmt_int(summary["state_counts"].get(STATE_NONE))],
+        ["Falha", _fmt_int(summary["state_counts"].get(STATE_CRIT)), "Sem diag. útil", _fmt_int(summary["state_counts"].get(STATE_NONE))],
         ["Confiab. dados média", _fmt_pct(summary["data_rel_mean"]), "Conf. detecção média", _fmt_pct(summary["det_conf_mean"])],
         ["Conf. diagnóstico média", _fmt_pct(summary["diag_conf_mean"]), "Leitura global", _classify_level(summary["diag_conf_mean"])],
     ]
@@ -755,7 +790,7 @@ def build_mismatch_pdf_report(
 
     story.append(PageBreak())
     story.append(_paragraph("Heatmap do período", styles["section"]))
-    story.append(_paragraph("Mapa dia x bin com a mesma semântica visual da aplicação: cinza = sem operativos, verde = normal, âmbar = warn, vermelho = falha.", styles["body"]))
+    story.append(_paragraph(f"Mapa dia x bin usando o modo de coloração selecionado: <b>{_safe_text((payload.get('heatmap_mode') or {}).get('selected_label') or filters.get('heatmap_mode') or 'Tipologia de falha')}</b>. Cinza = sem diagnóstico útil, verde = normal, âmbar = warn, vermelho = falha.", styles["body"]))
     story.append(Spacer(1, 2 * mm))
     story.append(Image(heat_png, width=255 * mm, height=120 * mm))
     story.append(_paragraph("Em intervalos longos, o heatmap deve ser lido como visão de triagem temporal: ele mostra persistência e sazonalidade dos estados, mas não substitui inspeção por evento nem análise com dados locais de referência.", styles["caption"]))

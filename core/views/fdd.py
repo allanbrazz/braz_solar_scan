@@ -144,6 +144,81 @@ def _runtime_severity(
     return "none"
 
 
+def _normalize_heatmap_mode(raw: Any) -> str:
+    s = str(raw or "").strip().lower()
+    if s in {"mismatch", "mismatch_power", "power", "mismatch_de_potencia"}:
+        return "mismatch"
+    if s in {"fault_type", "fault", "typology", "tipologia", "falha"}:
+        return "fault_type"
+    return "fault_type"
+
+
+def _mismatch_mode_severity(
+    *,
+    has_oper: bool,
+    mismatch_rel: Optional[float],
+    g_poa: Optional[float],
+    pac_real_w: Optional[float],
+    pac_model_w: Optional[float],
+    warn_abs: float,
+    fault_abs: float,
+    gpoa_gate: float,
+    pmin_w: float,
+) -> str:
+    if not has_oper:
+        return "none"
+
+    mm = _as_float(mismatch_rel)
+    gp = _as_float(g_poa)
+    pr = _as_float(pac_real_w)
+    pm = _as_float(pac_model_w)
+
+    if (gp is not None) and (pm is not None) and (pr is not None):
+        if gp >= float(gpoa_gate) and pm > max(50.0, float(pmin_w)) and pr <= float(pmin_w):
+            return "crit"
+
+    if mm is None:
+        return "ok"
+    if mm <= -float(fault_abs):
+        return "crit"
+    if abs(mm) >= float(warn_abs):
+        return "warn"
+    return "ok"
+
+
+def _display_label_for_heatmap(
+    *,
+    heatmap_mode: str,
+    heatmap_class: str,
+    diagnosis_label: Any,
+    rca_label: Any,
+    state_label: Any = None,
+    direct_grid_evidence: bool = False,
+) -> str:
+    diag = str(diagnosis_label or "").strip()
+    rca = str(rca_label or "").strip()
+    base = diag or rca or "invalid"
+    base_norm = base.lower()
+    state_norm = str(state_label or "").strip().lower()
+    hm = str(heatmap_class or "none").strip().lower()
+    mode = _normalize_heatmap_mode(heatmap_mode)
+
+    if hm == "none":
+        return "invalid" if base_norm in {"ok", "normal", "", "-"} else base
+
+    if hm == "ok":
+        return "ok" if base_norm in {"normal", "ok", "", "-"} else base
+
+    if hm in {"warn", "crit"} and base_norm in {"normal", "ok", "invalid", "", "-"}:
+        if mode == "mismatch":
+            return "severe_power_mismatch" if hm == "crit" else "power_mismatch_warning"
+        if direct_grid_evidence and state_norm == "sun_available_not_injecting":
+            return "grid_related_shutdown" if hm == "crit" else "grid_related_degradation"
+        return "critical_operational_anomaly" if hm == "crit" else "operational_anomaly_warning"
+
+    return base
+
+
 # ----------------------------
 # JSON strict/robusto
 # ----------------------------
@@ -425,6 +500,7 @@ def mismatch_fdd_view(request: HttpRequest):
             "pmin_w": float((request.GET.get("pmin_w") or 0)),
             "api_url": reverse("mismatch_fdd_api"),
             "export_pdf_url": reverse("mismatch_fdd_export_pdf"),
+            "heatmap_mode": _normalize_heatmap_mode(request.GET.get("heatmap_mode") or "fault_type"),
             "version_summary": MISMATCH_VERSION_SUMMARY,
         },
     )
@@ -472,6 +548,7 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
 
     src_oper_raw = (data.get("source_oper") or data.get("src_oper") or "").strip()
     src_meteo = (data.get("source_meteo") or data.get("src_meteo") or "").strip() or None
+    heatmap_mode = _normalize_heatmap_mode(data.get("heatmap_mode") or "fault_type")
 
     if not src_meteo:
         _, best_m = _pick_best_sources(plant_id, dt0_utc, dt1_utc)
@@ -1591,7 +1668,7 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
     }
 
     sev_runtime: List[str] = []
-    sev_counts = {"none": 0, "ok": 0, "warn": 0, "crit": 0}
+    sev_counts_typology = {"none": 0, "ok": 0, "warn": 0, "crit": 0}
     for i in range(n):
         sev = _runtime_severity(
             state_label=diag_state_labels[i],
@@ -1600,7 +1677,61 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
             anomaly_flag=bool(anomaly[i]),
         )
         sev_runtime.append(sev)
-        sev_counts[sev] = sev_counts.get(sev, 0) + 1
+        sev_counts_typology[sev] = sev_counts_typology.get(sev, 0) + 1
+
+    heatmap_class_mismatch: List[str] = []
+    sev_counts_mismatch = {"none": 0, "ok": 0, "warn": 0, "crit": 0}
+    for i in range(n):
+        cls = _mismatch_mode_severity(
+            has_oper=not bool(flag_inv_missing_all[i]),
+            mismatch_rel=mismatch_rel_raw[i],
+            g_poa=g_poa_used[i],
+            pac_real_w=p_ac_w[i],
+            pac_model_w=pac_model_w[i],
+            warn_abs=float(thr.warn_abs),
+            fault_abs=float(thr.fault_abs),
+            gpoa_gate=float(gpoa_gate),
+            pmin_w=float(pmin_w),
+        )
+        heatmap_class_mismatch.append(cls)
+        sev_counts_mismatch[cls] = sev_counts_mismatch.get(cls, 0) + 1
+
+    if heatmap_mode == "mismatch":
+        heatmap_class = heatmap_class_mismatch
+        heatmap_counts = dict(sev_counts_mismatch)
+        heatmap_mode_label = "Mismatch de potência"
+        heatmap_mode_note = "A cor do bin segue a severidade do desvio de potência: |mismatch|, gate radiométrico e condição de não geração sob sol disponível."
+    else:
+        heatmap_class = sev_runtime
+        heatmap_counts = dict(sev_counts_typology)
+        heatmap_mode_label = "Tipologia de falha"
+        heatmap_mode_note = "A cor do bin segue a tipologia diagnóstica consolidada (RCA), isto é, o rótulo de falha e a severidade runtime atribuídos ao bin."
+
+    label_display: List[str] = []
+    for i in range(n):
+        label_display.append(
+            _display_label_for_heatmap(
+                heatmap_mode=heatmap_mode,
+                heatmap_class=heatmap_class[i],
+                diagnosis_label=diag_diagnosis_labels[i],
+                rca_label=labels[i],
+                state_label=diag_state_labels[i],
+                direct_grid_evidence=bool(diag_direct_grid[i]),
+            )
+        )
+
+    for i, (tloc, ts_utc) in enumerate(zip(x_local_dt, times_utc)):
+        tkey = f"{tloc.strftime('%Y-%m-%dT%H:%M')}"
+        if tkey in dump_by_tkey:
+            dump_by_tkey[tkey]["label_display"] = label_display[i]
+            dump_by_tkey[tkey]["heatmap"] = {
+                "selected_mode": heatmap_mode,
+                "selected_mode_label": heatmap_mode_label,
+                "class_selected": heatmap_class[i],
+                "class_mismatch": heatmap_class_mismatch[i],
+                "class_fault_type": sev_runtime[i],
+                "label_display": label_display[i],
+            }
 
     payload = {
         "ok": True,
@@ -1615,6 +1746,15 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
             "selected_sources": selected_sources,
         },
         "versions": MISMATCH_VERSION_SUMMARY,
+        "heatmap_mode": {
+            "selected": heatmap_mode,
+            "selected_label": heatmap_mode_label,
+            "selected_note": heatmap_mode_note,
+            "options": [
+                {"value": "mismatch", "label": "Mismatch de potência"},
+                {"value": "fault_type", "label": "Tipologia de falha"},
+            ],
+        },
         "confidence_summary": {
             "data_reliability_mean": _mean_none(data_reliability_score),
             "detection_confidence_mean": _mean_none(detection_confidence_score),
@@ -1689,6 +1829,8 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
             "diagnosis_confidence_level": diagnosis_confidence_level,
             "state_label": diag_state_labels,
             "domain_label": diag_domain_labels,
+            "label_display": label_display,
+            "diagnosis_label_display": label_display,
             "diagnosis_label": diag_diagnosis_labels,
             "direct_grid_evidence": diag_direct_grid,
             "zero_injection_flag": diag_zero_inj,
@@ -1709,13 +1851,23 @@ def mismatch_fdd_api(request: HttpRequest) -> JsonResponse:
             "labels": labels,
             "sev_runtime": sev_runtime,
 
+            # heatmap / coloração
+            "heatmap_mode": [heatmap_mode] * n,
+            "heatmap_class": heatmap_class,
+            "heatmap_class_typology": sev_runtime,
+            "heatmap_class_mismatch": heatmap_class_mismatch,
+            "cls": heatmap_class,
+
             # heatmap helpers (local)
             "hm_day_local": hm_day_local,
             "hm_minute_local": hm_minute_local,
         },
         "series_by_source": series_by_source,
         "summary": {
-            "counts": sev_counts,
+            "counts": dict(heatmap_counts),
+            "heatmap_counts": dict(heatmap_counts),
+            "diagnostic_counts": dict(sev_counts_typology),
+            "mismatch_counts": dict(sev_counts_mismatch),
             "events": [],
             "n_points": n,
             "state_label_counts": dict(Counter(str(v or "unknown") for v in diag_state_labels)),
@@ -1779,6 +1931,7 @@ def mismatch_fdd_export_pdf(request: HttpRequest) -> HttpResponse:
             "dt_minutes": request.GET.get("dt_minutes") or payload.get("series", {}).get("dt_minutes") or request.GET.get("bin_minutes"),
             "source_oper": request.GET.get("source_oper") or request.GET.get("src_oper") or None,
             "source_meteo": request.GET.get("source_meteo") or request.GET.get("src_meteo") or payload.get("sources", {}).get("source_meteo"),
+            "heatmap_mode": request.GET.get("heatmap_mode") or (payload.get("heatmap_mode") or {}).get("selected"),
             "pipeline": payload.get("pipeline"),
         }
 
