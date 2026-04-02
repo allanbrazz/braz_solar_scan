@@ -17,7 +17,7 @@ from core.services.fdd.reliability import (
     compute_detection_confidence,
     compute_diagnosis_confidence,
 )
-from core.services.mppt_gnn_fdd.window_loader import compute_pac_model_and_mismatch
+from core.services.power_model.runtime_residuals import compute_pac_model_and_mismatch
 
 
 MERGED_FIELDS = (

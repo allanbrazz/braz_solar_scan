@@ -8,7 +8,7 @@ from django.db.models import Count
 
 from core.models import FaultEvent, PVPlantMergedRecord15m
 from core.services.mppt_gnn_fdd.features import WindowArrays
-from core.services.mppt_gnn_fdd.window_loader import compute_pac_model_and_mismatch
+from core.services.power_model.runtime_residuals import compute_pac_model_and_mismatch
 
 
 def _pick_best_source_meteo(plant_id: int, dt0_utc: datetime, dt1_utc: datetime) -> Optional[str]:
