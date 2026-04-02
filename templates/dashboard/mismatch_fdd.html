@@ -1523,44 +1523,32 @@
     const out = [];
     const mpptSrcs = mpptSourceList(payload);
 
-    // SOMENTE DC por MPPT
-    const fields = [
-      { key: "v_dc_v", label: "Vdc [V]" },
-      { key: "i_dc_a", label: "Idc [A]" },
-      { key: "p_dc_w", label: "Pdc [W]" },
-    ];
-
     for (const src of mpptSrcs){
-      const block = sbs?.[src];
+      const block = sbs?.[src] || {};
       const tag = mpptTagFromSource(src);
+      const getAt = (key) => {
+        const arr = block?.[key];
+        if (Array.isArray(arr) && idx >= 0 && idx < arr.length) return arr[idx];
+        return null;
+      };
 
-      // valores (podem ser null; ainda assim mostramos)
-      let vdc = null, idc = null, pdc = null;
+      const rows = [
+        ["Vdc med [V]", getAt("v_dc_v")],
+        ["Vdc mod [V]", getAt("v_dc_model_v")],
+        ["Idc med [A]", getAt("i_dc_a")],
+        ["Idc mod [A]", getAt("i_dc_model_a")],
+        ["Pdc med [W]", getAt("p_dc_w")],
+        ["Pdc mod [W]", getAt("p_dc_model_w")],
+      ];
 
-      for (const f of fields){
-        const arr = block?.[f.key];
-        let v = null;
-        if (Array.isArray(arr) && idx >= 0 && idx < arr.length) v = arr[idx];
-        // idx inválido => fica null (mantém nome no UI)
-        if (f.key === "v_dc_v") vdc = v;
-        if (f.key === "i_dc_a") idc = v;
-        if (f.key === "p_dc_w") pdc = v;
-
-        out.push({
-          k: `${f.key}@${src}`,
-          v,
-          label: `${tag} — ${f.label}`,
-        });
+      for (const [label, v] of rows){
+        out.push({ k: `${label}@${src}`, v, label: `${tag} — ${label}` });
       }
 
-      // Pdc estimado (sempre mostra a linha; valor só se der pra calcular)
-      const vdcN = Number(vdc), idcN = Number(idc);
-      const pEst = (Number.isFinite(vdcN) && Number.isFinite(idcN)) ? (vdcN * idcN) : null;
-      out.push({
-        k: `p_dc_est_w@${src}`,
-        v: pEst,
-        label: `${tag} — Pdc est [W] (Vdc×Idc)`,
-      });
+      const note = getAt("model_note");
+      if (!isNullishValue(note)) {
+        out.push({ k: `model_note@${src}`, v: note, label: `${tag} — Nota do modelo` });
+      }
     }
     return out;
   }
@@ -1573,7 +1561,7 @@
 
     const out = {};
     for (const src of mpptSrcs){
-      const block = sbs?.[src];
+      const block = sbs?.[src] || {};
       const tag = mpptTagFromSource(src);
 
       const getAt = (key) => {
@@ -1595,6 +1583,11 @@
         i_dc_a: idc,
         p_dc_w: pdc,
         p_dc_est_w: pEst,
+        v_dc_model_v: getAt("v_dc_model_v"),
+        i_dc_model_a: getAt("i_dc_model_a"),
+        p_dc_model_w: getAt("p_dc_model_w"),
+        topology_ok: getAt("topology_ok"),
+        model_note: getAt("model_note"),
       };
     }
 

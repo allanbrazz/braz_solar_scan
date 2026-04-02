@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import inspect
 import logging
+import re
 from dataclasses import asdict, is_dataclass
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
@@ -14,6 +15,74 @@ from core.services.fdd_mismatch import CODE_INVALID, classify_mismatch_series
 logger = logging.getLogger(__name__)
 
 
+def _mppt_no_from_source(src: Any) -> Optional[int]:
+    s = str(src or "")
+    m = re.search(r"(?:^|\|)MPPT\s*([0-9]+)\b", s, re.IGNORECASE)
+    if not m:
+        return None
+    try:
+        return int(m.group(1))
+    except Exception:
+        return None
+
+
+def _float_list(xs: Any, *, np_mod) -> List[Optional[float]]:
+    if xs is None:
+        return []
+    out: List[Optional[float]] = []
+    for v in list(np_mod.asarray(xs, dtype=float).tolist()):
+        out.append(None if (not np_mod.isfinite(v)) else float(v))
+    return out
+
+
+def _fill_aggregate_dc_from_mppt_model(*, agg: Dict[str, Any], mppt_model_by_source: Dict[str, Dict[str, Any]], v_dc_model_v: List[Optional[float]], i_dc_model_a: List[Optional[float]]) -> None:
+    if not mppt_model_by_source:
+        return
+    sbs = agg.get("series_by_source") or {}
+    n = len(v_dc_model_v)
+    for i in range(n):
+        vv = []
+        ii = []
+        for src, model_block in mppt_model_by_source.items():
+            meas = sbs.get(src) or {}
+            meas_pdc = None
+            meas_idc = None
+            try:
+                meas_pdc = (meas.get("p_dc_w") or [None] * n)[i]
+            except Exception:
+                meas_pdc = None
+            try:
+                meas_idc = (meas.get("i_dc_a") or [None] * n)[i]
+            except Exception:
+                meas_idc = None
+            active = False
+            try:
+                active = (meas_pdc is not None and float(meas_pdc) > 1.0) or (meas_idc is not None and float(meas_idc) > 0.2)
+            except Exception:
+                active = False
+            if not active:
+                continue
+            mv = None
+            mi = None
+            try:
+                mv = (model_block.get("v_dc_model_v") or [None] * n)[i]
+            except Exception:
+                mv = None
+            try:
+                mi = (model_block.get("i_dc_model_a") or [None] * n)[i]
+            except Exception:
+                mi = None
+            if mv is not None:
+                vv.append(float(mv))
+            if mi is not None:
+                ii.append(float(mi))
+        if v_dc_model_v[i] is None and vv:
+            v_dc_model_v[i] = float(sum(vv) / len(vv))
+        if i_dc_model_a[i] is None and ii:
+            i_dc_model_a[i] = float(sum(ii))
+
+
+
 def compute_power_model(plant: PVPlant, details: Any, times_utc: List[datetime], agg: Dict[str, Any]) -> Dict[str, Any]:
     try:
         import numpy as np
@@ -22,6 +91,7 @@ def compute_power_model(plant: PVPlant, details: Any, times_utc: List[datetime],
             module_from_pvmodule,
             plant_from_details,
             transpose_ghi_to_poa_isotropic,
+            expected_dc_by_mppt_from_details,
         )
     except Exception as exc:
         raise DashboardServiceError(f"ImportError power_model: {type(exc).__name__}: {exc}", status_code=500)
@@ -160,6 +230,53 @@ def compute_power_model(plant: PVPlant, details: Any, times_utc: List[datetime],
         else:
             tcell_c = [None if (not np.isfinite(v)) else float(v) for v in np.asarray(tcell_np, dtype=float).tolist()]
 
+        mppt_model_by_source: Dict[str, Dict[str, Any]] = {}
+        try:
+            mppt_expected = expected_dc_by_mppt_from_details(
+                details=details,
+                module=mod,
+                plant=pl,
+                g_poa=g_poa_used_np,
+                tamb_c=tamb_np,
+                g_min_valid=0.0,
+                n_points=60,
+            )
+        except Exception:
+            logger.exception("Falha ao calcular modelo DC por MPPT plant_id=%s", plant.id)
+            mppt_expected = {}
+
+        sbs = agg.get("series_by_source") or {}
+        has_any_mppt_config = bool(mppt_expected)
+        for src in sbs.keys():
+            mppt_no = _mppt_no_from_source(src)
+            if mppt_no is None:
+                continue
+            block = mppt_expected.get(mppt_no)
+            if block is not None:
+                mppt_model_by_source[src] = {
+                    "v_dc_model_v": _float_list(block.get("v_dc_expected_v"), np_mod=np),
+                    "i_dc_model_a": _float_list(block.get("i_dc_expected_a"), np_mod=np),
+                    "p_dc_model_w": _float_list(block.get("pdc_expected_w"), np_mod=np),
+                    "topology_ok": [True] * len(times_utc),
+                    "model_note": [None] * len(times_utc),
+                }
+            else:
+                note = "Sem strings configuradas para este MPPT." if has_any_mppt_config else "Cadastre PVPlantStringConfig com campo MPPT preenchido para habilitar o modelo DC por MPPT."
+                mppt_model_by_source[src] = {
+                    "v_dc_model_v": [None] * len(times_utc),
+                    "i_dc_model_a": [None] * len(times_utc),
+                    "p_dc_model_w": [None] * len(times_utc),
+                    "topology_ok": [False] * len(times_utc),
+                    "model_note": [note] * len(times_utc),
+                }
+
+        _fill_aggregate_dc_from_mppt_model(
+            agg=agg,
+            mppt_model_by_source=mppt_model_by_source,
+            v_dc_model_v=v_dc_model_v,
+            i_dc_model_a=i_dc_model_a,
+        )
+
         return {
             "g_poa_used": g_poa_used,
             "pac_model_w": pac_model_w,
@@ -171,6 +288,7 @@ def compute_power_model(plant: PVPlant, details: Any, times_utc: List[datetime],
             "mismatch_rel": mismatch_rel,
             "valid_model": valid_model,
             "tcell_c": tcell_c,
+            "mppt_model_by_source": mppt_model_by_source,
             "np": np,
         }
     except DashboardServiceError:
@@ -192,6 +310,53 @@ def build_base_gate(params: MismatchDashboardParams, model: Dict[str, Any], agg:
         ok = ok and (not bool(agg["flag_inv_missing_all"][i]))
         base_gate.append(ok)
     return base_gate
+
+
+def build_base_gate_debug(params: MismatchDashboardParams, model: Dict[str, Any], agg: Dict[str, Any]) -> Dict[str, List[Any]]:
+    gate_valid_model: List[bool] = []
+    gate_gpoa_ok: List[bool] = []
+    gate_pac_ok: List[bool] = []
+    gate_meteo_ok: List[bool] = []
+    gate_inverter_ok: List[bool] = []
+    gate_reason: List[str] = []
+
+    for i in range(len(model["mismatch_rel"])):
+        gp = model["g_poa_used"][i]
+        pr = agg["p_ac_w"][i]
+
+        valid_model_ok = bool(model["valid_model"][i])
+        gpoa_ok = (gp is not None) and (float(gp) >= float(params.gpoa_gate))
+        pac_ok = (pr is not None) and (float(pr) >= float(params.pmin_w))
+        meteo_ok = not bool(agg["flag_meteo_missing"][i])
+        inverter_ok = not bool(agg["flag_inv_missing_all"][i])
+
+        gate_valid_model.append(valid_model_ok)
+        gate_gpoa_ok.append(bool(gpoa_ok))
+        gate_pac_ok.append(bool(pac_ok))
+        gate_meteo_ok.append(bool(meteo_ok))
+        gate_inverter_ok.append(bool(inverter_ok))
+
+        reasons: List[str] = []
+        if not valid_model_ok:
+            reasons.append("invalid_model")
+        if not gpoa_ok:
+            reasons.append("low_gpoa")
+        if not pac_ok:
+            reasons.append("low_pac")
+        if not meteo_ok:
+            reasons.append("meteo_missing")
+        if not inverter_ok:
+            reasons.append("inv_missing")
+        gate_reason.append("ok" if not reasons else ";".join(reasons))
+
+    return {
+        "gate_valid_model": gate_valid_model,
+        "gate_gpoa_ok": gate_gpoa_ok,
+        "gate_pac_ok": gate_pac_ok,
+        "gate_meteo_ok": gate_meteo_ok,
+        "gate_inverter_ok": gate_inverter_ok,
+        "gate_reason": gate_reason,
+    }
 
 
 def pick_diag_row_for_ts(ts_utc: datetime, per_ts: Dict[datetime, Dict[str, Dict[str, Any]]], selected_sources: List[str]) -> Optional[Dict[str, Any]]:
@@ -335,6 +500,8 @@ def run_detection_and_rca(
 ) -> Dict[str, Any]:
     n = len(times_utc)
     base_gate = build_base_gate(params, model, agg)
+    gate_debug = build_base_gate_debug(params, model, agg)
+    detection_signal: List[Optional[float]] = list(model["mismatch_rel"])
 
     coarse_period = [False] * n
     fine_period = [False] * n
@@ -444,6 +611,13 @@ def run_detection_and_rca(
 
         det_dbg = {
             "z": det.get("z"),
+            "base_gate": base_gate,
+            "gate_valid_model": gate_debug["gate_valid_model"],
+            "gate_gpoa_ok": gate_debug["gate_gpoa_ok"],
+            "gate_pac_ok": gate_debug["gate_pac_ok"],
+            "gate_meteo_ok": gate_debug["gate_meteo_ok"],
+            "gate_inverter_ok": gate_debug["gate_inverter_ok"],
+            "gate_reason": gate_debug["gate_reason"],
             "ewma_z": ewma_z,
             "cusum": cusum_score,
             "baseline": det.get("baseline"),
@@ -554,6 +728,14 @@ def run_detection_and_rca(
         pipeline_name = "ewma_cusum_multichannel_residuals + rca_patterns"
         return {
             "pipeline_name": pipeline_name,
+            "base_gate": base_gate,
+            "gate_valid_model": gate_debug["gate_valid_model"],
+            "gate_gpoa_ok": gate_debug["gate_gpoa_ok"],
+            "gate_pac_ok": gate_debug["gate_pac_ok"],
+            "gate_meteo_ok": gate_debug["gate_meteo_ok"],
+            "gate_inverter_ok": gate_debug["gate_inverter_ok"],
+            "gate_reason": gate_debug["gate_reason"],
+            "detection_signal_rel": detection_signal,
             "valid_period": valid_period,
             "anomaly": anomaly,
             "anomaly_power": anomaly_power,
@@ -579,6 +761,14 @@ def run_detection_and_rca(
 
     return {
         "pipeline_name": pipeline_name,
+        "base_gate": base_gate,
+        "gate_valid_model": gate_debug["gate_valid_model"],
+        "gate_gpoa_ok": gate_debug["gate_gpoa_ok"],
+        "gate_pac_ok": gate_debug["gate_pac_ok"],
+        "gate_meteo_ok": gate_debug["gate_meteo_ok"],
+        "gate_inverter_ok": gate_debug["gate_inverter_ok"],
+        "gate_reason": gate_debug["gate_reason"],
+        "detection_signal_rel": detection_signal,
         "valid_period": valid_period,
         "anomaly": anomaly,
         "anomaly_power": anomaly_power,

@@ -4,6 +4,8 @@ from datetime import datetime, timezone as dt_tz
 from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
 
+from core.services.fdd.dashboard_common import is_agg_source
+
 
 def _at(seq: Any, i: int, default: Any = None) -> Any:
     try:
@@ -45,10 +47,18 @@ def build_runtime_dump(
 
         any_row = None
         for sname in selected_sources:
+            if not is_agg_source(sname):
+                continue
             rr = by_src.get(sname)
             if rr is not None:
                 any_row = rr
                 break
+        if any_row is None:
+            for sname in selected_sources:
+                rr = by_src.get(sname)
+                if rr is not None:
+                    any_row = rr
+                    break
         if any_row is not None:
             meteo_dump["g_poa_used"] = _at(model.get("g_poa_used"), i)
             meteo_dump["gti"] = any_row.get("gti")
@@ -69,6 +79,7 @@ def build_runtime_dump(
             rr = by_src.get(sname)
             if rr is None:
                 continue
+            sb = (agg.get("series_by_source") or {}).get(sname) or {}
             src_dump[sname] = {
                 "p_ac_w": rr.get("p_ac_w"),
                 "p_dc_w": rr.get("p_dc_w"),
@@ -78,6 +89,11 @@ def build_runtime_dump(
                 "v_ac_v": rr.get("v_ac_v"),
                 "i_ac_a": rr.get("i_ac_a"),
                 "freq_hz": rr.get("freq_hz"),
+                "v_dc_model_v": _at(sb.get("v_dc_model_v"), i),
+                "i_dc_model_a": _at(sb.get("i_dc_model_a"), i),
+                "p_dc_model_w": _at(sb.get("p_dc_model_w"), i),
+                "topology_ok": _at(sb.get("topology_ok"), i),
+                "model_note": _at(sb.get("model_note"), i),
                 "mppt1_vdc_v": rr.get("mppt1_vdc_v"),
                 "mppt2_vdc_v": rr.get("mppt2_vdc_v"),
                 "mppt3_vdc_v": rr.get("mppt3_vdc_v"),
@@ -104,21 +120,43 @@ def build_runtime_dump(
                 "detection_confidence_level": confidence["detection_confidence_level"][i],
                 "diagnosis_confidence_score": confidence["diagnosis_confidence_score"][i],
                 "diagnosis_confidence_level": confidence["diagnosis_confidence_level"][i],
+                "state_label": _at(confidence.get("diag_state_labels"), i),
+                "domain_label": _at(confidence.get("diag_domain_labels"), i),
+                "diagnosis_label": _at(confidence.get("diag_diagnosis_labels"), i),
+                "direct_grid_evidence": _at(confidence.get("diag_direct_grid"), i),
+                "zero_injection_flag": _at(confidence.get("diag_zero_inj"), i),
+                "irradiance_tier": _at(pipeline.get("irradiance_tier"), i),
                 "notes": confidence["confidence_notes"][i],
             },
             "detection": {
+                "base_gate": _at(pipeline.get("base_gate"), i),
+                "gate_reason": _at(pipeline.get("gate_reason"), i),
+                "gate_valid_model": _at(pipeline.get("gate_valid_model"), i),
+                "gate_gpoa_ok": _at(pipeline.get("gate_gpoa_ok"), i),
+                "gate_pac_ok": _at(pipeline.get("gate_pac_ok"), i),
+                "gate_meteo_ok": _at(pipeline.get("gate_meteo_ok"), i),
+                "gate_inverter_ok": _at(pipeline.get("gate_inverter_ok"), i),
                 "valid_period": _at(pipeline.get("valid_period"), i),
+                "coarse_period": _at(pipeline.get("coarse_period"), i),
+                "fine_period": _at(pipeline.get("fine_period"), i),
+                "meteo_quality_ok": _at(pipeline.get("meteo_quality_ok"), i),
                 "stable_sky": _at(pipeline.get("stable_sky"), i),
                 "anomaly": _at(pipeline.get("anomaly"), i),
                 "anomaly_power": _at(pipeline.get("anomaly_power"), i),
                 "residual_trigger": _at(pipeline.get("residual_trigger"), i),
                 "residual_event_score": _at(pipeline.get("residual_event_score"), i),
                 "combined_event_score": _at(pipeline.get("combined_event_score"), i),
+                "detection_signal_rel": _at(pipeline.get("detection_signal_rel"), i),
                 "ewma_z": _at(pipeline.get("ewma_z"), i),
                 "cusum_score": _at(pipeline.get("cusum_score"), i),
                 "irradiance_tier": _at(pipeline.get("irradiance_tier"), i),
                 "rca_code": _at(pipeline.get("codes"), i),
                 "rca_label": _at(pipeline.get("labels"), i),
+                "state_label": _at(confidence.get("diag_state_labels"), i),
+                "domain_label": _at(confidence.get("diag_domain_labels"), i),
+                "diagnosis_label": _at(confidence.get("diag_diagnosis_labels"), i),
+                "direct_grid_evidence": _at(confidence.get("diag_direct_grid"), i),
+                "zero_injection_flag": _at(confidence.get("diag_zero_inj"), i),
             },
             "chosen_total": {
                 "p_ac_w": _pick_first_not_none(agg["p_ac_w"][i], agg["p_ac_mppt_sum_w"][i], agg["p_ac_agg_w"][i], (any_row.get("p_ac_w") if any_row is not None else None)),
@@ -178,6 +216,14 @@ def build_runtime_dump(
             "sources": src_dump,
             "meteo": meteo_dump,
             # atalhos flat para facilitar compatibilidade do drawer/template
+            "base_gate": _at(pipeline.get("base_gate"), i),
+            "gate_reason": _at(pipeline.get("gate_reason"), i),
+            "gate_valid_model": _at(pipeline.get("gate_valid_model"), i),
+            "gate_gpoa_ok": _at(pipeline.get("gate_gpoa_ok"), i),
+            "gate_pac_ok": _at(pipeline.get("gate_pac_ok"), i),
+            "gate_meteo_ok": _at(pipeline.get("gate_meteo_ok"), i),
+            "gate_inverter_ok": _at(pipeline.get("gate_inverter_ok"), i),
+            "detection_signal_rel": _at(pipeline.get("detection_signal_rel"), i),
             "ewma_z": _at(pipeline.get("ewma_z"), i),
             "cusum_score": _at(pipeline.get("cusum_score"), i),
             "residual_event_score": _at(pipeline.get("residual_event_score"), i),
@@ -186,6 +232,11 @@ def build_runtime_dump(
             "rca_label": _at(pipeline.get("labels"), i),
             "code": _at(pipeline.get("codes"), i),
             "label": _at(pipeline.get("labels"), i),
+            "state_label": _at(confidence.get("diag_state_labels"), i),
+            "domain_label": _at(confidence.get("diag_domain_labels"), i),
+            "diagnosis_label": _at(confidence.get("diag_diagnosis_labels"), i),
+            "direct_grid_evidence": _at(confidence.get("diag_direct_grid"), i),
+            "zero_injection_flag": _at(confidence.get("diag_zero_inj"), i),
             "p_ac_w": _pick_first_not_none(agg["p_ac_w"][i], agg["p_ac_mppt_sum_w"][i], agg["p_ac_agg_w"][i], (any_row.get("p_ac_w") if any_row is not None else None)),
             "v_ac_v": _pick_first_not_none(agg["v_ac_v"][i], (any_row.get("v_ac_v") if any_row is not None else None)),
             "i_ac_a": _pick_first_not_none(agg["i_ac_a"][i], (any_row.get("i_ac_a") if any_row is not None else None)),

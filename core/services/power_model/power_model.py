@@ -1674,6 +1674,119 @@ class StringGroup:
     modules_per_string: int
 
 
+
+
+def _string_groups_by_mppt_from_details(details: Any) -> Dict[int, List[StringGroup]]:
+    out: Dict[int, List[StringGroup]] = {}
+    qs = getattr(details, "string_configs", None)
+    if qs is None:
+        return out
+    try:
+        cfgs = list(qs.all())
+    except Exception:
+        return out
+    for c in cfgs:
+        mppt = _safe_int(getattr(c, "mppt", None))
+        sq = _safe_int(getattr(c, "strings_qty", None))
+        ns = _safe_int(getattr(c, "modules_per_string", None))
+        if mppt is None or sq is None or ns is None or sq < 1 or ns < 1:
+            continue
+        out.setdefault(int(mppt), []).append(StringGroup(strings_qty=int(sq), modules_per_string=int(ns)))
+    return out
+
+
+def expected_dc_from_string_groups(
+    *,
+    g_poa: ArrayLike,
+    tamb_c: ArrayLike,
+    module: ModuleOneDiode,
+    plant: PlantModel,
+    groups: Union[Sequence[Tuple[int, int]], Sequence[StringGroup]],
+    g_min_valid: float = 0.0,
+    n_points: int = 60,
+    force_zero_when_invalid: bool = False,
+) -> Dict[str, np.ndarray]:
+    G0 = np.asarray(g_poa, dtype=float).ravel()
+    Tair = np.asarray(tamb_c, dtype=float).ravel()
+    if G0.size != Tair.size:
+        raise ValueError("g_poa e tamb_c devem ter o mesmo tamanho.")
+
+    n = G0.size
+    valid = np.isfinite(G0) & np.isfinite(Tair) & (G0 >= float(g_min_valid))
+    Tc = tcell_noct(G0, Tair, noct_c=float(getattr(plant, "noct_c", 45.0) or 45.0))
+
+    iph = iph_irr_temp(module, G0, Tc)
+    i0 = i0_temp(module, Tc)
+    rp = rp_irr(module, G0)
+    Tk = Tc + 273.15
+    aVt = float(module.a) * (_vt_cell(Tk) * float(module.ns))
+    voc_g = voc_guess(module, Tc, G0)
+
+    grp = pmp_array_groups_vec(
+        iph=iph,
+        i0=i0,
+        rs=float(module.rs_ohm),
+        rp=rp,
+        aVt=aVt,
+        voc_g=voc_g,
+        groups=groups,
+        n_points=int(max(30, n_points)),
+    )
+
+    pdc_raw = np.asarray(grp.get("pmp"), dtype=float)
+    vdc_exp = np.asarray(grp.get("vmp"), dtype=float)
+    idc_exp = np.asarray(grp.get("imp"), dtype=float)
+
+    if force_zero_when_invalid:
+        pdc_raw = np.where(valid, np.where(np.isfinite(pdc_raw), pdc_raw, 0.0), 0.0)
+        vdc_exp = np.where(valid, np.where(np.isfinite(vdc_exp), vdc_exp, 0.0), 0.0)
+        idc_exp = np.where(valid, np.where(np.isfinite(idc_exp), idc_exp, 0.0), 0.0)
+    else:
+        pdc_raw = np.where(valid, pdc_raw, np.nan)
+        vdc_exp = np.where(valid, vdc_exp, np.nan)
+        idc_exp = np.where(valid, idc_exp, np.nan)
+
+    k_sys = float(getattr(plant, "k_sys", 1.0) or 1.0)
+    pdc_expected = np.where(valid, pdc_raw * k_sys, np.nan)
+
+    return {
+        "valid": valid,
+        "tcell_c": Tc,
+        "g_poa_used": G0,
+        "pdc_expected_w": pdc_expected,
+        "v_dc_expected_v": vdc_exp,
+        "i_dc_expected_a": idc_exp,
+    }
+
+
+def expected_dc_by_mppt_from_details(
+    *,
+    details: Any,
+    module: ModuleOneDiode,
+    plant: PlantModel,
+    g_poa: ArrayLike,
+    tamb_c: ArrayLike,
+    g_min_valid: float = 0.0,
+    n_points: int = 60,
+) -> Dict[int, Dict[str, np.ndarray]]:
+    groups_by_mppt = _string_groups_by_mppt_from_details(details)
+    out: Dict[int, Dict[str, np.ndarray]] = {}
+    for mppt, groups in groups_by_mppt.items():
+        if not groups:
+            continue
+        out[int(mppt)] = expected_dc_from_string_groups(
+            g_poa=g_poa,
+            tamb_c=tamb_c,
+            module=module,
+            plant=plant,
+            groups=groups,
+            g_min_valid=g_min_valid,
+            n_points=n_points,
+            force_zero_when_invalid=False,
+        )
+    return out
+
+
 def _as_groups(groups: Union[Sequence[Tuple[int, int]], Sequence[StringGroup]]) -> List[StringGroup]:
     out: List[StringGroup] = []
     for g in groups:

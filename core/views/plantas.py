@@ -5,19 +5,19 @@ from core.views._imports import *
 # Forms
 from core.forms import (
     PVPlantForm, PlantMonitoringCredentialForm,
-    PVPlantDetailsForm,     
-    PlantCableFormSet,      
+    PVPlantDetailsForm,
     PlantCableFormSet,
-    PlantCableSegmentForm, 
-    PVStringGroupFormSet,
+    PlantCableSegmentForm,
+    PVStringConfigFormSet,
 )
 
 # Models
 from core.models import (
     PVPlant,
     PlantMonitoringCredential,
-    PVPlantDetails,    
-    PlantCableSegment, 
+    PVPlantDetails,
+    PVPlantStringConfig,
+    PlantCableSegment,
 )
 #---------------------------
 #---------------------------  P L A N T A S
@@ -102,28 +102,44 @@ class PlantDetailsEditView(LoginRequiredMixin, View):
     template_name = "plants/details_form.html"
     FORMSET_PREFIX = "strings"
 
-    def _initial_strings_from_details(self, details: PVPlantDetails):
+    def _legacy_initial_strings(self, details: PVPlantDetails):
         """
-        Se já houver strings_count/modules_per_string, preenche 1 linha inicial.
-        Se modules_total existir mas modules_per_string for None (MIX), deixa em branco (usuário preenche).
+        Se ainda não existirem PVPlantStringConfig persistidas, converte a configuração
+        legada (strings_count/modules_per_string) em 1 linha inicial do formset.
         """
-        if details and details.strings_count and details.modules_per_string:
+        if not details:
+            return []
+        try:
+            if details.string_configs.exists():
+                return []
+        except Exception:
+            return []
+
+        if details.strings_count and details.modules_per_string:
             return [{
-                "label": "S1",
+                "name": "S1",
                 "strings_qty": int(details.strings_count),
                 "modules_per_string": int(details.modules_per_string),
             }]
         return []
+
+    def _build_strings_formset(self, *, details: PVPlantDetails, data=None):
+        kwargs = {
+            "instance": details,
+            "prefix": self.FORMSET_PREFIX,
+        }
+        if data is not None:
+            kwargs["data"] = data
+        else:
+            kwargs["initial"] = self._legacy_initial_strings(details)
+        return PVStringConfigFormSet(**kwargs)
 
     def get(self, request, pk):
         plant = get_object_or_404(PVPlant, pk=pk, owner=request.user)
         details, _ = PVPlantDetails.objects.get_or_create(plant=plant)
 
         form = PVPlantDetailsForm(instance=details)
-        strings_formset = PVStringGroupFormSet(
-            prefix=self.FORMSET_PREFIX,
-            initial=self._initial_strings_from_details(details),
-        )
+        strings_formset = self._build_strings_formset(details=details)
 
         ctx = {"plant": plant, "pk": plant.pk, "form": form, "strings_formset": strings_formset}
         return render(request, self.template_name, ctx)
@@ -133,45 +149,34 @@ class PlantDetailsEditView(LoginRequiredMixin, View):
         details, _ = PVPlantDetails.objects.get_or_create(plant=plant)
 
         form = PVPlantDetailsForm(request.POST, instance=details)
-        strings_formset = PVStringGroupFormSet(request.POST, prefix=self.FORMSET_PREFIX)
+        strings_formset = self._build_strings_formset(details=details, data=request.POST)
 
         ok_form = form.is_valid()
         ok_fs = strings_formset.is_valid()
 
         if ok_form and ok_fs:
-            details_obj = form.save(commit=False)
+            with transaction.atomic():
+                details_obj = form.save(commit=False)
+                details_obj.plant = plant
+                details_obj.save()
 
-            # agrega totais a partir do formset
-            total_strings = 0
-            total_modules = 0
-            mps_vals = []
+                strings_formset.instance = details_obj
+                strings_formset.save()
 
-            for row in strings_formset.cleaned_data:
-                if not row or row.get("DELETE"):
-                    continue
-                qty = int(row["strings_qty"])
-                mps = int(row["modules_per_string"])
-                total_strings += qty
-                total_modules += qty * mps
-                mps_vals.append(mps)
+                details_obj.refresh_from_db()
+                if details_obj.string_configs.exists():
+                    details_obj.recompute_totals_from_configs(commit=True)
+                else:
+                    PVPlantDetails.objects.filter(pk=details_obj.pk).update(
+                        strings_count=None,
+                        modules_total=None,
+                        modules_per_string=None,
+                    )
+                    details_obj.refresh_from_db()
 
-            # grava agregados no details
-            if total_strings == 0:
-                details_obj.strings_count = None
-                details_obj.modules_total = None
-                details_obj.modules_per_string = None
-            else:
-                details_obj.strings_count = total_strings
-                details_obj.modules_total = total_modules
-
-                # se todos os mps iguais, salva; senão, deixa None (MIX)
-                details_obj.modules_per_string = mps_vals[0] if all(v == mps_vals[0] for v in mps_vals) else None
-
-            details_obj.save()
             messages.success(request, "Detalhes da planta salvos.")
             return redirect("plants:detail", pk=plant.pk)
 
-        # DEBUG: agora você enxerga exatamente o que quebrou
         logger.warning("PVPlantDetailsForm errors: %s", form.errors.as_json())
         logger.warning("String formset errors: %s", strings_formset.errors)
 

@@ -151,12 +151,22 @@ def aggregate_runtime_series(
         e15_l = [as_float(by_src[s].get("e_ac_wh_15")) for s in chosen] if chosen else []
         vdc_l = [as_float(by_src[s].get("v_dc_v")) for s in chosen] if chosen else []
         idc_l = [as_float(by_src[s].get("i_dc_a")) for s in chosen] if chosen else []
-        vac_l = [as_float(by_src[s].get("v_ac_v")) for s in chosen] if chosen else []
-        fac_l = [as_float(by_src[s].get("freq_hz")) for s in chosen] if chosen else []
         cov_l = [as_float(by_src[s].get("inv_coverage")) for s in chosen] if chosen else []
 
         agg_ref_src = present_agg[0] if present_agg else None
         agg_ref_row = by_src.get(agg_ref_src) if agg_ref_src else None
+
+        vac_candidates = (
+            [as_float(by_src[s].get("v_ac_v")) for s in present_agg]
+            if present_agg else
+            [as_float(by_src[s].get("v_ac_v")) for s in chosen]
+        )
+        fac_candidates = (
+            [as_float(by_src[s].get("freq_hz")) for s in present_agg]
+            if present_agg else
+            [as_float(by_src[s].get("freq_hz")) for s in chosen]
+        )
+
         agg_iac = as_float(agg_ref_row.get("i_ac_a")) if agg_ref_row is not None else None
         if agg_iac is not None:
             iac_value = agg_iac
@@ -164,15 +174,33 @@ def aggregate_runtime_series(
             iac_candidates = [as_float(by_src[s].get("i_ac_a")) for s in chosen] if chosen else []
             iac_value = next((x for x in iac_candidates if x is not None), None)
 
+        pac_total = pac_mppt if pac_mppt is not None else pac_agg
+        if pac_total is None:
+            pac_total = sum_none(pac_l)
+
+        active_vdc = []
+        if chosen:
+            for s in chosen:
+                vv = as_float(by_src[s].get("v_dc_v"))
+                ii = as_float(by_src[s].get("i_dc_a"))
+                pp = as_float(by_src[s].get("p_dc_w"))
+                is_active = (
+                    (pp is not None and pp > 1.0)
+                    or (ii is not None and ii > 0.25)
+                )
+                if is_active and vv is not None and vv > 0.0:
+                    active_vdc.append(vv)
+        vdc_value = mean_none(active_vdc) if active_vdc else mean_none(vdc_l)
+
         miss_flags = [bool(by_src[s].get("flag_inv_missing") or False) for s in chosen] if chosen else []
-        p_ac_w[i] = sum_none(pac_l)
+        p_ac_w[i] = pac_total
         p_dc_w[i] = sum_none(pdc_l)
         e_ac_wh_15[i] = sum_none(e15_l)
-        v_dc_v[i] = mean_none(vdc_l)
+        v_dc_v[i] = vdc_value
         i_dc_a[i] = sum_none(idc_l)
-        v_ac_v[i] = mean_none(vac_l)
+        v_ac_v[i] = mean_none(vac_candidates)
         i_ac_a[i] = iac_value
-        freq_hz[i] = mean_none(fac_l)
+        freq_hz[i] = mean_none(fac_candidates)
         inv_cov[i] = mean_none(cov_l)
 
         if not miss_flags:

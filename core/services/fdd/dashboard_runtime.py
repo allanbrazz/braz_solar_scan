@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from collections import Counter
+from collections import Counter, defaultdict
 from datetime import datetime, time, timedelta, timezone as dt_tz
 from typing import Any, Dict, List, Mapping, Optional, Tuple
+import re
 from zoneinfo import ZoneInfo
 
-from core.models import PVPlant
+from core.models import PVPlant, PVPlantStringConfig
 from core.services.fdd.dashboard_common import (
     MISMATCH_VERSION_SUMMARY,
     DashboardServiceError,
@@ -46,6 +47,174 @@ def _series_with_fallback(*series_list: List[Any]) -> List[Any]:
         out[i] = _pick_first_not_none(*vals)
     return out
 
+
+
+
+def _mppt_no_from_source(src: Any) -> Optional[int]:
+    m = re.search(r"(?:\||\b)MPPT\s*([0-9]+)", str(src or ""), flags=re.IGNORECASE)
+    if not m:
+        return None
+    try:
+        return int(m.group(1))
+    except Exception:
+        return None
+
+
+def _float_list(xs: Any, n: int) -> List[Optional[float]]:
+    out: List[Optional[float]] = [None] * n
+    if not isinstance(xs, (list, tuple)):
+        return out
+    for i in range(min(n, len(xs))):
+        try:
+            v = xs[i]
+            out[i] = None if v is None else float(v)
+        except Exception:
+            out[i] = None
+    return out
+
+
+def _build_mppt_model_by_source(plant: PVPlant, details: Any, times_utc: List[datetime], agg: Dict[str, Any], selected_sources: List[str], g_poa_used: List[Any]) -> Dict[str, Dict[str, List[Any]]]:
+    n = len(times_utc)
+    try:
+        import numpy as np
+        from core.services.power_model.power_model import (
+            module_from_pvmodule,
+            plant_from_details,
+            StringGroup,
+            tcell_noct,
+            iph_irr_temp,
+            i0_temp,
+            rp_irr,
+            _vt_cell,
+            voc_guess,
+            pmp_array_groups_vec,
+        )
+    except Exception:
+        return {}
+
+    cfgs = list(PVPlantStringConfig.objects.filter(details_id=getattr(details, "id", None)).order_by("mppt", "order", "id"))
+    groups_by_mppt: Dict[int, List[Any]] = defaultdict(list)
+    for c in cfgs:
+        try:
+            mppt = int(getattr(c, "mppt", None))
+            sq = int(getattr(c, "strings_qty", None))
+            ns = int(getattr(c, "modules_per_string", None))
+        except Exception:
+            continue
+        if mppt < 1 or sq < 1 or ns < 1:
+            continue
+        groups_by_mppt[mppt].append(StringGroup(strings_qty=sq, modules_per_string=ns))
+
+    out: Dict[str, Dict[str, List[Any]]] = {}
+    if not groups_by_mppt:
+        for src in selected_sources:
+            if _mppt_no_from_source(src) is None:
+                continue
+            out[src] = {
+                "v_dc_model_v": [None] * n,
+                "i_dc_model_a": [None] * n,
+                "p_dc_model_w": [None] * n,
+                "topology_ok": [False] * n,
+                "model_note": ["Cadastre PVPlantStringConfig com MPPT para habilitar o modelo DC por MPPT."] * n,
+            }
+        return out
+
+    try:
+        mod = module_from_pvmodule(details.module)
+        inv = getattr(details, "inverter", None)
+        pl = plant_from_details(details, inverter=inv, use_inverter_eff=True)
+
+        G0 = np.asarray([np.nan if v is None else float(v) for v in g_poa_used], dtype=float)
+        Tair = np.asarray([np.nan if v is None else float(v) for v in (agg.get("temp_air") or [None] * n)], dtype=float)
+        valid = np.isfinite(G0) & np.isfinite(Tair) & (G0 >= 0.0)
+        Tc = tcell_noct(G0, Tair, noct_c=float(getattr(pl, "noct_c", 45.0) or 45.0))
+        iph = iph_irr_temp(mod, G0, Tc)
+        i0 = i0_temp(mod, Tc)
+        rp = rp_irr(mod, G0)
+        Tk = Tc + 273.15
+        aVt = float(mod.a) * (_vt_cell(Tk) * float(mod.ns))
+        voc_g = voc_guess(mod, Tc, G0)
+
+        for src in selected_sources:
+            mppt_no = _mppt_no_from_source(src)
+            if mppt_no is None:
+                continue
+            groups = groups_by_mppt.get(mppt_no)
+            if not groups:
+                out[src] = {
+                    "v_dc_model_v": [None] * n,
+                    "i_dc_model_a": [None] * n,
+                    "p_dc_model_w": [None] * n,
+                    "topology_ok": [False] * n,
+                    "model_note": ["Sem strings configuradas para este MPPT."] * n,
+                }
+                continue
+
+            grp = pmp_array_groups_vec(
+                iph=iph,
+                i0=i0,
+                rs=float(mod.rs_ohm),
+                rp=rp,
+                aVt=aVt,
+                voc_g=voc_g,
+                groups=groups,
+                n_points=60,
+            )
+            pdc_raw = np.asarray(grp.get("pmp"), dtype=float)
+            vdc_exp = np.asarray(grp.get("vmp"), dtype=float)
+            idc_exp = np.asarray(grp.get("imp"), dtype=float)
+            pdc_exp = np.where(valid, pdc_raw * float(getattr(pl, "k_sys", 1.0) or 1.0), np.nan)
+            vdc_exp = np.where(valid, vdc_exp, np.nan)
+            idc_exp = np.where(valid, idc_exp, np.nan)
+
+            out[src] = {
+                "v_dc_model_v": [None if not np.isfinite(v) else float(v) for v in vdc_exp.tolist()],
+                "i_dc_model_a": [None if not np.isfinite(v) else float(v) for v in idc_exp.tolist()],
+                "p_dc_model_w": [None if not np.isfinite(v) else float(v) for v in pdc_exp.tolist()],
+                "topology_ok": [True] * n,
+                "model_note": [None] * n,
+            }
+    except Exception as exc:
+        note = f"Falha no modelo DC por MPPT: {type(exc).__name__}: {exc}"
+        for src in selected_sources:
+            if _mppt_no_from_source(src) is None:
+                continue
+            out[src] = {
+                "v_dc_model_v": [None] * n,
+                "i_dc_model_a": [None] * n,
+                "p_dc_model_w": [None] * n,
+                "topology_ok": [False] * n,
+                "model_note": [note] * n,
+            }
+    return out
+
+
+def _fill_aggregate_dc_from_mppt(agg: Dict[str, Any], series_by_source: Dict[str, Dict[str, List[Any]]], model: Dict[str, Any]) -> None:
+    n = len(model.get("v_dc_model_v") or [])
+    for i in range(n):
+        vv: List[float] = []
+        ii: List[float] = []
+        for src, sb in (series_by_source or {}).items():
+            if _mppt_no_from_source(src) is None:
+                continue
+            try:
+                mv = sb.get("v_dc_model_v")[i]
+                mi = sb.get("i_dc_model_a")[i]
+                meas_p = (sb.get("p_dc_w") or [None] * n)[i]
+                meas_i = (sb.get("i_dc_a") or [None] * n)[i]
+            except Exception:
+                continue
+            is_active = ((meas_p is not None and float(meas_p) > 1.0) or (meas_i is not None and float(meas_i) > 0.25))
+            if not is_active:
+                continue
+            if mv is not None:
+                vv.append(float(mv))
+            if mi is not None:
+                ii.append(float(mi))
+        if model.get("v_dc_model_v") is not None and i < len(model["v_dc_model_v"]) and model["v_dc_model_v"][i] is None and vv:
+            model["v_dc_model_v"][i] = float(sum(vv) / len(vv))
+        if model.get("i_dc_model_a") is not None and i < len(model["i_dc_model_a"]) and model["i_dc_model_a"][i] is None and ii:
+            model["i_dc_model_a"][i] = float(sum(ii))
 
 def parse_dashboard_params(data: Mapping[str, Any], tz_name: str) -> MismatchDashboardParams:
     try:
@@ -202,7 +371,7 @@ def build_mismatch_dashboard_payload(plant: PVPlant, params: MismatchDashboardPa
 
     model = compute_power_model(plant, details, times_utc, agg)
     p_ac_real_series = _series_with_fallback(agg.get("p_ac_w") or [], agg.get("p_ac_mppt_sum_w") or [], agg.get("p_ac_agg_w") or [])
-    residual_out = compute_residual_series_from_observations(
+    residual_kwargs = dict(
         plant=plant,
         times_utc=times_utc,
         gti=agg["gti"],
@@ -228,7 +397,30 @@ def build_mismatch_dashboard_payload(plant: PVPlant, params: MismatchDashboardPa
         source_oper=(source_oper_list[0] if source_oper_list else ""),
         source_meteo=src_meteo,
     )
+    try:
+        import inspect as _inspect
+        if "g_poa_wm2" in _inspect.signature(compute_residual_series_from_observations).parameters:
+            residual_kwargs["g_poa_wm2"] = model["g_poa_used"]
+    except Exception:
+        pass
+    residual_out = compute_residual_series_from_observations(**residual_kwargs)
     residual_series = residual_out.get("series") or {}
+
+    mppt_model_by_source = _build_mppt_model_by_source(
+        plant=plant,
+        details=details,
+        times_utc=times_utc,
+        agg=agg,
+        selected_sources=selected_sources,
+        g_poa_used=model.get("g_poa_used") or [None] * len(times_utc),
+    )
+    for src, sb in (agg.get("series_by_source") or {}).items():
+        block = mppt_model_by_source.get(src) or {}
+        sb["v_dc_model_v"] = list(block.get("v_dc_model_v") or ([None] * len(times_utc)))
+        sb["i_dc_model_a"] = list(block.get("i_dc_model_a") or ([None] * len(times_utc)))
+        sb["p_dc_model_w"] = list(block.get("p_dc_model_w") or ([None] * len(times_utc)))
+        sb["topology_ok"] = list(block.get("topology_ok") or ([False] * len(times_utc)))
+        sb["model_note"] = list(block.get("model_note") or ([None] * len(times_utc)))
 
     # Sincroniza expectativas do módulo canônico com o payload principal.
     if residual_series:
@@ -239,6 +431,8 @@ def build_mismatch_dashboard_payload(plant: PVPlant, params: MismatchDashboardPa
         model["pdc_model_w"] = residual_series.get("pdc_expected_w") or model.get("pdc_model_w") or [None] * len(times_utc)
         model["v_dc_model_v"] = residual_series.get("v_dc_expected_v") or model.get("v_dc_model_v") or [None] * len(times_utc)
         model["i_dc_model_a"] = residual_series.get("i_dc_expected_a") or model.get("i_dc_model_a") or [None] * len(times_utc)
+
+    _fill_aggregate_dc_from_mppt(agg, agg.get("series_by_source") or {}, model)
 
     pipeline = run_detection_and_rca(
         plant=plant,

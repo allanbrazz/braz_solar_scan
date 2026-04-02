@@ -47,7 +47,7 @@
         <div>
           <h3 class="mb-1">Configuração elétrica (Strings)</h3>
           <div class="muted">
-            Total de módulos = <span class="mono">Σ(strings_qty × modules_per_string)</span>.
+            Total de módulos = <span class="mono">Σ(strings_qty × modules_per_string)</span>. Preencha o MPPT em cada linha para habilitar o modelo DC por MPPT no dashboard.
           </div>
         </div>
         <div class="row-actions">
@@ -62,11 +62,12 @@
         <table class="strings-table">
           <thead>
             <tr>
-              <th style="width:38%;">Nome/Label</th>
-              <th style="width:18%;">Qtd. strings</th>
-              <th style="width:18%;">Módulos/string</th>
+              <th style="width:28%;">Nome/Label</th>
+              <th style="width:12%;">MPPT</th>
+              <th style="width:16%;">Qtd. strings</th>
+              <th style="width:16%;">Módulos/string</th>
               <th style="width:18%;">Total módulos</th>
-              <th style="width:8%;">Remover</th>
+              <th style="width:10%;">Remover</th>
             </tr>
           </thead>
 
@@ -94,6 +95,14 @@
 
                   {# Se existir campo hidden id no seu form, mantém (não atrapalha) #}
                   {{ f.id }}
+                  {% if f.order %}{{ f.order.as_hidden }}{% endif %}
+                </td>
+
+                <td>
+                  <div class="field">
+                    {% if f.mppt %}{{ f.mppt }}{% endif %}
+                    {% if f.mppt.errors %}<div class="text-danger small">{{ f.mppt.errors|join:", " }}</div>{% endif %}
+                  </div>
                 </td>
 
                 <td>
@@ -197,7 +206,9 @@
         {% if f.label %}{{ f.label }}{% elif f.name %}{{ f.name }}{% endif %}
       </div>
       {{ f.id }}
+                  {% if f.order %}{{ f.order.as_hidden }}{% endif %}
     </td>
+    <td><div class="field">{% if f.mppt %}{{ f.mppt }}{% endif %}</div></td>
     <td><div class="field">{{ f.strings_qty }}</div></td>
     <td><div class="field">{{ f.modules_per_string }}</div></td>
     <td class="mono"><span class="rowTotal">—</span></td>

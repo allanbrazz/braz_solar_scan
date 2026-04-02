@@ -29,7 +29,7 @@ def row_from_mapping(mapping: Dict[str, Any], *, plant_id: int, source_oper: str
         v_ac_v=_f(mapping.get("v_ac_v")),
         i_ac_a=_f(mapping.get("i_ac_a")),
         freq_hz=_f(mapping.get("freq_hz")),
-        g_poa_wm2=_f(mapping.get("gti") if mapping.get("gti") is not None else mapping.get("g_poa_wm2")),
+        g_poa_wm2=_f(mapping.get("g_poa_wm2") if mapping.get("g_poa_wm2") is not None else mapping.get("gti")),
         ghi_wm2=_f(mapping.get("ghi")),
         dni_wm2=_f(mapping.get("dni")),
         dhi_wm2=_f(mapping.get("dhi")),

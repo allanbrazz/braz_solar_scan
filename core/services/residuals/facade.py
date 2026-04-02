@@ -164,7 +164,7 @@ def compute_residual_series_from_rows(*, plant: Any, rows: Iterable[Dict[str, An
     }
 
 
-def compute_residual_series_from_observations(*, plant: Any, times_utc: List[Any], gti: List[Optional[float]] | np.ndarray, ghi: List[Optional[float]] | np.ndarray, dni: List[Optional[float]] | np.ndarray, dhi: List[Optional[float]] | np.ndarray, temp_air: List[Optional[float]] | np.ndarray, p_ac_w: List[Optional[float]] | np.ndarray, p_dc_w: List[Optional[float]] | np.ndarray, v_dc_v: List[Optional[float]] | np.ndarray, i_dc_a: List[Optional[float]] | np.ndarray, v_ac_v: Optional[List[Optional[float]] | np.ndarray] = None, i_ac_a: Optional[List[Optional[float]] | np.ndarray] = None, freq_hz: Optional[List[Optional[float]] | np.ndarray] = None, meteo_qc_score: Optional[List[Optional[float]] | np.ndarray] = None, flag_meteo_missing: Optional[List[bool]] = None, flag_meteo_low_confidence: Optional[List[bool]] = None, flag_meteo_interpolated: Optional[List[bool]] = None, flag_meteo_outlier: Optional[List[bool]] = None, flag_meteo_artifact: Optional[List[bool]] = None, flag_inv_missing: Optional[List[bool]] = None, inv_coverage: Optional[List[Optional[float]] | np.ndarray] = None, source_oper: str = "", source_meteo: str = "", config: Optional[ResidualConfig] = None) -> Dict[str, Any]:
+def compute_residual_series_from_observations(*, plant: Any, times_utc: List[Any], gti: List[Optional[float]] | np.ndarray, ghi: List[Optional[float]] | np.ndarray, dni: List[Optional[float]] | np.ndarray, dhi: List[Optional[float]] | np.ndarray, temp_air: List[Optional[float]] | np.ndarray, p_ac_w: List[Optional[float]] | np.ndarray, p_dc_w: List[Optional[float]] | np.ndarray, v_dc_v: List[Optional[float]] | np.ndarray, i_dc_a: List[Optional[float]] | np.ndarray, v_ac_v: Optional[List[Optional[float]] | np.ndarray] = None, i_ac_a: Optional[List[Optional[float]] | np.ndarray] = None, freq_hz: Optional[List[Optional[float]] | np.ndarray] = None, meteo_qc_score: Optional[List[Optional[float]] | np.ndarray] = None, flag_meteo_missing: Optional[List[bool]] = None, flag_meteo_low_confidence: Optional[List[bool]] = None, flag_meteo_interpolated: Optional[List[bool]] = None, flag_meteo_outlier: Optional[List[bool]] = None, flag_meteo_artifact: Optional[List[bool]] = None, flag_inv_missing: Optional[List[bool]] = None, inv_coverage: Optional[List[Optional[float]] | np.ndarray] = None, source_oper: str = "", source_meteo: str = "", config: Optional[ResidualConfig] = None, g_poa_wm2: Optional[List[Optional[float]] | np.ndarray] = None) -> Dict[str, Any]:
     def at(seq, i):
         if seq is None:
             return None
@@ -187,6 +187,7 @@ def compute_residual_series_from_observations(*, plant: Any, times_utc: List[Any
             "i_ac_a": at(i_ac_a, i),
             "freq_hz": at(freq_hz, i),
             "gti": at(gti, i),
+            "g_poa_wm2": at(g_poa_wm2, i) if g_poa_wm2 is not None else at(gti, i),
             "ghi": at(ghi, i),
             "dni": at(dni, i),
             "dhi": at(dhi, i),

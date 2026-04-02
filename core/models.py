@@ -301,6 +301,38 @@ class PVPlantStringConfig(models.Model):
         if self.modules_per_string is None or int(self.modules_per_string) < 1:
             raise ValidationError({"modules_per_string": "Deve ser >= 1."})
 
+    def _sync_parent_details(self) -> None:
+        details = getattr(self, "details", None)
+        if not details or not details.pk:
+            return
+        qs = details.string_configs.all()
+        if qs.exists():
+            details.recompute_totals_from_configs(commit=True)
+        else:
+            PVPlantDetails.objects.filter(pk=details.pk).update(
+                strings_count=None,
+                modules_total=None,
+                modules_per_string=None,
+            )
+
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        self._sync_parent_details()
+
+    def delete(self, *args, **kwargs):
+        details = getattr(self, "details", None)
+        super().delete(*args, **kwargs)
+        if details and details.pk:
+            qs = details.string_configs.all()
+            if qs.exists():
+                details.recompute_totals_from_configs(commit=True)
+            else:
+                PVPlantDetails.objects.filter(pk=details.pk).update(
+                    strings_count=None,
+                    modules_total=None,
+                    modules_per_string=None,
+                )
+
     def __str__(self) -> str:
         label = self.name.strip() or f"Config #{self.pk or 'new'}"
         return f"{label}: {self.strings_qty} strings × {self.modules_per_string} módulos/string"

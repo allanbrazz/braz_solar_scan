@@ -199,15 +199,57 @@ class PVPlantForm(forms.ModelForm):
         if not self.initial.get("timezone") and not getattr(self.instance, "timezone", None):
             self.initial["timezone"] = getattr(settings, "TIME_ZONE", "UTC")
 
-class PVStringGroupForm(forms.Form):
-    label = forms.CharField(label="Nome/Label", required=False)
-    strings_qty = forms.IntegerField(label="Qtd. strings", min_value=1, required=True)
-    modules_per_string = forms.IntegerField(label="Módulos/string", min_value=1, required=True)
+class PVPlantStringConfigEditForm(forms.ModelForm):
+    class Meta:
+        model = PVPlantStringConfig
+        fields = ["order", "name", "mppt", "strings_qty", "modules_per_string"]
+        widgets = {
+            "order": forms.NumberInput(attrs={"class": "form-control", "min": 0}),
+            "name": forms.TextInput(attrs={"class": "form-control", "placeholder": "Ex.: S1 / MPPT1"}),
+            "mppt": forms.NumberInput(attrs={"class": "form-control", "min": 1, "placeholder": "Ex.: 1"}),
+            "strings_qty": forms.NumberInput(attrs={"class": "form-control", "min": 1}),
+            "modules_per_string": forms.NumberInput(attrs={"class": "form-control", "min": 1}),
+        }
+        labels = {
+            "order": "Ordem",
+            "name": "Nome/Label",
+            "mppt": "MPPT",
+            "strings_qty": "Qtd. strings",
+            "modules_per_string": "Módulos/string",
+        }
 
-PVStringGroupFormSet = formset_factory(
-    PVStringGroupForm,
-    extra=1,          # começa com 1 linha
-    can_delete=True,  # habilita DELETE
+    def clean(self):
+        cleaned = super().clean()
+        mppt = cleaned.get("mppt")
+        details = getattr(self.instance, "details", None)
+        inverter = getattr(details, "inverter", None) if details is not None else None
+        mppt_count = getattr(inverter, "mppt_count", None) if inverter is not None else None
+        if mppt is not None and mppt_count is not None:
+            try:
+                if int(mppt) > int(mppt_count):
+                    self.add_error("mppt", f"MPPT deve estar entre 1 e {int(mppt_count)} para o inversor associado.")
+            except Exception:
+                pass
+        return cleaned
+
+
+class PVPlantDetailsForm(forms.ModelForm):
+    class Meta:
+        model = PVPlantDetails
+        fields = ["module", "inverter", "tilt_deg", "azimuth_deg", "k_sys", "noct_c"]
+
+    strings_count = forms.IntegerField(required=False, disabled=True)
+    modules_per_string = forms.IntegerField(required=False, disabled=True)
+    modules_total = forms.IntegerField(required=False, disabled=True)
+
+
+PVStringConfigFormSet = inlineformset_factory(
+    PVPlantDetails,
+    PVPlantStringConfig,
+    form=PVPlantStringConfigEditForm,
+    fields=("order", "name", "mppt", "strings_qty", "modules_per_string"),
+    extra=1,
+    can_delete=True,
 )
 
 # ---------- Credenciais de Monitoramento ----------
@@ -220,25 +262,6 @@ class PlantMonitoringCredentialForm(forms.ModelForm):
             "username": forms.TextInput(attrs={"class": "form-control"}),
             "password": forms.PasswordInput(render_value=True, attrs={"class": "form-control"}),
         }
-
-class PVPlantDetailsForm(forms.ModelForm):
-    class Meta:
-        model = PVPlantDetails
-        fields = ["module", "inverter", "tilt_deg", "azimuth_deg", "k_sys", "noct_c"]
-
-    # Exibir derivados como read-only, se quiser:
-    strings_count = forms.IntegerField(required=False, disabled=True)
-    modules_per_string = forms.IntegerField(required=False, disabled=True)
-    modules_total = forms.IntegerField(required=False, disabled=True)
-
-
-PVStringConfigFormSet = inlineformset_factory(
-    PVPlantDetails,
-    PVPlantStringConfig,
-    fields=("order", "name", "mppt", "strings_qty", "modules_per_string"),
-    extra=1,
-    can_delete=True,
-)
 
 class PlantCableSegmentForm(forms.ModelForm):
     class Meta:
