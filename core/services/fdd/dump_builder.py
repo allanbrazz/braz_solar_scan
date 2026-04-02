@@ -1,8 +1,16 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone as dt_tz
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
+
+
+def _at(seq: Any, i: int, default: Any = None) -> Any:
+    try:
+        return seq[i]
+    except Exception:
+        return default
+
 
 def build_runtime_dump(
     *,
@@ -12,9 +20,15 @@ def build_runtime_dump(
     times_utc: List[datetime],
     per_ts: Dict[datetime, Dict[str, Dict[str, Any]]],
     agg: Dict[str, Any],
+    model: Dict[str, Any],
+    pipeline: Dict[str, Any],
     confidence: Dict[str, Any],
+    residual_series: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     dump_by_tkey: Dict[str, Any] = {}
+    residual_series = residual_series or {}
+    ch_conf = residual_series.get("channel_confidence") or {}
+
     for i, ts_utc in enumerate(times_utc):
         tloc = ts_utc.astimezone(tz)
         tkey = tloc.strftime("%Y-%m-%dT%H:%M")
@@ -29,8 +43,20 @@ def build_runtime_dump(
                 any_row = rr
                 break
         if any_row is not None:
-            for k in ["gti", "ghi", "dni", "dhi", "temp_air", "wind_speed", "rh", "flag_meteo_missing", "meteo_qc_score"]:
-                meteo_dump[k] = any_row.get(k)
+            meteo_dump["g_poa_used"] = _at(model.get("g_poa_used"), i)
+            meteo_dump["gti"] = any_row.get("gti")
+            meteo_dump["ghi"] = any_row.get("ghi")
+            meteo_dump["dni"] = any_row.get("dni")
+            meteo_dump["dhi"] = any_row.get("dhi")
+            meteo_dump["temp_air"] = any_row.get("temp_air")
+            meteo_dump["wind_speed"] = any_row.get("wind_speed")
+            meteo_dump["rh"] = any_row.get("rh")
+            meteo_dump["flag_meteo_missing"] = any_row.get("flag_meteo_missing")
+            meteo_dump["flag_meteo_low_confidence"] = any_row.get("flag_meteo_low_confidence")
+            meteo_dump["flag_meteo_interpolated"] = any_row.get("flag_meteo_interpolated")
+            meteo_dump["flag_meteo_outlier"] = any_row.get("flag_meteo_outlier")
+            meteo_dump["flag_meteo_artifact"] = any_row.get("flag_meteo_artifact")
+            meteo_dump["meteo_qc_score"] = any_row.get("meteo_qc_score")
 
         for sname in selected_sources:
             rr = by_src.get(sname)
@@ -73,17 +99,85 @@ def build_runtime_dump(
                 "diagnosis_confidence_level": confidence["diagnosis_confidence_level"][i],
                 "notes": confidence["confidence_notes"][i],
             },
+            "detection": {
+                "valid_period": _at(pipeline.get("valid_period"), i),
+                "stable_sky": _at(pipeline.get("stable_sky"), i),
+                "anomaly": _at(pipeline.get("anomaly"), i),
+                "anomaly_power": _at(pipeline.get("anomaly_power"), i),
+                "residual_trigger": _at(pipeline.get("residual_trigger"), i),
+                "residual_event_score": _at(pipeline.get("residual_event_score"), i),
+                "combined_event_score": _at(pipeline.get("combined_event_score"), i),
+                "ewma_z": _at(pipeline.get("ewma_z"), i),
+                "cusum_score": _at(pipeline.get("cusum_score"), i),
+                "irradiance_tier": _at(pipeline.get("irradiance_tier"), i),
+                "rca_code": _at(pipeline.get("codes"), i),
+                "rca_label": _at(pipeline.get("labels"), i),
+            },
             "chosen_total": {
                 "p_ac_w": agg["p_ac_w"][i],
+                "p_dc_w": agg["p_dc_w"][i],
                 "p_ac_mppt_sum_w": agg["p_ac_mppt_sum_w"][i],
                 "p_ac_agg_w": agg["p_ac_agg_w"][i],
+                "v_dc_v": agg["v_dc_v"][i],
+                "i_dc_a": agg["i_dc_a"][i],
+                "v_ac_v": agg["v_ac_v"][i],
+                "i_ac_a": agg["i_ac_a"][i],
+                "freq_hz": (agg["freq_hz"][i] if agg["freq_hz"][i] is not None else (any_row.get("freq_hz") if any_row is not None else None)),
                 "inv_coverage": agg["inv_cov"][i],
                 "flag_inv_missing_all": agg["flag_inv_missing_all"][i],
                 "flag_inv_missing_partial": agg["flag_inv_missing_partial"][i],
-                "freq_hz": agg["freq_hz"][i],
+            },
+            "model": {
+                "g_poa_used": _at(model.get("g_poa_used"), i),
+                "tcell_c": _at(model.get("tcell_c"), i),
+                "p_ac_model_w": _at(model.get("pac_model_w"), i),
+                "p_dc_model_w": _at(model.get("pdc_model_w"), i),
+                "v_dc_model_v": _at(model.get("v_dc_model_v"), i),
+                "i_dc_model_a": _at(model.get("i_dc_model_a"), i),
+                "mismatch_rel": _at(model.get("mismatch_rel"), i),
+                "valid_model": _at(model.get("valid_model"), i),
+            },
+            "residuals": {
+                "p_ac": {
+                    "measured": agg["p_ac_w"][i],
+                    "expected": _at(residual_series.get("pac_expected_w"), i),
+                    "abs": _at(residual_series.get("p_ac_residual_abs"), i),
+                    "rel": _at(residual_series.get("p_ac_residual_rel"), i),
+                    "confidence": _at(ch_conf.get("p_ac"), i),
+                },
+                "p_dc": {
+                    "measured": agg["p_dc_w"][i],
+                    "expected": _at(residual_series.get("pdc_expected_w"), i),
+                    "abs": _at(residual_series.get("p_dc_residual_abs"), i),
+                    "rel": _at(residual_series.get("p_dc_residual_rel"), i),
+                    "confidence": _at(ch_conf.get("p_dc"), i),
+                },
+                "v_dc": {
+                    "measured": agg["v_dc_v"][i],
+                    "expected": _at(residual_series.get("v_dc_expected_v"), i),
+                    "abs": _at(residual_series.get("v_dc_residual_abs"), i),
+                    "rel": _at(residual_series.get("v_dc_residual_rel"), i),
+                    "confidence": _at(ch_conf.get("v_dc"), i),
+                },
+                "i_dc": {
+                    "measured": agg["i_dc_a"][i],
+                    "expected": _at(residual_series.get("i_dc_expected_a"), i),
+                    "abs": _at(residual_series.get("i_dc_residual_abs"), i),
+                    "rel": _at(residual_series.get("i_dc_residual_rel"), i),
+                    "confidence": _at(ch_conf.get("i_dc"), i),
+                },
+                "global_confidence": _at(residual_series.get("global_confidence"), i),
             },
             "sources": src_dump,
             "meteo": meteo_dump,
+            # atalhos flat para facilitar compatibilidade do drawer/template
+            "ewma_z": _at(pipeline.get("ewma_z"), i),
+            "cusum_score": _at(pipeline.get("cusum_score"), i),
+            "residual_event_score": _at(pipeline.get("residual_event_score"), i),
+            "combined_event_score": _at(pipeline.get("combined_event_score"), i),
+            "rca_code": _at(pipeline.get("codes"), i),
+            "rca_label": _at(pipeline.get("labels"), i),
+            "p_ac_w": agg["p_ac_w"][i],
+            "freq_hz": (agg["freq_hz"][i] if agg["freq_hz"][i] is not None else (any_row.get("freq_hz") if any_row is not None else None)),
         }
     return dump_by_tkey
-

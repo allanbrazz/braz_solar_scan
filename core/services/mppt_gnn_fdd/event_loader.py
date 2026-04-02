@@ -9,6 +9,7 @@ from django.db.models import Count
 from core.models import FaultEvent, PVPlantMergedRecord15m
 from core.services.mppt_gnn_fdd.features import WindowArrays
 from core.services.power_model.runtime_residuals import compute_pac_model_and_mismatch
+from core.services.residuals.facade import compute_residual_series_from_observations
 
 
 def _pick_best_source_meteo(plant_id: int, dt0_utc: datetime, dt1_utc: datetime) -> Optional[str]:
@@ -172,16 +173,27 @@ def load_event_window(
         mppt_vdc[pos] = _fill_on_grid(ts_grid, rows, f"mppt{k}_vdc_v")
         mppt_idc[pos] = _fill_on_grid(ts_grid, rows, f"mppt{k}_idc_a")
 
-    pac_model, mismatch = compute_pac_model_and_mismatch(
+    residual_out = compute_residual_series_from_observations(
         plant=event.plant,
         times_utc=ts_grid,
-        gti=gti,
-        ghi=ghi,
-        dni=dni,
-        dhi=dhi,
-        temp_air=tair,
-        pac_real=pac,
+        gti=list(np.asarray(gti, dtype=float).tolist()),
+        ghi=list(np.asarray(ghi, dtype=float).tolist()),
+        dni=list(np.asarray(dni, dtype=float).tolist()),
+        dhi=list(np.asarray(dhi, dtype=float).tolist()),
+        temp_air=list(np.asarray(tair, dtype=float).tolist()),
+        p_ac_w=list(np.asarray(pac, dtype=float).tolist()),
+        p_dc_w=[None] * len(ts_grid),
+        v_dc_v=list(np.asarray(vdc_total, dtype=float).tolist()),
+        i_dc_a=[None] * len(ts_grid),
+        v_ac_v=list(np.asarray(vac, dtype=float).tolist()),
+        i_ac_a=list(np.asarray(iac, dtype=float).tolist()),
+        freq_hz=list(np.asarray(freq, dtype=float).tolist()),
+        source_oper=source_oper,
+        source_meteo=source_meteo,
     )
+    rs = residual_out.get("series") or {}
+    pac_model = np.asarray([np.nan if v is None else float(v) for v in rs.get("pac_expected_w", [None] * len(ts_grid))], dtype=float)
+    mismatch = np.asarray([np.nan if v is None else float(v) for v in rs.get("p_ac_residual_rel", [None] * len(ts_grid))], dtype=float)
 
     inv = getattr(getattr(event.plant, "details", None), "inverter", None)
     try:
@@ -202,6 +214,17 @@ def load_event_window(
         "n_mppt": len(resolved_mppts),
         "v_ac_nom_v": vac_nom_v,
         "freq_nom_hz": float(getattr(__import__("django.conf").conf.settings, "FDD_GRID_FREQ_NOM_HZ", 50.0) or 50.0),
+        "residuals": {
+            "p_ac_residual_rel": rs.get("p_ac_residual_rel"),
+            "p_dc_residual_rel": rs.get("p_dc_residual_rel"),
+            "v_dc_residual_rel": rs.get("v_dc_residual_rel"),
+            "i_dc_residual_rel": rs.get("i_dc_residual_rel"),
+            "channel_confidence": rs.get("channel_confidence"),
+            "pac_expected_w": rs.get("pac_expected_w"),
+            "v_dc_expected_v": rs.get("v_dc_expected_v"),
+            "i_dc_expected_a": rs.get("i_dc_expected_a"),
+            "global_confidence": rs.get("global_confidence"),
+        },
     }
 
     win = WindowArrays(

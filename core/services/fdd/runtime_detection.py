@@ -13,6 +13,7 @@ from core.services.fdd_mismatch import CODE_INVALID, classify_mismatch_series
 
 logger = logging.getLogger(__name__)
 
+
 def compute_power_model(plant: PVPlant, details: Any, times_utc: List[datetime], agg: Dict[str, Any]) -> Dict[str, Any]:
     try:
         import numpy as np
@@ -163,6 +164,7 @@ def compute_power_model(plant: PVPlant, details: Any, times_utc: List[datetime],
         logger.exception("Falha no power_model (dashboard_runtime) plant_id=%s", plant.id)
         raise DashboardServiceError(f"{type(exc).__name__}: {exc}", status_code=500)
 
+
 def build_base_gate(params: MismatchDashboardParams, model: Dict[str, Any], agg: Dict[str, Any]) -> List[bool]:
     base_gate: List[bool] = []
     for i in range(len(model["mismatch_rel"])):
@@ -175,6 +177,7 @@ def build_base_gate(params: MismatchDashboardParams, model: Dict[str, Any], agg:
         ok = ok and (not bool(agg["flag_inv_missing_all"][i]))
         base_gate.append(ok)
     return base_gate
+
 
 def pick_diag_row_for_ts(ts_utc: datetime, per_ts: Dict[datetime, Dict[str, Dict[str, Any]]], selected_sources: List[str]) -> Optional[Dict[str, Any]]:
     by_src = per_ts.get(ts_utc, {})
@@ -189,6 +192,7 @@ def pick_diag_row_for_ts(ts_utc: datetime, per_ts: Dict[datetime, Dict[str, Dict
     except Exception:
         return None
 
+
 def build_alarm_vectors(times_utc: List[datetime], per_ts: Dict[datetime, Dict[str, Dict[str, Any]]], selected_sources: List[str]) -> Tuple[List[Optional[int]], List[Optional[int]]]:
     alarm_code: List[Optional[int]] = []
     alarm_sev: List[Optional[int]] = []
@@ -197,6 +201,110 @@ def build_alarm_vectors(times_utc: List[datetime], per_ts: Dict[datetime, Dict[s
         alarm_code.append(None if row is None or row.get("alarm_code") is None else int(row.get("alarm_code")))
         alarm_sev.append(None if row is None or row.get("alarm_sev") is None else int(row.get("alarm_sev")))
     return alarm_code, alarm_sev
+
+
+def _safe_abs(v: Optional[float]) -> Optional[float]:
+    try:
+        if v is None:
+            return None
+        return abs(float(v))
+    except Exception:
+        return None
+
+
+def _residual_score_from_channels(i: int, residual_series: Optional[Dict[str, Any]]) -> Tuple[Optional[float], bool]:
+    if not residual_series:
+        return None, False
+    conf = residual_series.get("channel_confidence") or {}
+    chans = [
+        (residual_series.get("p_dc_residual_rel") or [], (conf.get("p_dc") or []), 0.40),
+        (residual_series.get("v_dc_residual_rel") or [], (conf.get("v_dc") or []), 0.25),
+        (residual_series.get("i_dc_residual_rel") or [], (conf.get("i_dc") or []), 0.35),
+    ]
+    num = 0.0
+    den = 0.0
+    for arr, carr, weight in chans:
+        try:
+            rv = arr[i]
+        except Exception:
+            rv = None
+        try:
+            cv = carr[i]
+        except Exception:
+            cv = None
+        if rv is None or cv is None:
+            continue
+        try:
+            av = min(abs(float(rv)), 2.0) / 2.0
+            cf = max(0.0, min(1.0, float(cv)))
+        except Exception:
+            continue
+        num += weight * av * cf
+        den += weight
+    if den <= 0:
+        return None, False
+    score = max(0.0, min(1.0, num / den))
+    return score, bool(score >= 0.45)
+
+
+
+
+def _combined_detection_signal(base_signal: List[Optional[float]], residual_series: Optional[Dict[str, Any]], base_gate: List[bool]) -> List[Optional[float]]:
+    """Build the canonical runtime detection signal from available residual channels.
+
+    Priority is given to the existing plant-level AC power mismatch so the dashboard
+    remains backward compatible, but DC residual channels participate whenever they
+    are available and sufficiently reliable.
+    """
+    if not residual_series:
+        return list(base_signal)
+
+    conf = residual_series.get("channel_confidence") or {}
+    pdc = residual_series.get("p_dc_residual_rel") or []
+    vdc = residual_series.get("v_dc_residual_rel") or []
+    idc = residual_series.get("i_dc_residual_rel") or []
+    c_pdc = conf.get("p_dc") or []
+    c_vdc = conf.get("v_dc") or []
+    c_idc = conf.get("i_dc") or []
+
+    out: List[Optional[float]] = [None] * len(base_signal)
+    for i in range(len(base_signal)):
+        if i < len(base_gate) and not bool(base_gate[i]):
+            out[i] = None
+            continue
+
+        num = 0.0
+        den = 0.0
+
+        # Preserve the existing AC-power mismatch contribution for continuity.
+        try:
+            bv = base_signal[i]
+            if bv is not None:
+                num += 0.40 * float(bv)
+                den += 0.40
+        except Exception:
+            pass
+
+        for arr, carr, weight in ((pdc, c_pdc, 0.25), (vdc, c_vdc, 0.15), (idc, c_idc, 0.20)):
+            try:
+                rv = arr[i]
+            except Exception:
+                rv = None
+            try:
+                cv = carr[i]
+            except Exception:
+                cv = None
+            if rv is None:
+                continue
+            try:
+                cf = 1.0 if cv is None else max(0.0, min(1.0, float(cv)))
+                num += weight * float(rv) * cf
+                den += weight * cf
+            except Exception:
+                continue
+
+        out[i] = (num / den) if den > 0 else (base_signal[i] if i < len(base_signal) else None)
+    return out
 
 def run_detection_and_rca(
     *,
@@ -208,6 +316,7 @@ def run_detection_and_rca(
     selected_sources: List[str],
     agg: Dict[str, Any],
     model: Dict[str, Any],
+    residual_series: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     n = len(times_utc)
     base_gate = build_base_gate(params, model, agg)
@@ -222,6 +331,10 @@ def run_detection_and_rca(
     freq_hz: List[Optional[float]] = list(agg.get("freq_hz") or ([None] * n))
     det_dbg: Dict[str, Any] = {}
     rca_dbg: Dict[str, Any] = {}
+    anomaly_power: List[bool] = [False] * n
+    residual_trigger: List[bool] = [False] * n
+    residual_event_score: List[Optional[float]] = [None] * n
+    combined_event_score: List[Optional[float]] = [None] * n
 
     if params.use_legacy:
         out_cls = classify_mismatch_series(
@@ -251,38 +364,25 @@ def run_detection_and_rca(
                 status_code=500,
             )
 
-        det_sig = inspect.signature(DetectionParams)
-        det_param_names = set(det_sig.parameters.keys())
-        if "gpoa_gate_wm2" in det_param_names:
-            det_params = DetectionParams(
-                gpoa_gate_wm2=float(params.gpoa_gate),
-                stable_cv_max=params.get_float("stable_cv_max", 0.08),
-                stable_window_points=params.get_int("stable_window_points", 6),
-                ewma_lambda=params.get_float("ewma_lambda", 0.20),
-                ewma_L=params.get_float("ewma_L", 3.0),
-                cusum_k=params.get_float("cusum_k", 0.50),
-                cusum_h=params.get_float("cusum_h", 8.0),
-                min_baseline_points=params.get_int("min_baseline_points", 24),
-                inv_cov_min=params.get_float("inv_cov_min", 0.30),
-            )
-        else:
-            det_params = DetectionParams(
-                sun_available_gpoa_wm2=params.get_float("sun_available_gpoa_wm2", max(150.0, float(params.gpoa_gate))),
-                coarse_diag_gpoa_wm2=params.get_float("coarse_diag_gpoa_wm2", max(700.0, float(params.gpoa_gate))),
-                fine_diag_gpoa_wm2=params.get_float("fine_diag_gpoa_wm2", max(800.0, float(params.gpoa_gate))),
-                stable_cv_max=params.get_float("stable_cv_max", 0.08),
-                stable_ramp_max_wm2=params.get_float("stable_ramp_max_wm2", 120.0),
-                stable_window_points=params.get_int("stable_window_points", 6),
-                ewma_lambda=params.get_float("ewma_lambda", 0.20),
-                ewma_L=params.get_float("ewma_L", 3.0),
-                cusum_k=params.get_float("cusum_k", 0.50),
-                cusum_h=params.get_float("cusum_h", 8.0),
-                min_baseline_points=params.get_int("min_baseline_points", 24),
-                inv_cov_min=params.get_float("inv_cov_min", 0.30),
-            )
+        det_params = DetectionParams(
+            sun_available_gpoa_wm2=params.get_float("sun_available_gpoa_wm2", max(150.0, float(params.gpoa_gate))),
+            coarse_diag_gpoa_wm2=params.get_float("coarse_diag_gpoa_wm2", max(700.0, float(params.gpoa_gate))),
+            fine_diag_gpoa_wm2=params.get_float("fine_diag_gpoa_wm2", max(800.0, float(params.gpoa_gate))),
+            stable_cv_max=params.get_float("stable_cv_max", 0.08),
+            stable_ramp_max_wm2=params.get_float("stable_ramp_max_wm2", 120.0),
+            stable_window_points=params.get_int("stable_window_points", 6),
+            ewma_lambda=params.get_float("ewma_lambda", 0.20),
+            ewma_L=params.get_float("ewma_L", 3.0),
+            cusum_k=params.get_float("cusum_k", 0.50),
+            cusum_h=params.get_float("cusum_h", 8.0),
+            min_baseline_points=params.get_int("min_baseline_points", 24),
+            inv_cov_min=params.get_float("inv_cov_min", 0.30),
+        )
+
+        detection_signal = _combined_detection_signal(model["mismatch_rel"], residual_series, base_gate)
 
         det = detect_anomalies(
-            mismatch_rel=model["mismatch_rel"],
+            mismatch_rel=detection_signal,
             g_poa_wm2=model["g_poa_used"],
             valid_model=base_gate,
             flag_meteo_missing=agg["flag_meteo_missing"],
@@ -294,7 +394,7 @@ def run_detection_and_rca(
         ) or {}
 
         valid_period = [bool(v) for v in (det.get("valid_period") or base_gate)]
-        anomaly = [bool(v) for v in (det.get("anomaly") or [False] * n)]
+        anomaly_power = [bool(v) for v in (det.get("anomaly") or [False] * n)]
         stable_sky = [bool(v) for v in (det.get("stable_sky") or [False] * n)]
         coarse_period = [bool(v) for v in (det.get("coarse_period") or valid_period)]
         fine_period = [bool(v) for v in (det.get("fine_period") or [False] * n)]
@@ -312,11 +412,27 @@ def run_detection_and_rca(
         else:
             cusum_score = cusum_score[:n]
 
+        for i in range(n):
+            score_i, trig_i = _residual_score_from_channels(i, residual_series)
+            residual_event_score[i] = score_i
+            residual_trigger[i] = bool(base_gate[i] and trig_i)
+            power_score = 0.0
+            mm = _safe_abs(detection_signal[i])
+            if mm is not None:
+                power_score = min(mm, 2.0) / 2.0
+            if residual_event_score[i] is None:
+                combined_event_score[i] = power_score if base_gate[i] else None
+            else:
+                combined_event_score[i] = (0.60 * power_score + 0.40 * float(residual_event_score[i])) if base_gate[i] else None
+
+        anomaly = [bool(base_gate[i] and (anomaly_power[i] or residual_trigger[i])) for i in range(n)]
+
         det_dbg = {
             "z": det.get("z"),
             "ewma_z": ewma_z,
             "cusum": cusum_score,
             "baseline": det.get("baseline"),
+            "detection_signal_rel": detection_signal,
             "coarse_period": coarse_period,
             "fine_period": fine_period,
             "meteo_quality_ok": meteo_quality_ok,
@@ -326,6 +442,10 @@ def run_detection_and_rca(
             "flag_meteo_outlier": agg["flag_meteo_outlier"],
             "flag_meteo_artifact": agg["flag_meteo_artifact"],
             "irradiance_tier": irradiance_tier,
+            "anomaly_power": anomaly_power,
+            "residual_trigger": residual_trigger,
+            "residual_event_score": residual_event_score,
+            "combined_event_score": combined_event_score,
         }
 
         pac_cap_w = None
@@ -340,75 +460,56 @@ def run_detection_and_rca(
         except Exception:
             pac_cap_w = None
 
-        rca_sig = inspect.signature(RCAParams)
-        rca_param_names = set(rca_sig.parameters.keys())
-        if "warn_abs" in rca_param_names and "fault_abs" in rca_param_names:
-            rca_params = RCAParams(
-                warn_abs=float(params.thr.warn_abs),
-                fault_abs=float(params.thr.fault_abs),
-                min_baseline_points=params.get_int("rca_min_baseline_points", 24),
-            )
-        else:
-            rca_params = RCAParams(
-                sun_available_gpoa_wm2=params.get_float("sun_available_gpoa_wm2", max(150.0, float(params.gpoa_gate))),
-                expected_power_min_w=float(params.pmin_w),
-                zero_abs_w=params.get_float("zero_abs_w", 100.0),
-                zero_rel_model=params.get_float("zero_rel_model", 0.05),
-                degraded_rel=params.get_float("degraded_rel", 0.25),
-                severe_rel=params.get_float("severe_rel", 0.50),
-                low_i_ratio_warn=params.get_float("low_i_ratio_warn", 0.35),
-                low_i_ratio_crit=params.get_float("low_i_ratio_crit", 0.15),
-                low_v_ratio_warn=params.get_float("low_v_ratio_warn", 0.80),
-                low_v_ratio_crit=params.get_float("low_v_ratio_crit", 0.60),
-                vac_low_ratio=params.get_float("vac_low_ratio", 0.90),
-                vac_high_ratio=params.get_float("vac_high_ratio", 1.10),
-                vac_abs_margin_v=params.get_float("vac_abs_margin_v", 10.0),
-                freq_abs_tol_hz=params.get_float("freq_abs_tol_hz", 1.0),
-                clip_margin=params.get_float("clip_margin", 0.98),
-                clip_model_margin=params.get_float("clip_model_margin", 1.02),
-                min_baseline_points=params.get_int("rca_min_baseline_points", 24),
-            )
+        rca_params = RCAParams(
+            sun_available_gpoa_wm2=params.get_float("sun_available_gpoa_wm2", max(150.0, float(params.gpoa_gate))),
+            expected_power_min_w=float(params.pmin_w),
+            zero_abs_w=params.get_float("zero_abs_w", 100.0),
+            zero_rel_model=params.get_float("zero_rel_model", 0.05),
+            degraded_rel=params.get_float("degraded_rel", 0.25),
+            severe_rel=params.get_float("severe_rel", 0.50),
+            low_i_ratio_warn=params.get_float("low_i_ratio_warn", 0.35),
+            low_i_ratio_crit=params.get_float("low_i_ratio_crit", 0.15),
+            low_v_ratio_warn=params.get_float("low_v_ratio_warn", 0.80),
+            low_v_ratio_crit=params.get_float("low_v_ratio_crit", 0.60),
+            vac_low_ratio=params.get_float("vac_low_ratio", 0.90),
+            vac_high_ratio=params.get_float("vac_high_ratio", 1.10),
+            vac_abs_margin_v=params.get_float("vac_abs_margin_v", 10.0),
+            freq_abs_tol_hz=params.get_float("freq_abs_tol_hz", 1.0),
+            clip_margin=params.get_float("clip_margin", 0.98),
+            clip_model_margin=params.get_float("clip_model_margin", 1.02),
+            min_baseline_points=params.get_int("rca_min_baseline_points", 24),
+        )
 
-        diag_sig = inspect.signature(diagnose_rca_series)
-        diag_param_names = set(diag_sig.parameters.keys())
-        diag_kwargs = dict(
+        alarm_code, alarm_sev = build_alarm_vectors(times_utc, per_ts, selected_sources)
+        rca = diagnose_rca_series(
             anomaly=anomaly,
             valid_period=valid_period,
             mismatch_rel=model["mismatch_rel"],
+            g_poa_wm2=model["g_poa_used"],
+            coarse_period=coarse_period,
+            fine_period=fine_period,
+            meteo_quality_ok=meteo_quality_ok,
+            irradiance_tier=irradiance_tier,
             v_dc_v=agg["v_dc_v"],
             i_dc_a=agg["i_dc_a"],
+            v_ac_v=agg.get("v_ac_v"),
+            i_ac_a=agg.get("i_ac_a"),
+            freq_hz=freq_hz,
+            alarm_code=alarm_code,
+            alarm_sev=alarm_sev,
             pac_real_w=agg["p_ac_w"],
             pac_model_w=model["pac_model_w"],
             flag_inv_missing=agg["flag_inv_missing_all"],
             flag_meteo_missing=agg["flag_meteo_missing"],
             inv_coverage=agg["inv_cov"],
             pac_cap_w=pac_cap_w,
+            p_ac_residual_rel=(residual_series or {}).get("p_ac_residual_rel"),
+            p_dc_residual_rel=(residual_series or {}).get("p_dc_residual_rel"),
+            v_dc_residual_rel=(residual_series or {}).get("v_dc_residual_rel"),
+            i_dc_residual_rel=(residual_series or {}).get("i_dc_residual_rel"),
+            residual_channel_confidence=(residual_series or {}).get("channel_confidence"),
             params=rca_params,
-        )
-        if "g_poa_wm2" in diag_param_names:
-            diag_kwargs["g_poa_wm2"] = model["g_poa_used"]
-        if "coarse_period" in diag_param_names:
-            diag_kwargs["coarse_period"] = coarse_period
-        if "fine_period" in diag_param_names:
-            diag_kwargs["fine_period"] = fine_period
-        if "meteo_quality_ok" in diag_param_names:
-            diag_kwargs["meteo_quality_ok"] = meteo_quality_ok
-        if "irradiance_tier" in diag_param_names:
-            diag_kwargs["irradiance_tier"] = irradiance_tier
-        if "v_ac_v" in diag_param_names:
-            diag_kwargs["v_ac_v"] = agg["v_ac_v"]
-        if "i_ac_a" in diag_param_names:
-            diag_kwargs["i_ac_a"] = agg["i_ac_a"]
-        if "freq_hz" in diag_param_names:
-            diag_kwargs["freq_hz"] = freq_hz
-
-        alarm_code, alarm_sev = build_alarm_vectors(times_utc, per_ts, selected_sources)
-        if "alarm_code" in diag_param_names:
-            diag_kwargs["alarm_code"] = alarm_code
-        if "alarm_sev" in diag_param_names:
-            diag_kwargs["alarm_sev"] = alarm_sev
-
-        rca = diagnose_rca_series(**diag_kwargs) or {}
+        ) or {}
         rca_codes_raw = rca.get("codes") or [0] * n
         rca_labels_raw = rca.get("labels") or ["normal"] * n
         codes: List[int] = [CODE_INVALID] * n
@@ -429,12 +530,21 @@ def run_detection_and_rca(
             codes[i] = c
             labels[i] = str(rca_labels_raw[i] or "anom")
 
-        rca_dbg = {"baseline": rca.get("baseline"), "alarm_code": alarm_code, "alarm_sev": alarm_sev}
-        pipeline_name = "ewma_cusum_detection + rca_patterns"
+        rca_dbg = {
+            "baseline": rca.get("baseline"),
+            "alarm_code": alarm_code,
+            "alarm_sev": alarm_sev,
+            "residual_channel_confidence": (residual_series or {}).get("channel_confidence"),
+        }
+        pipeline_name = "ewma_cusum_multichannel_residuals + rca_patterns"
         return {
             "pipeline_name": pipeline_name,
             "valid_period": valid_period,
             "anomaly": anomaly,
+            "anomaly_power": anomaly_power,
+            "residual_trigger": residual_trigger,
+            "residual_event_score": residual_event_score,
+            "combined_event_score": combined_event_score,
             "stable_sky": stable_sky,
             "coarse_period": coarse_period,
             "fine_period": fine_period,
@@ -456,6 +566,10 @@ def run_detection_and_rca(
         "pipeline_name": pipeline_name,
         "valid_period": valid_period,
         "anomaly": anomaly,
+        "anomaly_power": anomaly_power,
+        "residual_trigger": residual_trigger,
+        "residual_event_score": residual_event_score,
+        "combined_event_score": combined_event_score,
         "stable_sky": stable_sky,
         "coarse_period": coarse_period,
         "fine_period": fine_period,
@@ -472,4 +586,3 @@ def run_detection_and_rca(
         "det_dbg": det_dbg,
         "rca_dbg": rca_dbg,
     }
-

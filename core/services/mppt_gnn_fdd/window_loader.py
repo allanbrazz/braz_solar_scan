@@ -12,6 +12,7 @@ from core.models import PVPlant, PVPlantMergedRecord15m
 from core.services.mppt_gnn_fdd.features import WindowArrays
 from core.services.mppt_gnn_fdd.constants import T_STEPS_DEFAULT, DT_MIN_DEFAULT
 from core.services.meteo_qc import METEO_QC_BOOL_COLS, METEO_QC_SCORE_COLS
+from core.services.residuals.facade import compute_residual_series_from_observations
 
 
 def _plant_tz(plant: PVPlant) -> ZoneInfo:
@@ -138,7 +139,40 @@ def _fill_on_grid(
     return arr
 
 
-from core.services.power_model.runtime_residuals import compute_pac_model_and_mismatch
+def compute_pac_model_and_mismatch(
+    *,
+    plant: PVPlant,
+    times_utc: List[datetime],
+    gti: np.ndarray,
+    ghi: np.ndarray,
+    dni: np.ndarray,
+    dhi: np.ndarray,
+    temp_air: np.ndarray,
+    pac_real: np.ndarray,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Compat shim: a modelagem/resíduos canônicos agora vivem em
+    core.services.residuals. Esta função mantém a assinatura legada
+    consumida pelo pipeline MPPT.
+    """
+    n = len(times_utc)
+    out = compute_residual_series_from_observations(
+        plant=plant,
+        times_utc=times_utc,
+        gti=list(np.asarray(gti, dtype=float).tolist()),
+        ghi=list(np.asarray(ghi, dtype=float).tolist()),
+        dni=list(np.asarray(dni, dtype=float).tolist()),
+        dhi=list(np.asarray(dhi, dtype=float).tolist()),
+        temp_air=list(np.asarray(temp_air, dtype=float).tolist()),
+        p_ac_w=list(np.asarray(pac_real, dtype=float).tolist()),
+        p_dc_w=[None] * n,
+        v_dc_v=[None] * n,
+        i_dc_a=[None] * n,
+    )
+    s = out.get("series") or {}
+    pac_model = np.asarray([np.nan if v is None else float(v) for v in s.get("pac_expected_w", [None] * n)], dtype=float)
+    mismatch = np.asarray([np.nan if v is None else float(v) for v in s.get("p_ac_residual_rel", [None] * n)], dtype=float)
+    return pac_model, mismatch
 
 def load_daily_window(
     *,
@@ -218,16 +252,27 @@ def load_daily_window(
         mppt_vdc[k - 1] = _fill_on_grid(ts_grid, rows, f"mppt{k}_vdc_v")
         mppt_idc[k - 1] = _fill_on_grid(ts_grid, rows, f"mppt{k}_idc_a")
 
-    pac_model, mm = compute_pac_model_and_mismatch(
+    residual_out = compute_residual_series_from_observations(
         plant=plant,
         times_utc=ts_grid,
-        gti=gti,
-        ghi=ghi,
-        dni=dni,
-        dhi=dhi,
-        temp_air=tair,
-        pac_real=pac,
+        gti=list(np.asarray(gti, dtype=float).tolist()),
+        ghi=list(np.asarray(ghi, dtype=float).tolist()),
+        dni=list(np.asarray(dni, dtype=float).tolist()),
+        dhi=list(np.asarray(dhi, dtype=float).tolist()),
+        temp_air=list(np.asarray(tair, dtype=float).tolist()),
+        p_ac_w=list(np.asarray(pac, dtype=float).tolist()),
+        p_dc_w=[None] * len(ts_grid),
+        v_dc_v=list(np.asarray(vdc_total, dtype=float).tolist()),
+        i_dc_a=[None] * len(ts_grid),
+        v_ac_v=list(np.asarray(vac, dtype=float).tolist()),
+        i_ac_a=list(np.asarray(iac, dtype=float).tolist()),
+        freq_hz=list(np.asarray(freq, dtype=float).tolist()),
+        source_oper=source_oper,
+        source_meteo=source_meteo,
     )
+    rs = residual_out.get("series") or {}
+    pac_model = np.asarray([np.nan if v is None else float(v) for v in rs.get("pac_expected_w", [None] * len(ts_grid))], dtype=float)
+    mm = np.asarray([np.nan if v is None else float(v) for v in rs.get("p_ac_residual_rel", [None] * len(ts_grid))], dtype=float)
 
     meteo_qc = {}
     if rows:
@@ -251,6 +296,17 @@ def load_daily_window(
         "day_local": day_local.isoformat(),
         "tz": str(tz),
         "meteo_qc": meteo_qc,
+        "residuals": {
+            "p_ac_residual_rel": rs.get("p_ac_residual_rel"),
+            "p_dc_residual_rel": rs.get("p_dc_residual_rel"),
+            "v_dc_residual_rel": rs.get("v_dc_residual_rel"),
+            "i_dc_residual_rel": rs.get("i_dc_residual_rel"),
+            "channel_confidence": rs.get("channel_confidence"),
+            "pac_expected_w": rs.get("pac_expected_w"),
+            "v_dc_expected_v": rs.get("v_dc_expected_v"),
+            "i_dc_expected_a": rs.get("i_dc_expected_a"),
+            "global_confidence": rs.get("global_confidence"),
+        },
     }
 
     win = WindowArrays(

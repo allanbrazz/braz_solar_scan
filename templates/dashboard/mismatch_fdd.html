@@ -334,11 +334,26 @@
       line-height: 1.35;
       white-space: pre;
     }
+
+    .drawer-tabs{ display:flex; gap:.4rem; flex-wrap:wrap; margin:.15rem 0 .8rem; }
+    .drawer-tab-btn{
+      padding:.38rem .68rem; border-radius:999px; cursor:pointer;
+      border:1px solid rgba(255,255,255,.14); background:rgba(255,255,255,.05); color:rgba(233,246,255,.92);
+      font-size:.84rem; font-weight:700;
+    }
+    .drawer-tab-btn.active{ border-color: rgba(90,200,255,.55); background: rgba(90,200,255,.16); }
+    .drawer-tab-panel{ display:none; }
+    .drawer-tab-panel.active{ display:block; }
+    table.compare-kv{ width:100%; border-collapse: collapse; border:1px solid rgba(255,255,255,.12); border-radius: 14px; overflow:hidden; background: rgba(255,255,255,.03); }
+    table.compare-kv th, table.compare-kv td{ padding: .55rem .65rem; border-bottom:1px solid rgba(255,255,255,.08); }
+    table.compare-kv tr:last-child td{ border-bottom:0; }
+    table.compare-kv th{ text-align:left; opacity:.85; font-size:.84rem; background: rgba(10,20,40,.25); }
+
   </style>
 {% endblock %}
 
 {% block content %}
-<div id="fddPage" class="dash" data-api="{% url 'mismatch_fdd_api' %}" data-export="{% url 'mismatch_fdd_export_pdf' %}">
+<div id="fddPage" class="dash" data-api="{% url 'mismatch_fdd_api' %}" data-export="{{ export_pdf_url|default:'' }}">
   <div class="card glass span-12">
     <div class="page-head">
       <div style="min-width:0;">
@@ -401,6 +416,16 @@
       </div>
 
       <div class="ctl sm">
+        <label for="display_mode">Exibir bins por</label>
+        <select id="display_mode">
+          <option value="mismatch" {% if display_mode|default:'mismatch' == 'mismatch' %}selected{% endif %}>Mismatch</option>
+          <option value="tipologia" {% if display_mode == 'tipologia' %}selected{% endif %}>Tipologia de falha</option>
+        </select>
+      </div>
+
+
+
+      <div class="ctl sm">
         <label for="fault_abs">Limiar FALHA (mismatch ≤ −)</label>
         <input id="fault_abs" type="number" step="0.01" min="0" value="{{ fault_abs|default_if_none:0.90 }}">
       </div>
@@ -413,14 +438,6 @@
       <div class="ctl sm">
         <label for="pmin_w">Potência mínima (W)</label>
         <input id="pmin_w" type="number" step="1" min="0" value="{{ pmin_w|default_if_none:0 }}">
-      </div>
-
-      <div class="ctl sm">
-        <label for="heatmap_mode">Coloração do heatmap</label>
-        <select id="heatmap_mode">
-          <option value="fault_type" {% if heatmap_mode == 'fault_type' %}selected{% endif %}>Tipologia de falha</option>
-          <option value="mismatch" {% if heatmap_mode == 'mismatch' %}selected{% endif %}>Mismatch de potência</option>
-        </select>
       </div>
 
       <div class="ctl" style="min-width: 320px;">
@@ -443,15 +460,15 @@
             <span class="label">Executar + Salvar</span>
           </button>
 
-
-          <button class="btn-glow secondary" id="btnExportPdf" type="button" title="Exportar relatório PDF do intervalo atual">
+          <button class="btn-glow secondary" id="btnExportPdf" type="button" title="Exportar relatório PDF do FDD Mismatch">
             <svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
               <path d="M12 3v12" stroke="rgba(233,246,255,.92)" stroke-width="2" stroke-linecap="round"/>
               <path d="m7 10 5 5 5-5" stroke="rgba(233,246,255,.92)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-              <path d="M4 20h16" stroke="rgba(233,246,255,.92)" stroke-width="2" stroke-linecap="round"/>
+              <path d="M5 19h14" stroke="rgba(233,246,255,.92)" stroke-width="2" stroke-linecap="round"/>
             </svg>
             <span class="label">Exportar PDF</span>
           </button>
+
           <button class="btn-glow danger" id="btnReset" type="button" title="Limpar gráficos/seleção">
             <svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
               <path d="M21 12a9 9 0 1 1-2.64-6.36" stroke="rgba(233,246,255,.92)" stroke-width="2" stroke-linecap="round"/>
@@ -471,41 +488,15 @@
     </div>
   </div>
 
-
-  <div class="card glass span-12">
-    <div class="kpi">
-      <div class="tile">
-        <p class="t">Modo atual do heatmap</p>
-        <p class="v" id="modeCurrentTitle">—</p>
-        <p class="s" id="modeCurrentDesc">A exportação PDF usa o mesmo modo de coloração selecionado na interface.</p>
-      </div>
-      <div class="tile">
-        <p class="t">Modo 1 — Mismatch de potência</p>
-        <p class="v mono">|Preal−Pmodelo|</p>
-        <p class="s" id="modeMismatchDesc">Verde quando o desvio está dentro dos limiares; amarelo/vermelho quando o mismatch e a condição de não geração sob sol disponível excedem os limiares configurados.</p>
-      </div>
-      <div class="tile">
-        <p class="t">Modo 2 — Tipologia de falha</p>
-        <p class="v mono">RCA / severidade</p>
-        <p class="s" id="modeTypologyDesc">A cor reflete a tipologia diagnóstica consolidada no bin: none, ok, warn ou crit a partir de state_label, diagnosis_label e evidência de rede.</p>
-      </div>
-    </div>
-  </div>
-
   <div class="card glass span-12">
     <div class="kpi" id="kpiGrid">
       <div class="tile"><p class="t">Pontos</p><p class="v" id="kpiPts">—</p><p class="s">na série</p></div>
-      <div class="tile"><p class="t">Normal</p><p class="v" id="kpiOk">—</p><p class="s">classe do modo atual</p></div>
-      <div class="tile"><p class="t">Warn</p><p class="v" id="kpiWarn">—</p><p class="s">classe do modo atual</p></div>
-      <div class="tile"><p class="t">Falha</p><p class="v" id="kpiCrit">—</p><p class="s">classe do modo atual</p></div>
-      <div class="tile"><p class="t">Sem diag. útil</p><p class="v" id="kpiNoData">—</p><p class="s">cinza / fora do gate</p></div>
+      <div class="tile"><p class="t">Normal</p><p class="v" id="kpiOk">—</p><p class="s">verde</p></div>
+      <div class="tile"><p class="t">Warn</p><p class="v" id="kpiWarn">—</p><p class="s">amarelo</p></div>
+      <div class="tile"><p class="t">Falha</p><p class="v" id="kpiCrit">—</p><p class="s">vermelho</p></div>
+      <div class="tile"><p class="t">Sem operativos</p><p class="v" id="kpiNoData">—</p><p class="s">cinza</p></div>
       <div class="tile"><p class="t">Intervalo</p><p class="v" id="kpiRange">—</p><p class="s">start → end</p></div>
     </div>
-  </div>
-
-  <div class="card glass span-12">
-    <h3 style="margin-top:0">Mismatch ao longo do tempo</h3>
-    <div class="chart-wrap"><canvas id="chartMismatch"></canvas></div>
   </div>
 
   <div class="card glass span-12">
@@ -517,14 +508,14 @@
     <div class="hm-head">
       <div style="min-width:0;">
         <h3 style="margin-top:0">Heatmap — dia × bin (canvas)</h3>
-        <div class="hm-sub" id="hmModeNote">
+        <div class="hm-sub">
           Linhas = dias • Colunas = bins de <b id="hmBinLbl">15</b> min •
-          a coloração segue o modo selecionado pelo usuário.
+          cinza=sem dados operativos do inversor, verde=normal, amarelo=warn, vermelho=falha.
         </div>
       </div>
 
       <div class="legend">
-        <span class="badge"><span class="dot" style="background:var(--hm-none)"></span>sem diag. útil</span>
+        <span class="badge"><span class="dot" style="background:var(--hm-none)"></span>sem operativos</span>
         <span class="badge"><span class="dot" style="background:var(--hm-ok)"></span>normal</span>
         <span class="badge"><span class="dot" style="background:var(--hm-warn)"></span>warn</span>
         <span class="badge"><span class="dot" style="background:var(--hm-crit)"></span>falha</span>
@@ -536,6 +527,14 @@
       <canvas id="hmCanvas" class="hm-canvas" width="800" height="420" title="Clique para selecionar um ponto"></canvas>
     </div>
     <div id="hmTip" class="hm-tip"></div>
+  </div>
+
+  <div class="card glass span-12">
+    <div class="kpi">
+      <div class="tile"><p class="t">Detector</p><p class="v mono">{{ version_summary.detector_version|default:"—" }}</p><p class="s">EWMA + CUSUM sobre sinal residual canônico multicanal</p></div>
+      <div class="tile"><p class="t">Classificação</p><p class="v mono">RCA explicável</p><p class="s">regras físico-estatísticas + alarmes + estado operacional</p></div>
+      <div class="tile"><p class="t">Síntese da implementação</p><p class="v mono">produto técnico</p><p class="s">A detecção usa a evidência combinada dos resíduos disponíveis de potência AC/DC, tensão DC e corrente DC, com ponderação por confiabilidade dos canais; o diagnóstico separa evidência observada de inferência causal e mantém rastreabilidade do evento no bin selecionado.</p></div>
+    </div>
   </div>
 </div>
 
@@ -573,18 +572,58 @@
   </div>
 
   <div class="body">
-    <h4 style="margin:.2rem 0 .6rem;">Confiabilidade meteo</h4>
-    <div id="detailMeteoHealth" class="meteo-health"></div>
+    <div class="drawer-tabs" id="drawerTabs">
+      <button type="button" class="drawer-tab-btn active" data-tab="mppt">Dados por MPPT</button>
+      <button type="button" class="drawer-tab-btn" data-tab="meteo">Meteorologia</button>
+      <button type="button" class="drawer-tab-btn" data-tab="diagnostic">Detecção/diagnóstico</button>
+      <button type="button" class="drawer-tab-btn" data-tab="ac">Saída do inversor (AC)</button>
+      <button type="button" class="drawer-tab-btn" data-tab="compare">Modelo × medido</button>
+      <button type="button" class="drawer-tab-btn" data-tab="curve">Curva do dia</button>
+      <button type="button" class="drawer-tab-btn" data-tab="dump">Dump</button>
+    </div>
 
-    <div style="height:.8rem"></div>
+    <div class="drawer-tab-panel active" data-panel="mppt">
+      <h4 style="margin:.2rem 0 .6rem;">Dados por MPPT</h4>
+      <table class="kv" id="detailMppt"></table>
+    </div>
 
-    <h4 style="margin:.2rem 0 .6rem;">Principais variáveis</h4>
-    <table class="kv" id="detailAll"></table>
+    <div class="drawer-tab-panel" data-panel="meteo">
+      <h4 style="margin:.2rem 0 .6rem;">Confiabilidade meteo</h4>
+      <div id="detailMeteoHealth" class="meteo-health"></div>
+      <div style="height:.8rem"></div>
+      <h4 style="margin:.2rem 0 .6rem;">Dados meteorológicos</h4>
+      <table class="kv" id="detailMeteo"></table>
+    </div>
 
-    <div style="height:.8rem"></div>
+    <div class="drawer-tab-panel" data-panel="diagnostic">
+      <h4 style="margin:.2rem 0 .6rem;">Precisão e diagnóstico</h4>
+      <table class="kv" id="detailConfidence"></table>
+      <div style="height:.8rem"></div>
+      <table class="kv" id="detailDetection"></table>
+    </div>
 
-    <h4 style="margin:.2rem 0 .6rem;">Dump</h4>
-    <pre class="dump" id="detailDump">{}</pre>
+    <div class="drawer-tab-panel" data-panel="ac">
+      <h4 style="margin:.2rem 0 .6rem;">Saída do inversor (AC)</h4>
+      <table class="kv" id="detailAC"></table>
+    </div>
+
+    <div class="drawer-tab-panel" data-panel="compare">
+      <h4 style="margin:.2rem 0 .6rem;">Modelo × medido</h4>
+      <table class="compare-kv" id="detailCompare"></table>
+    </div>
+
+    <div class="drawer-tab-panel" data-panel="curve">
+      <h4 style="margin:.2rem 0 .6rem;">Curva do dia</h4>
+      <div class="chart-wrap sm"><canvas id="chartDetailDay"></canvas></div>
+    </div>
+
+    <div class="drawer-tab-panel" data-panel="dump">
+      <h4 style="margin:.2rem 0 .6rem;">Principais variáveis</h4>
+      <table class="kv" id="detailAll"></table>
+      <div style="height:.8rem"></div>
+      <h4 style="margin:.2rem 0 .6rem;">Dump</h4>
+      <pre class="dump" id="detailDump">{}</pre>
+    </div>
   </div>
 </aside>
 
@@ -644,38 +683,6 @@
     if (typeof v === "boolean") return v ? "true" : "false";
     if (typeof v === "string") return v === "" ? "—" : v;
     try{ return JSON.stringify(v); }catch(_e){ return String(v); }
-  }
-
-
-  function normalizeHeatmapMode(v){
-    const s = String(v || "").trim().toLowerCase();
-    if (["mismatch", "mismatch_power", "power"].includes(s)) return "mismatch";
-    return "fault_type";
-  }
-
-  function heatmapModeLabel(mode){
-    return normalizeHeatmapMode(mode) === "mismatch" ? "Mismatch de potência" : "Tipologia de falha";
-  }
-
-  function heatmapModeDescription(mode){
-    return normalizeHeatmapMode(mode) === "mismatch"
-      ? "A cor do bin segue o desvio de potência: verde dentro dos limiares, amarelo/vermelho quando o mismatch e a condição de não geração sob sol disponível excedem os limiares configurados."
-      : "A cor do bin segue a tipologia diagnóstica consolidada (RCA), isto é, a severidade runtime derivada de state_label, diagnosis_label e evidência direta de rede.";
-  }
-
-  function currentHeatmapMode(payload=null){
-    const fromPayload = payload?.heatmap_mode?.selected || payload?.series?.heatmap_mode?.[0] || null;
-    const fromDom = $("heatmap_mode")?.value || null;
-    return normalizeHeatmapMode(fromPayload || fromDom || "fault_type");
-  }
-
-  function setHeatmapModeCards(payload=null){
-    const mode = currentHeatmapMode(payload);
-    const label = heatmapModeLabel(mode);
-    const desc = heatmapModeDescription(mode);
-    if ($("modeCurrentTitle")) $("modeCurrentTitle").textContent = label;
-    if ($("modeCurrentDesc")) $("modeCurrentDesc").textContent = desc + " A exportação PDF usa o mesmo modo selecionado.";
-    if ($("hmModeNote")) $("hmModeNote").innerHTML = `Linhas = dias • Colunas = bins de <b id="hmBinLbl">${String(hmState?.dtm || Number($("dt_minutes")?.value || 15))}</b> min • ${desc}`;
   }
 
   function normalizeNumberInput(id, def){
@@ -740,6 +747,22 @@
     wind_speed:   "Vento [m/s]",
     rh:           "UR [%]",
     meteo_qc_score: "Score de QC meteo",
+    data_reliability_score: "Confiabilidade dos dados",
+    data_reliability_level: "Nível de confiabilidade dos dados",
+    detection_confidence_score: "Confiança da detecção",
+    detection_confidence_level: "Nível de confiança da detecção",
+    diagnosis_confidence_score: "Confiança do diagnóstico",
+    diagnosis_confidence_level: "Nível de confiança do diagnóstico",
+    ewma_z: "EWMA z",
+    cusum_score: "CUSUM score",
+    residual_event_score: "Residual event score",
+    combined_event_score: "Combined event score",
+    state_label: "Estado operativo",
+    domain_label: "Domínio provável",
+    diagnosis_label: "Diagnóstico final",
+    direct_grid_evidence: "Evidência direta de rede",
+    zero_injection_flag: "Sem injeção sob sol",
+    irradiance_tier: "Tier de irradiância",
     flag_meteo_low_confidence: "Meteo baixa confiança",
     flag_meteo_interpolated: "Fonte meteo interpolada",
     flag_meteo_outlier: "Outlier meteo",
@@ -891,8 +914,8 @@
   }
 
   /* Charts */
-  let chartMismatch = null;
   let chartPower = null;
+  let chartDetailDay = null;
 
   function chartCommonOptions(){
     return {
@@ -920,8 +943,8 @@
   }
 
   function destroyCharts(){
-    if(chartMismatch){ chartMismatch.destroy(); chartMismatch = null; }
     if(chartPower){ chartPower.destroy(); chartPower = null; }
+    if(chartDetailDay){ chartDetailDay.destroy(); chartDetailDay = null; }
   }
 
   function buildCharts(payload){
@@ -930,26 +953,8 @@
 
     const s = payload?.series || {};
     const t  = s.t_local || s.x_local || payload?.x_local || [];
-    const mm = s.mismatch_rel || s.mismatch_relativo || s.mismatch || [];
     const pr = s.p_ac_real_w  || s.p_ac_w || s.pac_w || [];
     const pm = s.p_ac_model_w || s.p_model_w || [];
-
-    chartMismatch = new Chart($("chartMismatch"), {
-      type: "line",
-      data: { labels: t, datasets: [
-        { label: "Mismatch relativo", data: mm, borderWidth: 2, pointRadius: 0, tension: 0.15 },
-      ]},
-      options: {
-        ...chartCommonOptions(),
-        scales: {
-          ...chartCommonOptions().scales,
-          y: {
-            ...chartCommonOptions().scales.y,
-            title: { display: true, text: "Mismatch relativo", color: "rgba(233,246,255,.95)", font: { size: 13, weight: "800" } }
-          }
-        }
-      }
-    });
 
     chartPower = new Chart($("chartPower"), {
       type: "line",
@@ -973,7 +978,7 @@
       ],
 
       code:         ["rca_code","codes","diag_code","diagnostic_code"],
-      label:        ["label_display","diagnosis_label","diagnosis_label_display","rca_label","label_t","labels","diag_label","diagnostic_label"],
+      label:        ["rca_label","label_t","labels","diag_label","diagnostic_label"],
 
       anomaly:      ["anomaly_iv","iv_anomaly","iv_ran_anomaly","iv_flag","anom","is_anomaly","anomalous","anomaly_flag"],
 
@@ -1113,47 +1118,51 @@
     return null;
   }
 
+
+  function currentDisplayMode(){
+    const el = $("display_mode");
+    const v = String(el?.value || "mismatch").trim().toLowerCase();
+    return (v === "tipologia") ? "tipologia" : "mismatch";
+  }
+
   function pointClass(payload, idx){
-    const explicitHeatmap = seriesAt(payload, "heatmap_class", idx);
-    if (explicitHeatmap != null && String(explicitHeatmap).trim() !== ""){
-      return { cls: normalizeClass(explicitHeatmap), reason: `backend_heatmap:${currentHeatmapMode(payload)}` };
+    const s = payload?.series || {};
+    const mode = currentDisplayMode();
+    const arr = (mode === "tipologia") ? (s.hm_class_typology || []) : (s.hm_class_mismatch || []);
+    const reasons = (mode === "tipologia") ? (s.hm_reason_typology || []) : (s.hm_reason_mismatch || []);
+    const cls = normalizeClass(arr[idx]);
+    if (arr.length){
+      return { cls, reason: reasons[idx] || `backend_${mode}` };
     }
 
     const rawCls = seriesAt(payload, "cls", idx);
+    let base = null;
     if (rawCls != null && String(rawCls).trim() !== ""){
-      return { cls: normalizeClass(rawCls), reason: "backend_class", raw: rawCls };
+      base = { cls: normalizeClass(rawCls), reason: "backend_class", raw: rawCls };
+    } else {
+      const code = seriesAt(payload, "code", idx);
+      if (code != null && String(code).trim() !== ""){
+        base = { cls: classFromCode(payload, code), reason: "rca_code", code };
+      } else {
+        const an = seriesAt(payload, "anomaly", idx);
+        base = isExplicitTrue(an) ? { cls: "warn", reason: "anomaly=true" } : { cls: "ok", reason: "default_ok" };
+      }
     }
-
-    const code = seriesAt(payload, "code", idx);
-    if (code != null && String(code).trim() !== ""){
-      return { cls: classFromCode(payload, code), reason: "rca_code", code };
-    }
-
-    const an = seriesAt(payload, "anomaly", idx);
-    if (isExplicitTrue(an)) return { cls: "warn", reason: "anomaly/IV=true" };
-    return { cls: "ok", reason: "default_ok" };
+    return base;
   }
 
   function setKpis(payload){
-    const summaryCounts = payload?.summary?.heatmap_counts || payload?.summary?.counts || {};
     const s = payload?.series || {};
     const t = s.t_local || s.x_local || payload?.x_local || [];
-    const pts = Number(payload?.summary?.n_points ?? (Array.isArray(t) ? t.length : 0));
+    const pts = Array.isArray(t) ? t.length : 0;
 
-    let ok = Number(summaryCounts.ok ?? 0);
-    let warn = Number(summaryCounts.warn ?? 0);
-    let crit = Number(summaryCounts.crit ?? 0);
-    let none = Number(summaryCounts.none ?? 0);
-
-    if (!Number.isFinite(ok) || !Number.isFinite(warn) || !Number.isFinite(crit) || !Number.isFinite(none) || (ok + warn + crit + none) <= 0){
-      ok = 0; warn = 0; crit = 0; none = 0;
-      for (let i=0; i<pts; i++){
-        const cls = pointClass(payload, i).cls;
-        if (cls === "ok") ok++;
-        else if (cls === "warn") warn++;
-        else if (cls === "crit") crit++;
-        else none++;
-      }
+    let ok = 0, warn = 0, crit = 0, none = 0;
+    for (let i=0; i<pts; i++){
+      const cls = pointClass(payload, i).cls;
+      if (cls === "ok") ok++;
+      else if (cls === "warn") warn++;
+      else if (cls === "crit") crit++;
+      else none++;
     }
 
     const rs = (payload?.range?.start || $("start")?.value || "—");
@@ -1288,6 +1297,8 @@
       const lbl = seriesAt(payload, "label", i);
       const code = seriesAt(payload, "code", i);
 
+      const localIso = (typeof t[i] === "string") ? t[i] : null;
+      const tkey = localIso ? String(localIso).slice(0,16) : null;
       cell.set(key, {
         idx: i,
         has_any: true,
@@ -1299,6 +1310,8 @@
         code: (code == null ? null : String(code)),
         day: ds,
         minute: Number(minutes),
+        tkey,
+        exact_ts_local: localIso,
       });
     }
 
@@ -1430,18 +1443,12 @@
       else none++;
     }
 
-    const summaryCounts = payload?.summary?.heatmap_counts || payload?.summary?.counts || null;
-    const badgeOk = Number(summaryCounts?.ok ?? ok);
-    const badgeWarn = Number(summaryCounts?.warn ?? warn);
-    const badgeCrit = Number(summaryCounts?.crit ?? crit);
-    const badgeNone = Number(summaryCounts?.none ?? none);
-    const modeLbl = heatmapModeLabel(currentHeatmapMode(payload));
-
     $("hmBadgeTxt").textContent =
-      `${modeLbl} • normal=${badgeOk} | warn=${badgeWarn} | falha=${badgeCrit} | cinza=${badgeNone} | bins com ponto=${any}`;
+      `normal=${ok} | warn=${warn} | falha=${crit} | cinza=${none} | bins com ponto=${any} | bins com operativos=${oper}`;
+
+    $("kpiNoData").textContent = (hmState.days.length && hmState.nBins) ? String(none) : "—";
 
     drawHeatmapCanvas();
-    setHeatmapModeCards(payload);
   }
 
   function binTimeStr(mins){
@@ -1608,117 +1615,285 @@
     dr.setAttribute("aria-hidden", "true");
   }
 
+
+  function confidenceLevelPt(level){
+    const m = { very_high: "muito alta", high: "alta", moderate: "moderada", low: "baixa", very_low: "muito baixa" };
+    return m[String(level || "")] || (level || "—");
+  }
+
+  function confidenceReasonText(block){
+    const reasons = Array.isArray(block?.reasons) ? block.reasons.filter(Boolean) : [];
+    return reasons.length ? reasons.join("; ") : "—";
+  }
+
+  function buildConfidenceRows(raw, dumpPoint){
+    const conf = dumpPoint?.confidence || {};
+    const notes = conf.notes || {};
+    return [
+      { label: "Confiabilidade dos dados", value: fmtPct(raw.data_reliability_score), key: "data_reliability_score" },
+      { label: "Nível dos dados", value: confidenceLevelPt(raw.data_reliability_level), key: "data_reliability_level" },
+      { label: "Razões (dados)", value: confidenceReasonText(notes.data_reliability), key: "data_reliability_reasons" },
+      { label: "Confiança da detecção", value: fmtPct(raw.detection_confidence_score), key: "detection_confidence_score" },
+      { label: "Nível da detecção", value: confidenceLevelPt(raw.detection_confidence_level), key: "detection_confidence_level" },
+      { label: "Razões (detecção)", value: confidenceReasonText(notes.detection_confidence), key: "detection_confidence_reasons" },
+      { label: "Confiança do diagnóstico", value: fmtPct(raw.diagnosis_confidence_score), key: "diagnosis_confidence_score" },
+      { label: "Nível do diagnóstico", value: confidenceLevelPt(raw.diagnosis_confidence_level), key: "diagnosis_confidence_level" },
+      { label: "Razões (diagnóstico)", value: confidenceReasonText(notes.diagnosis_confidence), key: "diagnosis_confidence_reasons" },
+      { label: "Estado operativo", value: fmtAny(raw.state_label), key: "state_label" },
+      { label: "Domínio provável", value: fmtAny(raw.domain_label), key: "domain_label" },
+      { label: "Diagnóstico final", value: fmtAny(raw.diagnosis_label), key: "diagnosis_label" },
+      { label: "Evidência direta de rede", value: fmtAny(raw.direct_grid_evidence), key: "direct_grid_evidence" },
+      { label: "Sem injeção sob sol", value: fmtAny(raw.zero_injection_flag), key: "zero_injection_flag" },
+      { label: "Tier de irradiância", value: fmtAny(raw.irradiance_tier), key: "irradiance_tier" },
+    ];
+  }
+
+  function renderKvRows(obj, keys){
+    return keys.map((k) => `<tr><td class="k mono">${prettyKeyCompact(k)}</td><td class="v mono">${fmtAny(obj?.[k])}</td></tr>`).join("");
+  }
+
+  function mergeDefined(baseObj, overrideObj){
+    const out = { ...(baseObj || {}) };
+    const src = overrideObj || {};
+    Object.keys(src).forEach((k) => {
+      const v = src[k];
+      if (v !== undefined && v !== null && !(typeof v === 'number' && !Number.isFinite(v))) out[k] = v;
+    });
+    return out;
+  }
+
+  function pickFirst(...vals){
+    for (const v of vals){
+      if (v !== undefined && v !== null && !(typeof v === 'number' && !Number.isFinite(v))) return v;
+    }
+    return null;
+  }
+
+  function renderCompareTable(tbl, dumpPoint){
+    if (!tbl) return;
+    const model = dumpPoint?.model || {};
+    const total = dumpPoint?.chosen_total || {};
+    const residuals = dumpPoint?.residuals || {};
+    const rows = [
+      ["Potência AC (W)", pickFirst(model.p_ac_model_w, residuals?.p_ac?.expected), pickFirst(total.p_ac_w, residuals?.p_ac?.measured)],
+      ["Potência DC (W)", pickFirst(model.p_dc_model_w, residuals?.p_dc?.expected), pickFirst(total.p_dc_w, residuals?.p_dc?.measured)],
+      ["Tensão DC (V)", pickFirst(model.v_dc_model_v, residuals?.v_dc?.expected), pickFirst(total.v_dc_v, residuals?.v_dc?.measured)],
+      ["Corrente DC (A)", pickFirst(model.i_dc_model_a, residuals?.i_dc?.expected), pickFirst(total.i_dc_a, residuals?.i_dc?.measured)],
+      ["GPOA usada (W/m²)", pickFirst(model.g_poa_used, dumpPoint?.meteo?.g_poa_used), null],
+      ["Tcell (°C)", model.tcell_c, null],
+    ];
+    tbl.innerHTML = `<tr><th>Variável</th><th>Modelo</th><th>Medido</th></tr>` + rows.map(([label, m, o]) => `<tr><td class="k mono">${label}</td><td class="v mono">${fmtAny(m)}</td><td class="v mono">${fmtAny(o)}</td></tr>`).join("");
+  }
+
+  function renderSelectedDayCurve(payload, cellObj){
+    const canvas = $("chartDetailDay");
+    if (!canvas || !window.Chart) return;
+    if (chartDetailDay){ chartDetailDay.destroy(); chartDetailDay = null; }
+    const dayKey = cellObj?.day || cellObj?.ds || null;
+    if (!payload || !cellObj || !dayKey) return;
+
+    const s = payload.series || {};
+    const labels = s.t_local || [];
+    const days = s.hm_day_local || [];
+    const prAll = s.p_ac_real_w || s.p_ac_w || [];
+    const pmAll = s.p_ac_model_w || [];
+
+    const idxs = [];
+    for (let i=0; i<days.length; i++) if (days[i] === dayKey) idxs.push(i);
+    if (!idxs.length) return;
+
+    const localLabels = idxs.map(i => {
+      const iso = String(labels[i] || "");
+      return iso.length >= 16 ? iso.slice(11,16) : iso;
+    });
+    const pr = idxs.map(i => prAll[i]);
+    const pm = idxs.map(i => pmAll[i]);
+    const selectedIndex = idxs.indexOf(cellObj.idx);
+    const pointR = localLabels.map((_,k)=>k===selectedIndex?4:0);
+
+    chartDetailDay = new Chart(canvas, {
+      type: "line",
+      data: {
+        labels: localLabels,
+        datasets: [
+          { label: "P AC real (W)", data: pr, borderWidth: 2, pointRadius: pointR, tension: 0.15 },
+          { label: "P AC modelo (W)", data: pm, borderWidth: 2, pointRadius: pointR, tension: 0.15 },
+        ]
+      },
+      options: chartCommonOptions(),
+    });
+  }
+
+  function buildSeriesDumpFallback(payload, idx){
+    if (!payload || !Number.isInteger(idx) || idx < 0) return {};
+    return {
+      confidence: {
+        data_reliability_score: seriesAt(payload, "data_reliability_score", idx),
+        data_reliability_level: seriesAt(payload, "data_reliability_level", idx),
+        detection_confidence_score: seriesAt(payload, "detection_confidence_score", idx),
+        detection_confidence_level: seriesAt(payload, "detection_confidence_level", idx),
+        diagnosis_confidence_score: seriesAt(payload, "diagnosis_confidence_score", idx),
+        diagnosis_confidence_level: seriesAt(payload, "diagnosis_confidence_level", idx),
+      },
+      detection: {
+        valid_period: seriesAt(payload, "valid_period", idx),
+        stable_sky: seriesAt(payload, "stable_sky", idx),
+        anomaly: seriesAt(payload, "anomaly", idx),
+        anomaly_power: seriesAt(payload, "anomaly_power", idx),
+        residual_trigger: seriesAt(payload, "residual_trigger", idx),
+        residual_event_score: seriesAt(payload, "residual_event_score", idx),
+        combined_event_score: seriesAt(payload, "combined_event_score", idx),
+        ewma_z: seriesAt(payload, "ewma_z", idx),
+        cusum_score: seriesAt(payload, "cusum_score", idx),
+        irradiance_tier: seriesAt(payload, "irradiance_tier", idx),
+        rca_code: seriesAt(payload, "code", idx),
+        rca_label: seriesAt(payload, "label", idx),
+      },
+      chosen_total: {
+        p_ac_w: seriesAt(payload, "p_ac_real_w", idx),
+        p_dc_w: seriesAt(payload, "p_dc_w", idx),
+        p_ac_mppt_sum_w: seriesAt(payload, "p_ac_mppt_sum_w", idx),
+        p_ac_agg_w: seriesAt(payload, "p_ac_agg_w", idx),
+        v_dc_v: seriesAt(payload, "v_dc_v", idx),
+        i_dc_a: seriesAt(payload, "i_dc_a", idx),
+        v_ac_v: seriesAt(payload, "v_ac_v", idx),
+        i_ac_a: seriesAt(payload, "i_ac_a", idx),
+        freq_hz: seriesAt(payload, "freq_hz", idx),
+        inv_coverage: seriesAt(payload, "inv_coverage", idx),
+        flag_inv_missing_all: seriesAt(payload, "flag_inv_missing_all", idx),
+        flag_inv_missing_partial: seriesAt(payload, "flag_inv_missing_partial", idx),
+      },
+      model: {
+        g_poa_used: seriesAt(payload, "g_poa", idx),
+        tcell_c: seriesAt(payload, "tcell_c", idx),
+        p_ac_model_w: seriesAt(payload, "p_ac_model_w", idx),
+        p_dc_model_w: seriesAt(payload, "p_dc_model_w", idx),
+        v_dc_model_v: seriesAt(payload, "v_dc_model_v", idx),
+        i_dc_model_a: seriesAt(payload, "i_dc_model_a", idx),
+        mismatch_rel: seriesAt(payload, "mismatch_rel", idx),
+        valid_model: seriesAt(payload, "valid_model", idx),
+      },
+      meteo: {
+        g_poa_used: seriesAt(payload, "g_poa", idx),
+        gti: seriesAt(payload, "gti", idx),
+        ghi: seriesAt(payload, "ghi", idx),
+        dni: seriesAt(payload, "dni", idx),
+        dhi: seriesAt(payload, "dhi", idx),
+        temp_air: seriesAt(payload, "temp_air", idx),
+        wind_speed: seriesAt(payload, "wind_speed", idx),
+        rh: seriesAt(payload, "rh", idx),
+        meteo_qc_score: seriesAt(payload, "meteo_qc_score", idx),
+        flag_meteo_missing: seriesAt(payload, "flag_meteo_missing", idx),
+        flag_meteo_low_confidence: seriesAt(payload, "flag_meteo_low_confidence", idx),
+        flag_meteo_interpolated: seriesAt(payload, "flag_meteo_interpolated", idx),
+        flag_meteo_outlier: seriesAt(payload, "flag_meteo_outlier", idx),
+        flag_meteo_artifact: seriesAt(payload, "flag_meteo_artifact", idx),
+      },
+      residuals: {
+        p_ac: { measured: seriesAt(payload, "p_ac_real_w", idx), expected: seriesAt(payload, "p_ac_model_w", idx), abs: seriesAt(payload, "p_ac_residual_abs", idx), rel: seriesAt(payload, "p_ac_residual_rel", idx) },
+        p_dc: { measured: seriesAt(payload, "p_dc_w", idx), expected: seriesAt(payload, "p_dc_model_w", idx), abs: seriesAt(payload, "p_dc_residual_abs", idx), rel: seriesAt(payload, "p_dc_residual_rel", idx) },
+        v_dc: { measured: seriesAt(payload, "v_dc_v", idx), expected: seriesAt(payload, "v_dc_model_v", idx), abs: seriesAt(payload, "v_dc_residual_abs", idx), rel: seriesAt(payload, "v_dc_residual_rel", idx) },
+        i_dc: { measured: seriesAt(payload, "i_dc_a", idx), expected: seriesAt(payload, "i_dc_model_a", idx), abs: seriesAt(payload, "i_dc_residual_abs", idx), rel: seriesAt(payload, "i_dc_residual_rel", idx) },
+      },
+    };
+  }
+
+  function setDrawerTab(name){
+    document.querySelectorAll('.drawer-tab-btn').forEach((el)=>el.classList.toggle('active', el.dataset.tab===name));
+    document.querySelectorAll('.drawer-tab-panel').forEach((el)=>el.classList.toggle('active', el.dataset.panel===name));
+  }
+
   function renderDetail(payload, cellObj){
     const meta = $("detailMeta");
     const tblAll = $("detailAll");
+    const tblMppt = $("detailMppt");
+    const tblMeteo = $("detailMeteo");
+    const tblConf = $("detailConfidence");
+    const tblDet = $("detailDetection");
+    const tblAC = $("detailAC");
+    const tblCompare = $("detailCompare");
     const dump = $("detailDump");
     const meteoHealth = $("detailMeteoHealth");
-    if (!meta || !tblAll || !dump || !meteoHealth) return;
 
-    if (!payload || !cellObj){
-      meta.textContent = "—";
-      tblAll.innerHTML = "";
-      dump.textContent = "{}";
-      renderMeteoHealth(meteoHealth, null);
+    if (!cellObj || !payload){
+      if (meta) meta.textContent = '—';
+      [tblAll,tblMppt,tblMeteo,tblConf,tblDet,tblAC,tblCompare].forEach((el)=>{ if(el) el.innerHTML=''; });
+      if (dump) dump.textContent = '{}';
+      if (meteoHealth) meteoHealth.innerHTML = '';
+      if (chartDetailDay){ chartDetailDay.destroy(); chartDetailDay = null; }
       closeDetailDrawer();
       return;
     }
 
-    const ds = cellObj.day;
-    const ts = binTimeStr(cellObj.minute);
+    const idx = Number.isInteger(cellObj?.idx) ? cellObj.idx : -1;
+    const ds = cellObj?.day || cellObj?.ds || '—';
+    const ts = cellObj?.ts || binTimeStr(cellObj?.minute) || '—';
+    const fallbackPoint = buildSeriesDumpFallback(payload, idx) || {};
+    const dumpPoint = cellObj?.dumpPoint || payload?.dump_by_tkey?.[cellObj?.tkey] || fallbackPoint;
+    const clsTxt = cellObj?.cls || 'none';
+    const tsLocal = dumpPoint?.ts_local || cellObj?.exact_ts_local || '—';
+    const tsUtc = dumpPoint?.ts_utc || '—';
+    if (meta) meta.textContent = `Data/hora local: ${fmtAny(tsLocal)} • UTC: ${fmtAny(tsUtc)} • classe=${clsTxt} • razão=${cellObj?.reason || '—'} • idx=${idx >= 0 ? idx : '—'}`;
 
-    // Meta
-    const metaRows = [
-      { k: "__meta_day",  label: "Dia", v: ds },
-      { k: "__meta_time", label: "Hora (bin)", v: ts },
-      { k: "__meta_bin",  label: "Bin (min)", v: String(hmState.dtm) },
-      { k: "__meta_cls",  label: "Classe", v: cellObj.cls || "none" },
-      { k: "__meta_reason", label: "Motivo", v: cellObj.reason || "—" },
-      { k: "__meta_has_any", label: "Tem ponto no bin?", v: !!cellObj.has_any },
-      { k: "__meta_has_oper", label: "Tem operativos?", v: !!cellObj.has_oper },
-    ];
+    const confBlock = mergeDefined(fallbackPoint?.confidence || {}, dumpPoint?.confidence || {});
+    const detBlock = mergeDefined(fallbackPoint?.detection || {}, dumpPoint?.detection || {});
+    const meteoBlock = mergeDefined(fallbackPoint?.meteo || {}, dumpPoint?.meteo || {});
+    const acBlock = mergeDefined(fallbackPoint?.chosen_total || {}, dumpPoint?.chosen_total || {});
+    const modelBlock = mergeDefined(fallbackPoint?.model || {}, dumpPoint?.model || {});
+    const residualBlock = mergeDefined(fallbackPoint?.residuals || {}, dumpPoint?.residuals || {});
+    // flat fallbacks adicionais
+    if (detBlock.ewma_z == null) detBlock.ewma_z = pickFirst(dumpPoint?.ewma_z, fallbackPoint?.ewma_z);
+    if (detBlock.cusum_score == null) detBlock.cusum_score = pickFirst(dumpPoint?.cusum_score, fallbackPoint?.cusum_score);
+    if (detBlock.residual_event_score == null) detBlock.residual_event_score = pickFirst(dumpPoint?.residual_event_score, fallbackPoint?.residual_event_score);
+    if (detBlock.combined_event_score == null) detBlock.combined_event_score = pickFirst(dumpPoint?.combined_event_score, fallbackPoint?.combined_event_score);
+    if (detBlock.rca_code == null) detBlock.rca_code = pickFirst(dumpPoint?.rca_code, fallbackPoint?.rca_code);
+    if (detBlock.rca_label == null) detBlock.rca_label = pickFirst(dumpPoint?.rca_label, fallbackPoint?.rca_label);
+    if (acBlock.p_ac_w == null) acBlock.p_ac_w = pickFirst(dumpPoint?.p_ac_w, fallbackPoint?.p_ac_w);
+    if (acBlock.freq_hz == null) acBlock.freq_hz = pickFirst(dumpPoint?.freq_hz, fallbackPoint?.freq_hz);
 
-    // ✅ Mesmo sem ponto (idx < 0), queremos mostrar os NOMES das variáveis.
-    const idx = (cellObj.has_any && cellObj.idx >= 0) ? cellObj.idx : -1;
+    const raw = {};
+    if (acBlock && typeof acBlock === 'object') Object.assign(raw, acBlock);
+    if (meteoBlock && typeof meteoBlock === 'object') Object.assign(raw, meteoBlock);
+    if (modelBlock && typeof modelBlock === 'object') Object.assign(raw, modelBlock);
 
-    const clsTxt = (cellObj.has_any && cellObj.idx >= 0) ? cellObj.cls : "none";
-    meta.textContent = `${ds} ${ts} • idx=${(idx >= 0 ? idx : "—")} • class=${clsTxt} • operativos=${cellObj.has_oper ? "sim" : "não"} • reason=${cellObj.reason || "—"}`;
-
-    // snapshot base (com chaves mesmo quando idx=-1)
-    const raw = pointSnapshot(payload, idx);
-    const tkey = `${ds}T${ts}`;
-    const dumpPoint = (payload?.dump_by_tkey && payload.dump_by_tkey[tkey]) ? payload.dump_by_tkey[tkey] : null;
-    const sourceMeteo = dumpPoint?.source_meteo || payload?.sources?.source_meteo || payload?.range?.source_meteo || "—";
-
-    if (dumpPoint?.chosen_total && typeof dumpPoint.chosen_total === "object") {
-      Object.assign(raw, dumpPoint.chosen_total);
-    }
-    if (dumpPoint?.meteo && typeof dumpPoint.meteo === "object") {
-      Object.assign(raw, dumpPoint.meteo);
-    }
-    if (sourceMeteo && !Object.prototype.hasOwnProperty.call(raw, "source_meteo")) {
-      raw.source_meteo = sourceMeteo;
-    }
-
-    // MPPT por source (DC only; com linhas mesmo sem valor)
-    const mpptItems = collectMpptItems(payload, idx);
-
-    const baseItems = Object.entries(raw).map(([k,v]) => ({ k, v, label: prettyKeyCompact(k) }));
-
-    // Para evitar “sumiço” de nomes: NÃO filtramos nada.
-    // Ordenação: deixa metas no topo; o resto ordena por label/k.
-    const items = baseItems.concat(mpptItems);
-    items.sort((a,b) => (String(a.label).localeCompare(String(b.label)) || String(a.k).localeCompare(String(b.k))));
-
-    const renderRow = (it) =>
-      `<tr><td class="k mono">${String(it.label)}</td><td class="v mono">${fmtAny(it.v)}</td></tr>`;
-
-    tblAll.innerHTML =
-      metaRows.map(renderRow).join("") +
-      (items.map(renderRow).join("") || `<tr><td class="k mono">—</td><td class="v mono">—</td></tr>`);
-
-    const meteoSummary = meteoHealthSummary(raw, sourceMeteo);
+    const sourceMeteo = payload?.sources?.source_meteo || dumpPoint?.source_meteo || '—';
+    const meteoSummary = meteoHealthSummary({ ...raw, ...meteoBlock }, sourceMeteo);
     renderMeteoHealth(meteoHealth, meteoSummary);
 
+    if (tblMppt) {
+      const mpptItems = collectMpptItems(payload, idx);
+      tblMppt.innerHTML = (mpptItems.length ? mpptItems : [{label:'—', v:'—'}]).map((it)=>`<tr><td class="k mono">${String(it.label)}</td><td class="v mono">${fmtAny(it.v)}</td></tr>`).join('');
+    }
+    if (tblMeteo) tblMeteo.innerHTML = renderKvRows(meteoBlock, ['g_poa_used','ghi','dni','dhi','temp_air','wind_speed','rh','meteo_qc_score','flag_meteo_missing','flag_meteo_low_confidence','flag_meteo_interpolated','flag_meteo_outlier','flag_meteo_artifact']);
+    if (tblConf) tblConf.innerHTML = renderKvRows(confBlock, ['data_reliability_score','data_reliability_level','detection_confidence_score','detection_confidence_level','diagnosis_confidence_score','diagnosis_confidence_level']);
+    if (tblDet) tblDet.innerHTML = renderKvRows(detBlock, ['valid_period','stable_sky','anomaly','anomaly_power','residual_trigger','residual_event_score','combined_event_score','ewma_z','cusum_score','irradiance_tier','rca_code','rca_label']);
+    if (tblAC) tblAC.innerHTML = renderKvRows(acBlock, ['p_ac_w','p_ac_mppt_sum_w','p_ac_agg_w','v_ac_v','i_ac_a','freq_hz','inv_coverage','flag_inv_missing_all','flag_inv_missing_partial']);
+    renderCompareTable(tblCompare, { ...dumpPoint, chosen_total: acBlock, meteo: meteoBlock, model: modelBlock, residuals: residualBlock });
+
+    if (tblAll){
+      const baseItems = Object.entries(raw).map(([k,v]) => ({ k, v, label: prettyKeyCompact(k) }));
+      baseItems.sort((a,b) => (String(a.label).localeCompare(String(b.label)) || String(a.k).localeCompare(String(b.k))));
+      tblAll.innerHTML = (baseItems.length ? baseItems : [{label:'—',v:'—'}]).map((it)=>`<tr><td class="k mono">${String(it.label)}</td><td class="v mono">${fmtAny(it.v)}</td></tr>`).join('');
+    }
+
     const dumpObj = snapshotVerbose(raw);
-    dumpObj.__meteo_health = {
-      title: meteoSummary.title,
-      note: meteoSummary.note,
-      tone: meteoSummary.tone,
-      source: meteoSummary.source,
-      score: meteoSummary.score,
-      flags: {
-        flag_meteo_missing: boolish(raw.flag_meteo_missing),
-        flag_meteo_low_confidence: boolish(raw.flag_meteo_low_confidence),
-        flag_meteo_interpolated: boolish(raw.flag_meteo_interpolated),
-        flag_meteo_outlier: boolish(raw.flag_meteo_outlier),
-        flag_meteo_artifact: boolish(raw.flag_meteo_artifact),
-      },
-    };
-    const mpptDump = collectMpptDump(payload, idx);
-    if (mpptDump) dumpObj.__mppt_by_source = mpptDump;
-
-    dumpObj.__heatmap = {
-      day: ds,
-      time_bin: ts,
-      dt_minutes: hmState.dtm,
-      mode: currentHeatmapMode(payload),
-      mode_label: heatmapModeLabel(currentHeatmapMode(payload)),
-      has_any: !!cellObj.has_any,
-      idx: (idx >= 0 ? idx : null),
-      has_oper: !!cellObj.has_oper,
-      class: clsTxt,
-      reason: cellObj.reason,
-    };
-
+    dumpObj.__confidence = confBlock;
+    dumpObj.__detection = detBlock;
+    dumpObj.__model = modelBlock;
+    dumpObj.__residuals = residualBlock;
+    dumpObj.__mppt_by_source = collectMpptDump(payload, idx);
+    dumpObj.__heatmap = { day: ds, time_bin: ts, dt_minutes: hmState.dtm, has_any: !!cellObj.has_any, idx: (idx >= 0 ? idx : null), has_oper: !!cellObj.has_oper, class: clsTxt, reason: cellObj.reason };
     hmState.selectedSnapshot = dumpObj;
-    dump.textContent = JSON.stringify(dumpObj, null, 2);
+    if (dump) dump.textContent = JSON.stringify(dumpObj, null, 2);
+    renderSelectedDayCurve(payload, cellObj);
+    setDrawerTab(document.querySelector('.drawer-tab-btn.active')?.dataset.tab || 'mppt');
     openDetailDrawer();
   }
 
   function clearSelection(){
     hmState.selectedKey = null;
     hmState.selectedSnapshot = null;
+    if (chartDetailDay){ chartDetailDay.destroy(); chartDetailDay = null; }
     renderDetail(null, null);
     drawHeatmapCanvas();
   }
@@ -1832,9 +2007,31 @@
       fault_abs: getNum("fault_abs", 0.90),
       gpoa_min: getNum("gpoa_min", 50),
       pmin_w: getNum("pmin_w", 0),
-      heatmap_mode: currentHeatmapMode(),
       dt_minutes: Math.max(1, Number($("dt_minutes")?.value || 15)),
+      display_mode: currentDisplayMode(),
     };
+  }
+
+  function exportPdf(){
+    const page = $("fddPage");
+    const exportUrl = page ? page.dataset.export : null;
+    if (!exportUrl){
+      alert("URL de exportação PDF não configurada.");
+      return;
+    }
+    try{
+      const payload = currentPayloadBase();
+      const params = new URLSearchParams();
+      for (const [k, v] of Object.entries(payload)){
+        if (v === undefined || v === null || v === "") continue;
+        params.set(k, String(v));
+      }
+      params.set("plant_pk", String(payload.plant_id));
+      params.set("pk", String(payload.plant_id));
+      window.location.href = `${exportUrl}?${params.toString()}`;
+    }catch(err){
+      setStatus(true, `Erro exportação PDF: ${String(err.message || err)}`);
+    }
   }
 
   async function runFdd(opts = { save:false }){
@@ -1894,6 +2091,7 @@
   function bindDetailButtons(){
     $("btnClearSel")?.addEventListener("click", () => clearSelection());
     $("btnCloseDetail")?.addEventListener("click", () => closeDetailDrawer());
+    document.querySelectorAll(".drawer-tab-btn").forEach((el)=>el.addEventListener("click", ()=>setDrawerTab(el.dataset.tab)));
     $("btnCopySel")?.addEventListener("click", async () => {
       const snap = hmState.selectedSnapshot;
       if (!snap){ alert("Nenhum ponto selecionado."); return; }
@@ -1916,20 +2114,6 @@
     }
   }
 
-
-  function exportPdf(){
-    const page = $("fddPage");
-    const exportUrl = page ? page.dataset.export : null;
-    if (!exportUrl){ alert("URL de exportação PDF não configurada."); return; }
-    try{
-      const payload = currentPayloadBase();
-      const url = exportUrl + "?" + buildQuery(payload);
-      window.open(url, "_blank", "noopener");
-    }catch(err){
-      alert(String(err.message || err));
-    }
-  }
-
   document.addEventListener("DOMContentLoaded", () => {
     prefillDefaultsIfEmpty();
 
@@ -1940,14 +2124,15 @@
 
     $("dt_minutes")?.addEventListener("change", () => {
       if (hmState.payload) renderHeatmapCanvas(hmState.payload);
-      else setHeatmapModeCards();
     });
-    $("heatmap_mode")?.addEventListener("change", () => {
-      setHeatmapModeCards();
+    $("display_mode")?.addEventListener("change", () => {
       if (hmState.payload) renderHeatmapCanvas(hmState.payload);
+      if (hmState.payload && hmState.selectedKey){
+        const obj = hmState.cell.get(hmState.selectedKey);
+        if (obj) renderDetail(hmState.payload, obj);
+      }
     });
 
-    setHeatmapModeCards();
     bindDetailButtons();
     bindHeatmapFit();
 

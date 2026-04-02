@@ -17,7 +17,7 @@ from core.services.fdd.reliability import (
     compute_detection_confidence,
     compute_diagnosis_confidence,
 )
-from core.services.power_model.runtime_residuals import compute_pac_model_and_mismatch
+from core.services.residuals.facade import compute_residual_series_from_observations
 
 
 MERGED_FIELDS = (
@@ -331,24 +331,43 @@ def run_detection_pipeline(
     alarm_code = _float_array(rows, "alarm_code")
     alarm_sev = _float_array(rows, "alarm_sev")
 
-    pac_model, mismatch = compute_pac_model_and_mismatch(
+    residuals = compute_residual_series_from_observations(
         plant=plant,
         times_utc=times_utc,
-        gti=gti,
-        ghi=ghi,
-        dni=dni,
-        dhi=dhi,
-        temp_air=temp_air,
-        pac_real=pac_real,
+        gti=gti.tolist(),
+        ghi=ghi.tolist(),
+        dni=dni.tolist(),
+        dhi=dhi.tolist(),
+        temp_air=temp_air.tolist(),
+        p_ac_w=pac_real.tolist(),
+        p_dc_w=_float_array(rows, "p_dc_w").tolist(),
+        v_dc_v=vdc.tolist(),
+        i_dc_a=idc.tolist(),
+        v_ac_v=vac.tolist(),
+        i_ac_a=iac.tolist(),
+        freq_hz=freq.tolist(),
+        meteo_qc_score=_float_array(rows, "meteo_qc_score").tolist(),
+        flag_meteo_missing=_bool_list(rows, "flag_meteo_missing"),
+        flag_meteo_low_confidence=_bool_list(rows, "flag_meteo_low_confidence"),
+        flag_meteo_interpolated=_bool_list(rows, "flag_meteo_interpolated"),
+        flag_meteo_outlier=_bool_list(rows, "flag_meteo_outlier"),
+        flag_meteo_artifact=_bool_list(rows, "flag_meteo_artifact"),
+        flag_inv_missing=_bool_list(rows, "flag_inv_missing"),
+        inv_coverage=[None if not np.isfinite(v) else float(v) for v in inv_coverage],
+        source_oper=src_oper,
+        source_meteo=src_meteo,
     )
+    rs = residuals.get("series") or {}
+    pac_model = _float_array([{"x": v} for v in rs.get("pac_expected_w", [])], "x")
+    mismatch = _float_array([{"x": v} for v in rs.get("p_ac_residual_rel", [])], "x")
+    g_used = _float_array([{"x": v} for v in rs.get("g_poa_used", [])], "x")
+    tcell = _float_array([{"x": v} for v in rs.get("tcell_c", [])], "x")
+    p_dc_residual_rel = rs.get("p_dc_residual_rel", [])
+    v_dc_residual_rel = rs.get("v_dc_residual_rel", [])
+    i_dc_residual_rel = rs.get("i_dc_residual_rel", [])
+    channel_confidence = rs.get("channel_confidence", {})
 
-    g_used = np.where(np.isfinite(gti), gti, ghi)
-
-    valid_model = (
-        np.isfinite(pac_real)
-        & np.isfinite(pac_model)
-        & np.isfinite(mismatch)
-    ).tolist()
+    valid_model = [bool(v) for v in (rs.get("valid_model") or (np.isfinite(pac_real) & np.isfinite(pac_model) & np.isfinite(mismatch)).tolist())]
 
     det = detect_anomalies(
         mismatch_rel=[None if not np.isfinite(v) else float(v) for v in mismatch],
@@ -381,6 +400,11 @@ def run_detection_pipeline(
         g_poa_wm2=[None if not np.isfinite(v) else float(v) for v in g_used],
         v_dc_v=[None if not np.isfinite(v) else float(v) for v in vdc],
         i_dc_a=[None if not np.isfinite(v) else float(v) for v in idc],
+        p_ac_residual_rel=list(rs.get("p_ac_residual_rel") or [None] * len(rows)),
+        p_dc_residual_rel=list(p_dc_residual_rel or [None] * len(rows)),
+        v_dc_residual_rel=list(v_dc_residual_rel or [None] * len(rows)),
+        i_dc_residual_rel=list(i_dc_residual_rel or [None] * len(rows)),
+        residual_channel_confidence=channel_confidence if isinstance(channel_confidence, dict) else None,
         v_ac_v=[None if not np.isfinite(v) else float(v) for v in vac],
         i_ac_a=[None if not np.isfinite(v) else float(v) for v in iac],
         freq_hz=[None if not np.isfinite(v) else float(v) for v in freq],
@@ -465,7 +489,7 @@ def run_detection_pipeline(
                 stable_sky=bool(det["stable_sky"][i]),
                 detector_version=detector_version,
                 g_poa=None if not np.isfinite(g_used[i]) else float(g_used[i]),
-                tcell_c=None,
+                tcell_c=None if not np.isfinite(tcell[i]) else float(tcell[i]),
                 pac_real_w=pac_real_i,
                 pac_model_w=pac_model_i,
                 mismatch_rel=mismatch_i,

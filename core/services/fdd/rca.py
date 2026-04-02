@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 
@@ -17,28 +17,47 @@ CODE_CRIT2 = 4
 class RCAParams:
     sun_available_gpoa_wm2: float = 150.0
     expected_power_min_w: float = 150.0
-
     zero_abs_w: float = 100.0
     zero_rel_model: float = 0.05
-
     degraded_rel: float = 0.25
     severe_rel: float = 0.50
-
     low_i_ratio_warn: float = 0.35
     low_i_ratio_crit: float = 0.15
     low_v_ratio_warn: float = 0.80
     low_v_ratio_crit: float = 0.60
-
     vac_low_ratio: float = 0.90
     vac_high_ratio: float = 1.10
     vac_abs_margin_v: float = 10.0
-
     freq_abs_tol_hz: float = 1.0
-
     clip_margin: float = 0.98
     clip_model_margin: float = 1.02
-
     min_baseline_points: int = 24
+    dc_open_current_rel: float = -0.85
+    dc_open_voltage_rel_low: float = -0.20
+    dc_short_voltage_rel: float = -0.45
+    dc_short_power_rel: float = -0.70
+    dc_shading_current_rel: float = -0.25
+    dc_shading_voltage_abs_rel: float = 0.18
+    dc_degradation_current_rel: float = -0.12
+    dc_degradation_power_rel: float = -0.15
+    dc_mppt_voltage_rel: float = -0.18
+
+
+_DC_ANOM_LABELS = {
+    "dc_shading_soiling_probable",
+    "dc_degradation_probable",
+    "dc_mppt_tracking_anomaly_probable",
+    "dc_partial_open_circuit_probable",
+    "dc_side_partial_loss_probable",
+    "dc_side_voltage_anomaly_probable",
+    "partial_generation_loss_probable",
+    "persistent_underperformance",
+}
+
+_DC_CRIT_LABELS = {
+    "dc_open_circuit_probable",
+    "dc_short_circuit_probable",
+}
 
 
 def _to_np(xs: List[Optional[float]]) -> np.ndarray:
@@ -62,7 +81,9 @@ def _encode_label(label: str) -> int:
         return CODE_CRIT
     if label in {"inverter_off_under_sun", "unknown_shutdown_with_sun"}:
         return CODE_CRIT
-    if label in {"dc_side_partial_loss_probable", "partial_generation_loss_probable", "persistent_underperformance"}:
+    if label in _DC_CRIT_LABELS:
+        return CODE_CRIT
+    if label in _DC_ANOM_LABELS:
         return CODE_ANOM
     return CODE_CRIT2 if label not in {"ok", "invalid"} else CODE_OK
 
@@ -103,6 +124,11 @@ def diagnose_rca_series(
     flag_meteo_missing: Optional[List[bool]] = None,
     inv_coverage: Optional[List[Optional[float]]] = None,
     pac_cap_w: Optional[float] = None,
+    p_ac_residual_rel: Optional[List[Optional[float]]] = None,
+    p_dc_residual_rel: Optional[List[Optional[float]]] = None,
+    v_dc_residual_rel: Optional[List[Optional[float]]] = None,
+    i_dc_residual_rel: Optional[List[Optional[float]]] = None,
+    residual_channel_confidence: Optional[Dict[str, List[Optional[float]]]] = None,
     params: Optional[RCAParams] = None,
 ) -> Dict[str, Any]:
     p = params or RCAParams()
@@ -125,6 +151,16 @@ def diagnose_rca_series(
     asev = _to_np(alarm_sev or [None] * len(vp))
     pac = _to_np(pac_real_w or [None] * len(vp))
     pm = _to_np(pac_model_w or [None] * len(vp))
+
+    pac_res = _to_np(p_ac_residual_rel or mismatch_rel)
+    pdc_res = _to_np(p_dc_residual_rel or [None] * len(vp))
+    vdc_res = _to_np(v_dc_residual_rel or [None] * len(vp))
+    idc_res = _to_np(i_dc_residual_rel or [None] * len(vp))
+
+    ch_conf = residual_channel_confidence or {}
+    pac_conf = _to_np(ch_conf.get("p_ac") or [None] * len(vp))
+    vdc_conf = _to_np(ch_conf.get("v_dc") or [None] * len(vp))
+    idc_conf = _to_np(ch_conf.get("i_dc") or [None] * len(vp))
 
     inv_miss = np.asarray(flag_inv_missing, dtype=bool) if flag_inv_missing is not None else np.zeros_like(an)
     met_miss = np.asarray(flag_meteo_missing, dtype=bool) if flag_meteo_missing is not None else np.zeros_like(an)
@@ -163,6 +199,10 @@ def diagnose_rca_series(
 
         pac_i = float(pac[i]) if np.isfinite(pac[i]) else np.nan
         pm_i = float(pm[i]) if np.isfinite(pm[i]) else np.nan
+        pac_res_i = float(pac_res[i]) if np.isfinite(pac_res[i]) else np.nan
+        pdc_res_i = float(pdc_res[i]) if np.isfinite(pdc_res[i]) else np.nan
+        vdc_res_i = float(vdc_res[i]) if np.isfinite(vdc_res[i]) else np.nan
+        idc_res_i = float(idc_res[i]) if np.isfinite(idc_res[i]) else np.nan
 
         zero_thr = max(
             float(p.zero_abs_w),
@@ -199,9 +239,19 @@ def diagnose_rca_series(
             "vdc_v": _safe_round(vdc[i]),
             "idc_a": _safe_round(idc[i]),
             "vac_v": _safe_round(vac[i]),
+            "iac_a": _safe_round(iac[i]),
             "freq_hz": _safe_round(freq[i]),
             "alarm_code": int(acode[i]) if np.isfinite(acode[i]) else None,
             "alarm_sev": int(asev[i]) if np.isfinite(asev[i]) else None,
+            "p_ac_residual_rel": _safe_round(pac_res_i),
+            "p_dc_residual_rel": _safe_round(pdc_res_i),
+            "v_dc_residual_rel": _safe_round(vdc_res_i),
+            "i_dc_residual_rel": _safe_round(idc_res_i),
+            "channel_confidence": {
+                "p_ac": _safe_round(pac_conf[i]),
+                "v_dc": _safe_round(vdc_conf[i]),
+                "i_dc": _safe_round(idc_conf[i]),
+            },
         }
 
         if (inv_miss[i] or met_miss[i] or (not cov_ok[i])):
@@ -255,6 +305,18 @@ def diagnose_rca_series(
             label = "ok"
             conf = 0.25
 
+            dc_open = bool(np.isfinite(idc_res_i) and idc_res_i <= float(p.dc_open_current_rel) and ((not np.isfinite(vdc_res_i)) or vdc_res_i >= float(p.dc_open_voltage_rel_low)))
+            dc_short = bool(np.isfinite(vdc_res_i) and vdc_res_i <= float(p.dc_short_voltage_rel) and np.isfinite(pac_res_i) and pac_res_i <= float(p.dc_short_power_rel))
+            dc_shading = bool(np.isfinite(idc_res_i) and idc_res_i <= float(p.dc_shading_current_rel) and ((not np.isfinite(vdc_res_i)) or abs(vdc_res_i) <= float(p.dc_shading_voltage_abs_rel)))
+            dc_deg = bool(np.isfinite(idc_res_i) and idc_res_i <= float(p.dc_degradation_current_rel) and np.isfinite(pac_res_i) and pac_res_i <= float(p.dc_degradation_power_rel))
+            dc_mppt = bool(np.isfinite(vdc_res_i) and vdc_res_i <= float(p.dc_mppt_voltage_rel) and ((not np.isfinite(idc_res_i)) or idc_res_i > float(p.dc_shading_current_rel)))
+
+            ev["dc_open_signature"] = dc_open
+            ev["dc_short_signature"] = dc_short
+            ev["dc_shading_signature"] = dc_shading
+            ev["dc_degradation_signature"] = dc_deg
+            ev["dc_mppt_signature"] = dc_mppt
+
             if clip:
                 domain = "operational"
                 label = "curtailment_clipping"
@@ -272,6 +334,16 @@ def diagnose_rca_series(
                     label = "grid_underfrequency_trip"
                 conf = _confidence_from_components(0.45, 0.35, 0.10 if sun_available else 0.0, 0.05 if (zero_inj or severe_degraded) else 0.0, 0.05 if np.isfinite(acode[i]) else 0.0)
                 ev["reason"] = "direct_grid_evidence"
+            elif sun_available and zero_inj and dc_open:
+                domain = "dc_side"
+                label = "dc_open_circuit_probable"
+                conf = _confidence_from_components(0.32, 0.18 if mq[i] else 0.0, 0.12 if np.isfinite(idc_conf[i]) and idc_conf[i] >= 0.6 else 0.04, 0.08 if tiers[i] == "A" else 0.03)
+                ev["reason"] = "zero_injection_with_open_signature"
+            elif sun_available and zero_inj and dc_short:
+                domain = "dc_side"
+                label = "dc_short_circuit_probable"
+                conf = _confidence_from_components(0.32, 0.18 if mq[i] else 0.0, 0.12 if np.isfinite(vdc_conf[i]) and vdc_conf[i] >= 0.6 else 0.04, 0.08 if tiers[i] == "A" else 0.03)
+                ev["reason"] = "zero_injection_with_short_signature"
             elif sun_available and zero_inj:
                 domain = "inverter"
                 if np.isfinite(acode[i]) or (np.isfinite(asev[i]) and float(asev[i]) >= 2.0):
@@ -282,6 +354,31 @@ def diagnose_rca_series(
                     label = "unknown_shutdown_with_sun"
                     conf = _confidence_from_components(0.20, 0.10 if tiers[i] in {"A", "B"} else 0.0, 0.10 if mq[i] else 0.0)
                     ev["reason"] = "zero_injection_no_direct_cause"
+            elif sun_available and degraded and dc_short:
+                domain = "dc_side"
+                label = "dc_short_circuit_probable"
+                conf = _confidence_from_components(0.28, 0.16 if mq[i] else 0.0, 0.12 if np.isfinite(vdc_conf[i]) and vdc_conf[i] >= 0.6 else 0.05, 0.06 if tiers[i] in {"A", "B"} else 0.02)
+                ev["reason"] = "vdc_residual_strong_negative"
+            elif sun_available and degraded and dc_open and severe_degraded:
+                domain = "dc_side"
+                label = "dc_partial_open_circuit_probable"
+                conf = _confidence_from_components(0.26, 0.16 if mq[i] else 0.0, 0.12 if np.isfinite(idc_conf[i]) and idc_conf[i] >= 0.6 else 0.05, 0.06 if tiers[i] in {"A", "B"} else 0.02)
+                ev["reason"] = "idc_residual_extremely_negative"
+            elif sun_available and degraded and dc_shading:
+                domain = "dc_side"
+                label = "dc_shading_soiling_probable"
+                conf = _confidence_from_components(0.24, 0.14 if mq[i] else 0.0, 0.08 if np.isfinite(idc_conf[i]) and idc_conf[i] >= 0.6 else 0.03, 0.06 if tiers[i] in {"A", "B"} else 0.02)
+                ev["reason"] = "idc_drop_with_vdc_preserved"
+            elif sun_available and degraded and dc_deg:
+                domain = "dc_side"
+                label = "dc_degradation_probable"
+                conf = _confidence_from_components(0.20, 0.12 if mq[i] else 0.0, 0.08 if np.isfinite(idc_conf[i]) and idc_conf[i] >= 0.6 else 0.03, 0.05 if bool(fp[i]) else 0.0)
+                ev["reason"] = "moderate_persistent_current_loss"
+            elif sun_available and degraded and dc_mppt:
+                domain = "dc_side"
+                label = "dc_mppt_tracking_anomaly_probable"
+                conf = _confidence_from_components(0.22, 0.10 if mq[i] else 0.0, 0.10 if np.isfinite(vdc_conf[i]) and vdc_conf[i] >= 0.6 else 0.03, 0.05 if bool(fp[i]) else 0.0)
+                ev["reason"] = "vdc_drop_without_matching_idc_drop"
             elif sun_available and degraded:
                 if tiers[i] == "A" and bool(fp[i]) and idc_ratio is not None and idc_ratio <= float(p.low_i_ratio_warn):
                     domain = "dc_side"
