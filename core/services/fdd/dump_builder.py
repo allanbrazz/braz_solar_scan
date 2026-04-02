@@ -12,6 +12,13 @@ def _at(seq: Any, i: int, default: Any = None) -> Any:
         return default
 
 
+def _pick_first_not_none(*values: Any) -> Any:
+    for v in values:
+        if v is not None:
+            return v
+    return None
+
+
 def build_runtime_dump(
     *,
     tz: ZoneInfo,
@@ -114,26 +121,26 @@ def build_runtime_dump(
                 "rca_label": _at(pipeline.get("labels"), i),
             },
             "chosen_total": {
-                "p_ac_w": agg["p_ac_w"][i],
+                "p_ac_w": _pick_first_not_none(agg["p_ac_w"][i], agg["p_ac_mppt_sum_w"][i], agg["p_ac_agg_w"][i], (any_row.get("p_ac_w") if any_row is not None else None)),
                 "p_dc_w": agg["p_dc_w"][i],
                 "p_ac_mppt_sum_w": agg["p_ac_mppt_sum_w"][i],
                 "p_ac_agg_w": agg["p_ac_agg_w"][i],
                 "v_dc_v": agg["v_dc_v"][i],
                 "i_dc_a": agg["i_dc_a"][i],
-                "v_ac_v": agg["v_ac_v"][i],
-                "i_ac_a": agg["i_ac_a"][i],
-                "freq_hz": (agg["freq_hz"][i] if agg["freq_hz"][i] is not None else (any_row.get("freq_hz") if any_row is not None else None)),
+                "v_ac_v": _pick_first_not_none(agg["v_ac_v"][i], (any_row.get("v_ac_v") if any_row is not None else None)),
+                "i_ac_a": _pick_first_not_none(agg["i_ac_a"][i], (any_row.get("i_ac_a") if any_row is not None else None)),
+                "freq_hz": _pick_first_not_none(agg["freq_hz"][i], _at(pipeline.get("freq_hz"), i), (any_row.get("freq_hz") if any_row is not None else None)),
                 "inv_coverage": agg["inv_cov"][i],
                 "flag_inv_missing_all": agg["flag_inv_missing_all"][i],
                 "flag_inv_missing_partial": agg["flag_inv_missing_partial"][i],
             },
             "model": {
-                "g_poa_used": _at(model.get("g_poa_used"), i),
-                "tcell_c": _at(model.get("tcell_c"), i),
-                "p_ac_model_w": _at(model.get("pac_model_w"), i),
-                "p_dc_model_w": _at(model.get("pdc_model_w"), i),
-                "v_dc_model_v": _at(model.get("v_dc_model_v"), i),
-                "i_dc_model_a": _at(model.get("i_dc_model_a"), i),
+                "g_poa_used": _pick_first_not_none(_at(model.get("g_poa_used"), i), _at(residual_series.get("g_poa_used"), i)),
+                "tcell_c": _pick_first_not_none(_at(model.get("tcell_c"), i), _at(residual_series.get("tcell_c"), i)),
+                "p_ac_model_w": _pick_first_not_none(_at(model.get("pac_model_w"), i), _at(residual_series.get("pac_expected_w"), i)),
+                "p_dc_model_w": _pick_first_not_none(_at(model.get("pdc_model_w"), i), _at(residual_series.get("pdc_expected_w"), i)),
+                "v_dc_model_v": _pick_first_not_none(_at(model.get("v_dc_model_v"), i), _at(residual_series.get("v_dc_expected_v"), i)),
+                "i_dc_model_a": _pick_first_not_none(_at(model.get("i_dc_model_a"), i), _at(residual_series.get("i_dc_expected_a"), i)),
                 "mismatch_rel": _at(model.get("mismatch_rel"), i),
                 "valid_model": _at(model.get("valid_model"), i),
             },
@@ -177,7 +184,17 @@ def build_runtime_dump(
             "combined_event_score": _at(pipeline.get("combined_event_score"), i),
             "rca_code": _at(pipeline.get("codes"), i),
             "rca_label": _at(pipeline.get("labels"), i),
-            "p_ac_w": agg["p_ac_w"][i],
-            "freq_hz": (agg["freq_hz"][i] if agg["freq_hz"][i] is not None else (any_row.get("freq_hz") if any_row is not None else None)),
+            "code": _at(pipeline.get("codes"), i),
+            "label": _at(pipeline.get("labels"), i),
+            "p_ac_w": _pick_first_not_none(agg["p_ac_w"][i], agg["p_ac_mppt_sum_w"][i], agg["p_ac_agg_w"][i], (any_row.get("p_ac_w") if any_row is not None else None)),
+            "v_ac_v": _pick_first_not_none(agg["v_ac_v"][i], (any_row.get("v_ac_v") if any_row is not None else None)),
+            "i_ac_a": _pick_first_not_none(agg["i_ac_a"][i], (any_row.get("i_ac_a") if any_row is not None else None)),
+            "freq_hz": _pick_first_not_none(agg["freq_hz"][i], _at(pipeline.get("freq_hz"), i), (any_row.get("freq_hz") if any_row is not None else None)),
+            "p_ac_model_w": _pick_first_not_none(_at(model.get("pac_model_w"), i), _at(residual_series.get("pac_expected_w"), i)),
+            "p_dc_model_w": _pick_first_not_none(_at(model.get("pdc_model_w"), i), _at(residual_series.get("pdc_expected_w"), i)),
+            "v_dc_model_v": _pick_first_not_none(_at(model.get("v_dc_model_v"), i), _at(residual_series.get("v_dc_expected_v"), i)),
+            "i_dc_model_a": _pick_first_not_none(_at(model.get("i_dc_model_a"), i), _at(residual_series.get("i_dc_expected_a"), i)),
+            "g_poa_used": _pick_first_not_none(_at(model.get("g_poa_used"), i), _at(residual_series.get("g_poa_used"), i)),
+            "tcell_c": _pick_first_not_none(_at(model.get("tcell_c"), i), _at(residual_series.get("tcell_c"), i)),
         }
     return dump_by_tkey

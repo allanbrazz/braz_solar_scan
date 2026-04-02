@@ -24,6 +24,29 @@ from core.services.fdd_mismatch import MismatchThresholds
 from core.services.residuals.facade import compute_residual_series_from_observations
 
 
+def _pick_first_not_none(*values: Any) -> Any:
+    for v in values:
+        if v is not None:
+            return v
+    return None
+
+
+def _series_with_fallback(*series_list: List[Any]) -> List[Any]:
+    if not series_list:
+        return []
+    n = max((len(s) for s in series_list if isinstance(s, list)), default=0)
+    out: List[Any] = [None] * n
+    for i in range(n):
+        vals = []
+        for s in series_list:
+            try:
+                vals.append(s[i])
+            except Exception:
+                vals.append(None)
+        out[i] = _pick_first_not_none(*vals)
+    return out
+
+
 def parse_dashboard_params(data: Mapping[str, Any], tz_name: str) -> MismatchDashboardParams:
     try:
         tz = ZoneInfo(tz_name or "UTC")
@@ -178,6 +201,7 @@ def build_mismatch_dashboard_payload(plant: PVPlant, params: MismatchDashboardPa
     hm_minute_local = [t.hour * 60 + t.minute for t in x_local_dt]
 
     model = compute_power_model(plant, details, times_utc, agg)
+    p_ac_real_series = _series_with_fallback(agg.get("p_ac_w") or [], agg.get("p_ac_mppt_sum_w") or [], agg.get("p_ac_agg_w") or [])
     residual_out = compute_residual_series_from_observations(
         plant=plant,
         times_utc=times_utc,
@@ -186,7 +210,7 @@ def build_mismatch_dashboard_payload(plant: PVPlant, params: MismatchDashboardPa
         dni=agg["dni"],
         dhi=agg["dhi"],
         temp_air=agg["temp_air"],
-        p_ac_w=agg["p_ac_w"],
+        p_ac_w=p_ac_real_series,
         p_dc_w=agg["p_dc_w"],
         v_dc_v=agg["v_dc_v"],
         i_dc_a=agg["i_dc_a"],
@@ -212,9 +236,9 @@ def build_mismatch_dashboard_payload(plant: PVPlant, params: MismatchDashboardPa
         model["tcell_c"] = residual_series.get("tcell_c") or model["tcell_c"]
         model["pac_model_w"] = residual_series.get("pac_expected_w") or model["pac_model_w"]
         model["mismatch_rel"] = residual_series.get("p_ac_residual_rel") or model["mismatch_rel"]
-        model["pdc_model_w"] = residual_series.get("pdc_expected_w") or [None] * len(times_utc)
-        model["v_dc_model_v"] = residual_series.get("v_dc_expected_v") or [None] * len(times_utc)
-        model["i_dc_model_a"] = residual_series.get("i_dc_expected_a") or [None] * len(times_utc)
+        model["pdc_model_w"] = residual_series.get("pdc_expected_w") or model.get("pdc_model_w") or [None] * len(times_utc)
+        model["v_dc_model_v"] = residual_series.get("v_dc_expected_v") or model.get("v_dc_model_v") or [None] * len(times_utc)
+        model["i_dc_model_a"] = residual_series.get("i_dc_expected_a") or model.get("i_dc_model_a") or [None] * len(times_utc)
 
     pipeline = run_detection_and_rca(
         plant=plant,
@@ -262,6 +286,8 @@ def build_mismatch_dashboard_payload(plant: PVPlant, params: MismatchDashboardPa
 
     sev_typology, reason_typology, counts_typology = _build_typology_classes(times_utc, confidence, pipeline)
     sev_mismatch, reason_mismatch, counts_mismatch = _build_mismatch_classes(times_utc, model, pipeline, params)
+
+    freq_series = _series_with_fallback(pipeline.get("freq_hz") or [], agg.get("freq_hz") or [])
 
     if params.display_mode == "tipologia":
         sev_selected = sev_typology
@@ -329,15 +355,15 @@ def build_mismatch_dashboard_payload(plant: PVPlant, params: MismatchDashboardPa
             "flag_meteo_outlier": agg["flag_meteo_outlier"],
             "flag_meteo_artifact": agg["flag_meteo_artifact"],
             "flag_meteo_missing": agg["flag_meteo_missing"],
-            "p_ac_w": agg["p_ac_w"],
-            "p_ac_real_w": agg["p_ac_w"],
+            "p_ac_w": p_ac_real_series,
+            "p_ac_real_w": p_ac_real_series,
             "p_dc_w": agg["p_dc_w"],
             "e_ac_wh_15": agg["e_ac_wh_15"],
             "v_dc_v": agg["v_dc_v"],
             "i_dc_a": agg["i_dc_a"],
             "v_ac_v": agg["v_ac_v"],
             "i_ac_a": agg["i_ac_a"],
-            "freq_hz": agg["freq_hz"],
+            "freq_hz": freq_series,
             "inv_coverage": agg["inv_cov"],
             "flag_inv_missing": agg["flag_inv_missing_all"],
             "flag_inv_missing_all": agg["flag_inv_missing_all"],

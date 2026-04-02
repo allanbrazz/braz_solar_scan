@@ -120,6 +120,11 @@ def compute_power_model(plant: PVPlant, details: Any, times_utc: List[datetime],
 
         out_model = expected_and_mismatch(**kwargs) or {}
         pac_expected = out_model.get("pac_expected_w")
+        pdc_expected = out_model.get("pdc_expected_w")
+        vdc_expected = out_model.get("v_dc_expected_v")
+        idc_expected = out_model.get("i_dc_expected_a")
+        v_ratio_np = out_model.get("v_ratio")
+        i_ratio_np = out_model.get("i_ratio")
         mismatch = out_model.get("mismatch_rel")
         valid_model_np = out_model.get("valid")
         tcell_np = out_model.get("tcell_c")
@@ -127,6 +132,11 @@ def compute_power_model(plant: PVPlant, details: Any, times_utc: List[datetime],
             raise DashboardServiceError("power_model não retornou pac_expected_w.", status_code=500)
 
         pac_model_w = [None if (not np.isfinite(v)) else float(v) for v in np.asarray(pac_expected, dtype=float).tolist()]
+        pdc_model_w = [None] * len(times_utc) if pdc_expected is None else [None if (not np.isfinite(v)) else float(v) for v in np.asarray(pdc_expected, dtype=float).tolist()]
+        v_dc_model_v = [None] * len(times_utc) if vdc_expected is None else [None if (not np.isfinite(v)) else float(v) for v in np.asarray(vdc_expected, dtype=float).tolist()]
+        i_dc_model_a = [None] * len(times_utc) if idc_expected is None else [None if (not np.isfinite(v)) else float(v) for v in np.asarray(idc_expected, dtype=float).tolist()]
+        v_ratio = [None] * len(times_utc) if v_ratio_np is None else [None if (not np.isfinite(v)) else float(v) for v in np.asarray(v_ratio_np, dtype=float).tolist()]
+        i_ratio = [None] * len(times_utc) if i_ratio_np is None else [None if (not np.isfinite(v)) else float(v) for v in np.asarray(i_ratio_np, dtype=float).tolist()]
         if mismatch is None:
             eps = 50.0
             mm: List[Optional[float]] = []
@@ -153,6 +163,11 @@ def compute_power_model(plant: PVPlant, details: Any, times_utc: List[datetime],
         return {
             "g_poa_used": g_poa_used,
             "pac_model_w": pac_model_w,
+            "pdc_model_w": pdc_model_w,
+            "v_dc_model_v": v_dc_model_v,
+            "i_dc_model_a": i_dc_model_a,
+            "v_ratio": v_ratio,
+            "i_ratio": i_ratio,
             "mismatch_rel": mismatch_rel,
             "valid_model": valid_model,
             "tcell_c": tcell_c,

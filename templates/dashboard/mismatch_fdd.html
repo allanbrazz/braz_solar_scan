@@ -1669,18 +1669,33 @@
     return null;
   }
 
-  function renderCompareTable(tbl, dumpPoint){
+
+  function pickDumpValue(dumpPoint, fallbackPoint, payload, idx, keys){
+    const list = Array.isArray(keys) ? keys : [keys];
+    for (const k of list){
+      const parts = String(k).split('.');
+      let cur = dumpPoint;
+      for (const part of parts){ cur = cur?.[part]; }
+      if (!isNullishValue(cur)) return cur;
+      cur = fallbackPoint;
+      for (const part of parts){ cur = cur?.[part]; }
+      if (!isNullishValue(cur)) return cur;
+      if (!String(k).includes('.')) {
+        const sv = seriesAt(payload, String(k), idx);
+        if (!isNullishValue(sv)) return sv;
+      }
+    }
+    return null;
+  }
+  function renderCompareTable(tbl, dumpPoint, fallbackPoint, payload, idx){
     if (!tbl) return;
-    const model = dumpPoint?.model || {};
-    const total = dumpPoint?.chosen_total || {};
-    const residuals = dumpPoint?.residuals || {};
     const rows = [
-      ["Potência AC (W)", pickFirst(model.p_ac_model_w, residuals?.p_ac?.expected), pickFirst(total.p_ac_w, residuals?.p_ac?.measured)],
-      ["Potência DC (W)", pickFirst(model.p_dc_model_w, residuals?.p_dc?.expected), pickFirst(total.p_dc_w, residuals?.p_dc?.measured)],
-      ["Tensão DC (V)", pickFirst(model.v_dc_model_v, residuals?.v_dc?.expected), pickFirst(total.v_dc_v, residuals?.v_dc?.measured)],
-      ["Corrente DC (A)", pickFirst(model.i_dc_model_a, residuals?.i_dc?.expected), pickFirst(total.i_dc_a, residuals?.i_dc?.measured)],
-      ["GPOA usada (W/m²)", pickFirst(model.g_poa_used, dumpPoint?.meteo?.g_poa_used), null],
-      ["Tcell (°C)", model.tcell_c, null],
+      ["Potência AC (W)", pickDumpValue(dumpPoint, fallbackPoint, payload, idx, ["model.p_ac_model_w","p_ac_model_w","residuals.p_ac.expected","p_ac_model_w"]), pickDumpValue(dumpPoint, fallbackPoint, payload, idx, ["chosen_total.p_ac_w","p_ac_w","residuals.p_ac.measured","p_ac_real_w","p_ac_w"])],
+      ["Potência DC (W)", pickDumpValue(dumpPoint, fallbackPoint, payload, idx, ["model.p_dc_model_w","p_dc_model_w","residuals.p_dc.expected","p_dc_model_w"]), pickDumpValue(dumpPoint, fallbackPoint, payload, idx, ["chosen_total.p_dc_w","p_dc_w","residuals.p_dc.measured","p_dc_w"])],
+      ["Tensão DC (V)", pickDumpValue(dumpPoint, fallbackPoint, payload, idx, ["model.v_dc_model_v","v_dc_model_v","residuals.v_dc.expected","v_dc_model_v"]), pickDumpValue(dumpPoint, fallbackPoint, payload, idx, ["chosen_total.v_dc_v","v_dc_v","residuals.v_dc.measured","v_dc_v"])],
+      ["Corrente DC (A)", pickDumpValue(dumpPoint, fallbackPoint, payload, idx, ["model.i_dc_model_a","i_dc_model_a","residuals.i_dc.expected","i_dc_model_a"]), pickDumpValue(dumpPoint, fallbackPoint, payload, idx, ["chosen_total.i_dc_a","i_dc_a","residuals.i_dc.measured","i_dc_a"])],
+      ["GPOA usada (W/m²)", pickDumpValue(dumpPoint, fallbackPoint, payload, idx, ["model.g_poa_used","g_poa_used","meteo.g_poa_used","g_poa"]), null],
+      ["Tcell (°C)", pickDumpValue(dumpPoint, fallbackPoint, payload, idx, ["model.tcell_c","tcell_c"]), null],
     ];
     tbl.innerHTML = `<tr><th>Variável</th><th>Modelo</th><th>Medido</th></tr>` + rows.map(([label, m, o]) => `<tr><td class="k mono">${label}</td><td class="v mono">${fmtAny(m)}</td><td class="v mono">${fmtAny(o)}</td></tr>`).join("");
   }
@@ -1842,14 +1857,22 @@
     const modelBlock = mergeDefined(fallbackPoint?.model || {}, dumpPoint?.model || {});
     const residualBlock = mergeDefined(fallbackPoint?.residuals || {}, dumpPoint?.residuals || {});
     // flat fallbacks adicionais
-    if (detBlock.ewma_z == null) detBlock.ewma_z = pickFirst(dumpPoint?.ewma_z, fallbackPoint?.ewma_z);
-    if (detBlock.cusum_score == null) detBlock.cusum_score = pickFirst(dumpPoint?.cusum_score, fallbackPoint?.cusum_score);
-    if (detBlock.residual_event_score == null) detBlock.residual_event_score = pickFirst(dumpPoint?.residual_event_score, fallbackPoint?.residual_event_score);
-    if (detBlock.combined_event_score == null) detBlock.combined_event_score = pickFirst(dumpPoint?.combined_event_score, fallbackPoint?.combined_event_score);
-    if (detBlock.rca_code == null) detBlock.rca_code = pickFirst(dumpPoint?.rca_code, fallbackPoint?.rca_code);
-    if (detBlock.rca_label == null) detBlock.rca_label = pickFirst(dumpPoint?.rca_label, fallbackPoint?.rca_label);
-    if (acBlock.p_ac_w == null) acBlock.p_ac_w = pickFirst(dumpPoint?.p_ac_w, fallbackPoint?.p_ac_w);
-    if (acBlock.freq_hz == null) acBlock.freq_hz = pickFirst(dumpPoint?.freq_hz, fallbackPoint?.freq_hz);
+    detBlock.ewma_z = pickDumpValue(dumpPoint, fallbackPoint, payload, idx, ["detection.ewma_z","ewma_z"]);
+    detBlock.cusum_score = pickDumpValue(dumpPoint, fallbackPoint, payload, idx, ["detection.cusum_score","cusum_score"]);
+    detBlock.residual_event_score = pickDumpValue(dumpPoint, fallbackPoint, payload, idx, ["detection.residual_event_score","residual_event_score"]);
+    detBlock.combined_event_score = pickDumpValue(dumpPoint, fallbackPoint, payload, idx, ["detection.combined_event_score","combined_event_score"]);
+    detBlock.rca_code = pickDumpValue(dumpPoint, fallbackPoint, payload, idx, ["detection.rca_code","rca_code","code"]);
+    detBlock.rca_label = pickDumpValue(dumpPoint, fallbackPoint, payload, idx, ["detection.rca_label","rca_label","label"]);
+    acBlock.p_ac_w = pickDumpValue(dumpPoint, fallbackPoint, payload, idx, ["chosen_total.p_ac_w","p_ac_w","p_ac_real_w","p_ac_w","p_ac_mppt_sum_w","p_ac_agg_w"]);
+    acBlock.v_ac_v = pickDumpValue(dumpPoint, fallbackPoint, payload, idx, ["chosen_total.v_ac_v","v_ac_v"]);
+    acBlock.i_ac_a = pickDumpValue(dumpPoint, fallbackPoint, payload, idx, ["chosen_total.i_ac_a","i_ac_a"]);
+    acBlock.freq_hz = pickDumpValue(dumpPoint, fallbackPoint, payload, idx, ["chosen_total.freq_hz","freq_hz"]);
+    modelBlock.v_dc_model_v = pickDumpValue(dumpPoint, fallbackPoint, payload, idx, ["model.v_dc_model_v","v_dc_model_v","residuals.v_dc.expected","v_dc_model_v"]);
+    modelBlock.i_dc_model_a = pickDumpValue(dumpPoint, fallbackPoint, payload, idx, ["model.i_dc_model_a","i_dc_model_a","residuals.i_dc.expected","i_dc_model_a"]);
+    modelBlock.p_ac_model_w = pickDumpValue(dumpPoint, fallbackPoint, payload, idx, ["model.p_ac_model_w","p_ac_model_w","residuals.p_ac.expected","p_ac_model_w"]);
+    modelBlock.p_dc_model_w = pickDumpValue(dumpPoint, fallbackPoint, payload, idx, ["model.p_dc_model_w","p_dc_model_w","residuals.p_dc.expected","p_dc_model_w"]);
+    modelBlock.g_poa_used = pickDumpValue(dumpPoint, fallbackPoint, payload, idx, ["model.g_poa_used","g_poa_used","meteo.g_poa_used","g_poa"]);
+    modelBlock.tcell_c = pickDumpValue(dumpPoint, fallbackPoint, payload, idx, ["model.tcell_c","tcell_c"]);
 
     const raw = {};
     if (acBlock && typeof acBlock === 'object') Object.assign(raw, acBlock);
@@ -1868,7 +1891,7 @@
     if (tblConf) tblConf.innerHTML = renderKvRows(confBlock, ['data_reliability_score','data_reliability_level','detection_confidence_score','detection_confidence_level','diagnosis_confidence_score','diagnosis_confidence_level']);
     if (tblDet) tblDet.innerHTML = renderKvRows(detBlock, ['valid_period','stable_sky','anomaly','anomaly_power','residual_trigger','residual_event_score','combined_event_score','ewma_z','cusum_score','irradiance_tier','rca_code','rca_label']);
     if (tblAC) tblAC.innerHTML = renderKvRows(acBlock, ['p_ac_w','p_ac_mppt_sum_w','p_ac_agg_w','v_ac_v','i_ac_a','freq_hz','inv_coverage','flag_inv_missing_all','flag_inv_missing_partial']);
-    renderCompareTable(tblCompare, { ...dumpPoint, chosen_total: acBlock, meteo: meteoBlock, model: modelBlock, residuals: residualBlock });
+    renderCompareTable(tblCompare, { ...dumpPoint, chosen_total: acBlock, meteo: meteoBlock, model: modelBlock, residuals: residualBlock }, fallbackPoint, payload, idx);
 
     if (tblAll){
       const baseItems = Object.entries(raw).map(([k,v]) => ({ k, v, label: prettyKeyCompact(k) }));
