@@ -25,6 +25,169 @@ from core.services.fdd_mismatch import MismatchThresholds
 from core.services.residuals.facade import compute_residual_series_from_observations
 
 
+def get_mismatch_backend_param_defaults(gpoa_gate: float = 180.0, pmin_w: float = 0.0) -> Dict[str, Any]:
+    try:
+        gpoa_gate = float(gpoa_gate)
+    except Exception:
+        gpoa_gate = 180.0
+    try:
+        pmin_w = float(pmin_w)
+    except Exception:
+        pmin_w = 0.0
+
+    return {
+        "warn_abs": 0.40,
+        "fault_abs": 0.90,
+        "gpoa_gate": gpoa_gate,
+        "pmin_w": pmin_w,
+        "meteo_pos_abs": 0.25,
+        "shading_std_abs": 0.22,
+        "shading_window_points": 6,
+        "max_gap_minutes": 30.0,
+        "gpoa_plot_min": max(700.0, gpoa_gate),
+        "pmodel_plot_min": max(200.0, pmin_w),
+        "mismatch_clip_abs": 2.0,
+        "sun_available_gpoa_wm2": max(180.0, gpoa_gate),
+        "coarse_diag_gpoa_wm2": max(320.0, gpoa_gate),
+        "fine_diag_gpoa_wm2": max(500.0, gpoa_gate),
+        "stable_cv_max": 0.08,
+        "stable_ramp_max_wm2": 120.0,
+        "stable_window_points": 6,
+        "ewma_lambda": 0.20,
+        "ewma_L": 3.0,
+        "cusum_k": 0.50,
+        "cusum_h": 8.0,
+        "min_baseline_points": 24,
+        "inv_cov_min": 0.30,
+        "zero_abs_w": 15.0,
+        "zero_rel_model": 0.02,
+        "degraded_rel": 0.25,
+        "severe_rel": 0.65,
+        "low_i_ratio_warn": 0.35,
+        "low_i_ratio_crit": 0.15,
+        "low_v_ratio_warn": 0.80,
+        "low_v_ratio_crit": 0.60,
+        "vac_low_ratio": 0.90,
+        "vac_high_ratio": 1.10,
+        "vac_abs_margin_v": 10.0,
+        "freq_abs_tol_hz": 1.0,
+        "clip_margin": 0.98,
+        "clip_model_margin": 1.02,
+        "rca_min_baseline_points": 24,
+    }
+
+
+def _format_backend_param_value(value: Any, kind: str = "float") -> str:
+    try:
+        if kind == "int":
+            return str(int(float(value)))
+        n = float(value)
+        if abs(n - round(n)) < 1e-9:
+            return str(int(round(n)))
+        return (f"{n:.6f}").rstrip("0").rstrip(".")
+    except Exception:
+        return str(value)
+
+
+def get_mismatch_advanced_ui_sections(gpoa_gate: float = 180.0, pmin_w: float = 0.0) -> List[Dict[str, Any]]:
+    defaults = get_mismatch_backend_param_defaults(gpoa_gate=gpoa_gate, pmin_w=pmin_w)
+    derived_keys = {
+        "gpoa_plot_min",
+        "pmodel_plot_min",
+        "sun_available_gpoa_wm2",
+        "coarse_diag_gpoa_wm2",
+        "fine_diag_gpoa_wm2",
+    }
+    section_specs = [
+        {
+            "id": "model_baseline",
+            "title": "Modelo, mismatch e persistência",
+            "description": "Parâmetros físicos e de pós-processamento usados para validar o mismatch e sintetizar a série canônica.",
+            "fields": [
+                {"key": "meteo_pos_abs", "label": "Mismatch positivo meteo", "kind": "float", "step": "0.01", "min": 0, "help": "Limiar para tratar mismatch positivo como provável viés meteorológico."},
+                {"key": "shading_std_abs", "label": "Desvio p/ sombreamento", "kind": "float", "step": "0.01", "min": 0, "help": "Proxy auxiliar para classificar variabilidade típica de sombreamento/instabilidade."},
+                {"key": "shading_window_points", "label": "Janela sombreamento (pts)", "kind": "int", "step": "1", "min": 1, "help": "Janela discreta usada em heurísticas locais de persistência/variabilidade."},
+                {"key": "max_gap_minutes", "label": "Gap máximo entre eventos (min)", "kind": "float", "step": "1", "min": 0, "help": "Une blocos adjacentes do mesmo evento quando o intervalo entre eles é pequeno."},
+                {"key": "gpoa_plot_min", "label": "GPOA mínimo para plots (W/m²)", "kind": "float", "step": "1", "min": 0, "help": "Gate visual para curvas/KPIs; deriva do GPOA gate atual.", "derived": True},
+                {"key": "pmodel_plot_min", "label": "Pmodelo mínimo para plots (W)", "kind": "float", "step": "1", "min": 0, "help": "Ponto mínimo de potência esperada para visualização/mascaramento; deriva da potência mínima atual.", "derived": True},
+                {"key": "mismatch_clip_abs", "label": "Clip |mismatch|", "kind": "float", "step": "0.1", "min": 0.1, "help": "Limite absoluto usado para clipar mismatch em gráficos e diagnósticos auxiliares."},
+            ],
+        },
+        {
+            "id": "detector_gate",
+            "title": "Detecção — gating, estabilidade e baseline",
+            "description": "Parâmetros do detector estatístico antes da etapa EWMA+CUSUM. Os campos marcados como automáticos acompanham o GPOA gate enquanto não forem editados manualmente.",
+            "fields": [
+                {"key": "sun_available_gpoa_wm2", "label": "Sol disponível (W/m²)", "kind": "float", "step": "1", "min": 0, "help": "Define quando há irradiância suficiente para raciocínio de geração/zero injeção.", "derived": True},
+                {"key": "coarse_diag_gpoa_wm2", "label": "Diag. coarse (W/m²)", "kind": "float", "step": "1", "min": 0, "help": "Gate radiométrico para diagnóstico grosseiro.", "derived": True},
+                {"key": "fine_diag_gpoa_wm2", "label": "Diag. fino (W/m²)", "kind": "float", "step": "1", "min": 0, "help": "Gate radiométrico para diagnóstico fino e maior confiança.", "derived": True},
+                {"key": "stable_cv_max", "label": "CV máximo estável", "kind": "float", "step": "0.01", "min": 0, "help": "Máximo coeficiente de variação permitido para classificar o céu como estável."},
+                {"key": "stable_ramp_max_wm2", "label": "Rampa estável máx. (W/m²)", "kind": "float", "step": "1", "min": 0, "help": "Máxima rampa de irradiância para considerar um trecho estável."},
+                {"key": "stable_window_points", "label": "Janela estável (pts)", "kind": "int", "step": "1", "min": 1, "help": "Número de pontos usado no cálculo de estabilidade do céu."},
+                {"key": "min_baseline_points", "label": "Baseline mínimo (pts)", "kind": "int", "step": "1", "min": 1, "help": "Quantidade mínima de pontos válidos para estimar baseline/contextual sigma."},
+                {"key": "inv_cov_min", "label": "Cobertura mín. inversor", "kind": "float", "step": "0.01", "min": 0, "max": 1, "help": "Cobertura mínima de dados operativos do inversor para liberar a detecção."},
+            ],
+        },
+        {
+            "id": "ewma_cusum",
+            "title": "Detecção — EWMA + CUSUM",
+            "description": "Sensibilidade do detector estatístico aplicado ao sinal de detecção canônico multicanal.",
+            "fields": [
+                {"key": "ewma_lambda", "label": "EWMA λ", "kind": "float", "step": "0.01", "min": 0.01, "max": 1, "help": "Fator de suavização do EWMA; valores maiores reagem mais rápido."},
+                {"key": "ewma_L", "label": "EWMA L", "kind": "float", "step": "0.1", "min": 0.1, "help": "Largura do envelope de controle do EWMA."},
+                {"key": "cusum_k", "label": "CUSUM k", "kind": "float", "step": "0.01", "min": 0.01, "help": "Drift de referência do CUSUM; controla sensibilidade a pequenas mudanças."},
+                {"key": "cusum_h", "label": "CUSUM h", "kind": "float", "step": "0.1", "min": 0.1, "help": "Limiar acumulado do CUSUM para disparo de anomalia."},
+            ],
+        },
+        {
+            "id": "rca",
+            "title": "Diagnóstico explicável (RCA)",
+            "description": "Limiarizações físico-estatísticas para classificar o tipo provável de falha após a detecção.",
+            "fields": [
+                {"key": "zero_abs_w", "label": "Zero injeção abs. (W)", "kind": "float", "step": "1", "min": 0, "help": "Potência absoluta abaixo da qual o sistema é tratado como sem injeção."},
+                {"key": "zero_rel_model", "label": "Zero injeção rel. modelo", "kind": "float", "step": "0.01", "min": 0, "help": "Relação P_real/P_model abaixo da qual há evidência de zero injeção."},
+                {"key": "degraded_rel", "label": "Perda moderada rel.", "kind": "float", "step": "0.01", "min": 0, "help": "Mismatch relativo mínimo para classificar perda moderada/degradação."},
+                {"key": "severe_rel", "label": "Perda severa rel.", "kind": "float", "step": "0.01", "min": 0, "help": "Mismatch relativo mínimo para classificar perda severa."},
+                {"key": "low_i_ratio_warn", "label": "Idc baixo warn", "kind": "float", "step": "0.01", "min": 0, "max": 1, "help": "Razão Idc_med/Idc_exp abaixo da qual há alerta de corrente baixa."},
+                {"key": "low_i_ratio_crit", "label": "Idc baixo crítico", "kind": "float", "step": "0.01", "min": 0, "max": 1, "help": "Razão Idc_med/Idc_exp abaixo da qual há crítica de corrente baixa."},
+                {"key": "low_v_ratio_warn", "label": "Vdc baixo warn", "kind": "float", "step": "0.01", "min": 0, "max": 2, "help": "Razão Vdc_med/Vdc_exp abaixo da qual há alerta de tensão baixa."},
+                {"key": "low_v_ratio_crit", "label": "Vdc baixo crítico", "kind": "float", "step": "0.01", "min": 0, "max": 2, "help": "Razão Vdc_med/Vdc_exp abaixo da qual há crítica de tensão baixa."},
+                {"key": "vac_low_ratio", "label": "Vac baixo rel.", "kind": "float", "step": "0.01", "min": 0, "max": 2, "help": "Razão Vac/Vnom usada para suspeita de subtensão."},
+                {"key": "vac_high_ratio", "label": "Vac alto rel.", "kind": "float", "step": "0.01", "min": 0, "max": 2, "help": "Razão Vac/Vnom usada para suspeita de sobretensão."},
+                {"key": "vac_abs_margin_v", "label": "Margem abs. Vac (V)", "kind": "float", "step": "1", "min": 0, "help": "Margem absoluta complementar para evidência direta de rede em tensão."},
+                {"key": "freq_abs_tol_hz", "label": "Tolerância freq. (Hz)", "kind": "float", "step": "0.1", "min": 0, "help": "Margem absoluta para considerar desvio relevante de frequência."},
+                {"key": "clip_margin", "label": "Margem clipping real", "kind": "float", "step": "0.01", "min": 0, "max": 2, "help": "Fração do limite do inversor para reconhecer clipping medido."},
+                {"key": "clip_model_margin", "label": "Margem clipping modelo", "kind": "float", "step": "0.01", "min": 0, "max": 2, "help": "Fração do limite do inversor para reconhecer clipping previsto pelo modelo."},
+                {"key": "rca_min_baseline_points", "label": "Baseline RCA mín. (pts)", "kind": "int", "step": "1", "min": 1, "help": "Quantidade mínima de pontos válidos requerida por algumas heurísticas de RCA."},
+            ],
+        },
+    ]
+
+    sections: List[Dict[str, Any]] = []
+    for section in section_specs:
+        sec = {
+            "id": section["id"],
+            "title": section["title"],
+            "description": section["description"],
+            "fields": [],
+        }
+        for field in section["fields"]:
+            key = field["key"]
+            value = defaults.get(key)
+            kind = str(field.get("kind") or "float")
+            formatted = _format_backend_param_value(value, kind=kind)
+            sec["fields"].append({
+                **field,
+                "value": "",
+                "default": value,
+                "default_display": formatted,
+                "placeholder": f"Automático: {formatted}",
+                "auto_derived": bool(field.get("derived") or key in derived_keys),
+            })
+        sections.append(sec)
+    return sections
+
+
 def _pick_first_not_none(*values: Any) -> Any:
     for v in values:
         if v is not None:
@@ -253,17 +416,19 @@ def parse_dashboard_params(data: Mapping[str, Any], tz_name: str) -> MismatchDas
         except Exception:
             return int(default)
 
-    gpoa_gate = _gf("gpoa_gate", _gf("gpoa_min", 50.0))
+    backend_default_root = get_mismatch_backend_param_defaults()
+    gpoa_gate = _gf("gpoa_gate", _gf("gpoa_min", float(backend_default_root["gpoa_gate"])))
     pmin_w = _gf("pmin_w", 0.0)
+    backend_defaults = get_mismatch_backend_param_defaults(gpoa_gate=gpoa_gate, pmin_w=pmin_w)
     thr = MismatchThresholds(
         gpoa_gate_wm2=gpoa_gate,
-        warn_abs=_gf("warn_abs", 0.35),
-        fault_abs=_gf("fault_abs", 0.90),
-        meteo_pos_abs=_gf("meteo_pos_abs", 0.25),
-        shading_std_abs=_gf("shading_std_abs", 0.22),
-        shading_window_points=_gi("shading_window_points", 6),
+        warn_abs=_gf("warn_abs", backend_defaults["warn_abs"]),
+        fault_abs=_gf("fault_abs", backend_defaults["fault_abs"]),
+        meteo_pos_abs=_gf("meteo_pos_abs", backend_defaults["meteo_pos_abs"]),
+        shading_std_abs=_gf("shading_std_abs", backend_defaults["shading_std_abs"]),
+        shading_window_points=_gi("shading_window_points", int(backend_defaults["shading_window_points"])),
         dt_minutes=15.0,
-        max_gap_minutes=_gf("max_gap_minutes", 30.0),
+        max_gap_minutes=_gf("max_gap_minutes", backend_defaults["max_gap_minutes"]),
     )
 
     display_mode = str(data.get("display_mode") or "mismatch").strip().lower()
@@ -285,9 +450,9 @@ def parse_dashboard_params(data: Mapping[str, Any], tz_name: str) -> MismatchDas
         thr=thr,
         use_legacy=(str(data.get("legacy") or data.get("use_legacy") or "").strip().lower() in ("1", "true", "yes", "on")),
         persist=(str(data.get("persist") or data.get("save") or "").strip().lower() in ("1", "true", "yes", "on")),
-        gpoa_plot_min=_gf("gpoa_plot_min", max(700.0, float(gpoa_gate))),
-        pmodel_plot_min=_gf("pmodel_plot_min", max(200.0, float(pmin_w))),
-        mismatch_clip_abs=_gf("mismatch_clip_abs", 2.0),
+        gpoa_plot_min=_gf("gpoa_plot_min", backend_defaults["gpoa_plot_min"]),
+        pmodel_plot_min=_gf("pmodel_plot_min", backend_defaults["pmodel_plot_min"]),
+        mismatch_clip_abs=_gf("mismatch_clip_abs", backend_defaults["mismatch_clip_abs"]),
         display_mode=display_mode,
     )
 

@@ -19,7 +19,12 @@ from django.contrib.auth.decorators import login_required
 
 from core.models import PVPlant
 from core.services.fdd.dashboard_common import MISMATCH_VERSION_SUMMARY, DashboardServiceError
-from core.services.fdd.dashboard_runtime import build_mismatch_dashboard_payload, parse_dashboard_params
+from core.services.fdd.dashboard_runtime import (
+    build_mismatch_dashboard_payload,
+    get_mismatch_advanced_ui_sections,
+    get_mismatch_backend_param_defaults,
+    parse_dashboard_params,
+)
 
 try:
     from core.services.fdd.report_pdf import build_mismatch_pdf_report  # type: ignore
@@ -28,6 +33,56 @@ except Exception:
 
 logger = logging.getLogger(__name__)
 
+
+
+def _request_float(data: Any, *keys: str, default: float) -> float:
+    for key in keys:
+        raw = data.get(key)
+        if raw in (None, ""):
+            continue
+        try:
+            return float(str(raw).replace(",", "."))
+        except Exception:
+            continue
+    return float(default)
+
+
+def _request_text(data: Any, *keys: str) -> str:
+    for key in keys:
+        raw = data.get(key)
+        if raw is None:
+            continue
+        txt = str(raw).strip()
+        if txt != "":
+            return txt
+    return ""
+
+
+def _format_default_text(value: Any) -> str:
+    try:
+        n = float(value)
+        if abs(n - round(n)) < 1e-9:
+            return str(int(round(n)))
+        return (f"{n:.6f}").rstrip("0").rstrip(".")
+    except Exception:
+        return str(value)
+
+
+def _apply_request_values_to_advanced_sections(sections: List[Dict[str, Any]], data: Any) -> bool:
+    is_dirty = False
+    for section in sections:
+        for field in section.get("fields", []):
+            key = str(field.get("key") or "").strip()
+            if not key:
+                continue
+            raw = data.get(key)
+            if raw in (None, ""):
+                continue
+            value = str(raw).replace(",", ".").strip()
+            field["value"] = value
+            field["dirty"] = (str(value) != str(field.get("default")))
+            is_dirty = is_dirty or bool(field["dirty"])
+    return is_dirty
 
 def _json_sanitize(x: Any) -> Any:
     if x is None:
@@ -110,6 +165,13 @@ def mismatch_fdd_view(request: HttpRequest):
     if not plant_id and plants:
         plant_id = str(plants[0].id)
 
+    base_defaults = get_mismatch_backend_param_defaults()
+    gpoa_min = _request_float(request.GET, "gpoa_min", "gpoa_gate", default=float(base_defaults["gpoa_gate"]))
+    pmin_w = _request_float(request.GET, "pmin_w", default=float(base_defaults["pmin_w"]))
+    backend_defaults = get_mismatch_backend_param_defaults(gpoa_gate=gpoa_min, pmin_w=pmin_w)
+    advanced_sections = get_mismatch_advanced_ui_sections(gpoa_gate=gpoa_min, pmin_w=pmin_w)
+    advanced_dirty = _apply_request_values_to_advanced_sections(advanced_sections, request.GET)
+
     return render(
         request,
         "dashboard/mismatch_fdd.html",
@@ -119,10 +181,19 @@ def mismatch_fdd_view(request: HttpRequest):
             "start": request.GET.get("start") or d_start.isoformat(),
             "end": request.GET.get("end") or d_end.isoformat(),
             "dt_minutes": int(float(request.GET.get("dt_minutes") or 15)),
-            "warn_abs": float(request.GET.get("warn_abs") or 0.35),
-            "fault_abs": float(request.GET.get("fault_abs") or 0.90),
-            "gpoa_min": float(request.GET.get("gpoa_min") or request.GET.get("gpoa_gate") or 50),
-            "pmin_w": float(request.GET.get("pmin_w") or 0),
+            "warn_abs_value": _request_text(request.GET, "warn_abs"),
+            "warn_abs_default": _format_default_text(backend_defaults["warn_abs"]),
+            "fault_abs_value": _request_text(request.GET, "fault_abs"),
+            "fault_abs_default": _format_default_text(backend_defaults["fault_abs"]),
+            "gpoa_min_value": _request_text(request.GET, "gpoa_min", "gpoa_gate"),
+            "gpoa_min_default": _format_default_text(backend_defaults["gpoa_gate"]),
+            "pmin_w_value": _request_text(request.GET, "pmin_w"),
+            "pmin_w_default": _format_default_text(backend_defaults["pmin_w"]),
+            "gpoa_min": gpoa_min,
+            "pmin_w": pmin_w,
+            "advanced_param_sections": advanced_sections,
+            "advanced_params_open": advanced_dirty,
+            "advanced_param_count": sum(len(sec.get("fields", [])) for sec in advanced_sections),
             "api_url": reverse("mismatch_fdd_api"),
             "export_pdf_url": reverse("mismatch_fdd_export_pdf"),
             "display_mode": (request.GET.get("display_mode") or "mismatch"),

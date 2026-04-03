@@ -22,9 +22,9 @@ class MismatchThresholds:
     Limiarização simples de mismatch.
     mismatch_rel = (Pac_real - Pac_model)/max(|Pac_model|, eps_w)
     """
-    gpoa_gate_wm2: float = 200.0
-    warn_abs: float = 0.35
-    fault_abs: float = 0.80
+    gpoa_gate_wm2: float = 180.0
+    warn_abs: float = 0.40
+    fault_abs: float = 0.90
     meteo_pos_abs: float = 0.25
     shading_std_abs: float = 0.22
     shading_window_points: int = 6

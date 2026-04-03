@@ -9,9 +9,9 @@ import numpy as np
 @dataclass
 class DetectionParams:
     # elegibilidade radiométrica
-    sun_available_gpoa_wm2: float = 150.0
-    coarse_diag_gpoa_wm2: float = 700.0
-    fine_diag_gpoa_wm2: float = 800.0
+    sun_available_gpoa_wm2: float = 180.0
+    coarse_diag_gpoa_wm2: float = 320.0
+    fine_diag_gpoa_wm2: float = 500.0
 
     # qualidade meteorológica
     stable_cv_max: float = 0.08
@@ -272,8 +272,8 @@ def detect_anomalies(
     """
     Saídas principais:
       - valid_period: há irradiância suficiente para avaliação operacional básica
-      - coarse_period: residual pode apoiar diagnóstico grosseiro (>=700 W/m²)
-      - fine_period: residual fino permitido (>=800 W/m² + meteo ok + sem interpolação)
+      - coarse_period: residual pode apoiar diagnóstico grosseiro (>=320 W/m²)
+      - fine_period: residual fino permitido (>=500 W/m² + meteo ok + sem interpolação)
       - meteo_quality_ok: estabilidade meteorológica aprovada para avaliação residual
       - anomaly: anomalia por residual (EWMA || CUSUM) somente onde residual é elegível
 

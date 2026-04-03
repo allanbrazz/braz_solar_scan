@@ -547,9 +547,9 @@ def run_detection_and_rca(
             )
 
         det_params = DetectionParams(
-            sun_available_gpoa_wm2=params.get_float("sun_available_gpoa_wm2", max(150.0, float(params.gpoa_gate))),
-            coarse_diag_gpoa_wm2=params.get_float("coarse_diag_gpoa_wm2", max(700.0, float(params.gpoa_gate))),
-            fine_diag_gpoa_wm2=params.get_float("fine_diag_gpoa_wm2", max(800.0, float(params.gpoa_gate))),
+            sun_available_gpoa_wm2=params.get_float("sun_available_gpoa_wm2", max(180.0, float(params.gpoa_gate))),
+            coarse_diag_gpoa_wm2=params.get_float("coarse_diag_gpoa_wm2", max(320.0, float(params.gpoa_gate))),
+            fine_diag_gpoa_wm2=params.get_float("fine_diag_gpoa_wm2", max(500.0, float(params.gpoa_gate))),
             stable_cv_max=params.get_float("stable_cv_max", 0.08),
             stable_ramp_max_wm2=params.get_float("stable_ramp_max_wm2", 120.0),
             stable_window_points=params.get_int("stable_window_points", 6),
@@ -561,15 +561,10 @@ def run_detection_and_rca(
             inv_cov_min=params.get_float("inv_cov_min", 0.30),
         )
 
-        residual_channel_map = {
-            "p_ac": list((residual_series or {}).get("p_ac_residual_rel") or model["mismatch_rel"]),
-            "p_dc": list((residual_series or {}).get("p_dc_residual_rel") or [None] * n),
-            "v_dc": list((residual_series or {}).get("v_dc_residual_rel") or [None] * n),
-            "i_dc": list((residual_series or {}).get("i_dc_residual_rel") or [None] * n),
-        }
+        detection_signal = _combined_detection_signal(model["mismatch_rel"], residual_series, base_gate)
 
         det = detect_anomalies(
-            mismatch_rel=model["mismatch_rel"],
+            mismatch_rel=detection_signal,
             g_poa_wm2=model["g_poa_used"],
             valid_model=base_gate,
             flag_meteo_missing=agg["flag_meteo_missing"],
@@ -577,12 +572,8 @@ def run_detection_and_rca(
             flag_meteo_interpolated=agg["flag_meteo_interpolated"],
             flag_inv_missing=agg["flag_inv_missing_all"],
             inv_coverage=agg["inv_cov"],
-            residual_channels=residual_channel_map,
-            residual_channel_confidence=(residual_series or {}).get("channel_confidence"),
             params=det_params,
         ) or {}
-
-        detection_signal = list(det.get("detection_signal_rel") or model["mismatch_rel"])
 
         valid_period = [bool(v) for v in (det.get("valid_period") or base_gate)]
         anomaly_power = [bool(v) for v in (det.get("anomaly") or [False] * n)]
@@ -659,12 +650,12 @@ def run_detection_and_rca(
             pac_cap_w = None
 
         rca_params = RCAParams(
-            sun_available_gpoa_wm2=params.get_float("sun_available_gpoa_wm2", max(150.0, float(params.gpoa_gate))),
+            sun_available_gpoa_wm2=params.get_float("sun_available_gpoa_wm2", max(180.0, float(params.gpoa_gate))),
             expected_power_min_w=float(params.pmin_w),
-            zero_abs_w=params.get_float("zero_abs_w", 100.0),
-            zero_rel_model=params.get_float("zero_rel_model", 0.05),
+            zero_abs_w=params.get_float("zero_abs_w", 15.0),
+            zero_rel_model=params.get_float("zero_rel_model", 0.02),
             degraded_rel=params.get_float("degraded_rel", 0.25),
-            severe_rel=params.get_float("severe_rel", 0.50),
+            severe_rel=params.get_float("severe_rel", 0.65),
             low_i_ratio_warn=params.get_float("low_i_ratio_warn", 0.35),
             low_i_ratio_crit=params.get_float("low_i_ratio_crit", 0.15),
             low_v_ratio_warn=params.get_float("low_v_ratio_warn", 0.80),

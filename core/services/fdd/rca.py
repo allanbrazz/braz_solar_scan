@@ -15,12 +15,12 @@ CODE_CRIT2 = 4
 
 @dataclass
 class RCAParams:
-    sun_available_gpoa_wm2: float = 150.0
+    sun_available_gpoa_wm2: float = 180.0
     expected_power_min_w: float = 150.0
-    zero_abs_w: float = 100.0
-    zero_rel_model: float = 0.05
+    zero_abs_w: float = 15.0
+    zero_rel_model: float = 0.02
     degraded_rel: float = 0.25
-    severe_rel: float = 0.50
+    severe_rel: float = 0.65
     low_i_ratio_warn: float = 0.35
     low_i_ratio_crit: float = 0.15
     low_v_ratio_warn: float = 0.80
