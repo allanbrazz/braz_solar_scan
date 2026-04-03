@@ -174,6 +174,7 @@ def mismatch_fdd_export_pdf(request: HttpRequest) -> HttpResponse:
             "source_meteo": request.GET.get("source_meteo") or request.GET.get("src_meteo") or payload.get("sources", {}).get("source_meteo"),
             "pipeline": payload.get("pipeline"),
             "display_mode": request.GET.get("display_mode") or payload.get("display_mode") or "mismatch",
+            "heatmap_mode": request.GET.get("display_mode") or payload.get("display_mode") or "mismatch",
         }
 
         generated_at_local = datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S %Z")

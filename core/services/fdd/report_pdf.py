@@ -288,6 +288,27 @@ def _series(payload: Dict[str, Any], key: str) -> List[Any]:
     return list(arr) if isinstance(arr, list) else []
 
 
+def _selected_heatmap_mode(payload: Dict[str, Any], filters: Optional[Dict[str, Any]] = None) -> str:
+    payload_mode = (payload.get("heatmap_mode") or {}).get("selected") or payload.get("display_mode")
+    filter_mode = None
+    if isinstance(filters, dict):
+        filter_mode = filters.get("heatmap_mode") or filters.get("display_mode")
+    return _normalize_heatmap_mode(payload_mode or filter_mode or "fault_type")
+
+
+def _selected_heatmap_label(payload: Dict[str, Any], filters: Optional[Dict[str, Any]] = None) -> str:
+    payload_label = (payload.get("heatmap_mode") or {}).get("selected_label")
+    mode = _selected_heatmap_mode(payload, filters)
+    if payload_label:
+        return _safe_text(payload_label)
+    if isinstance(filters, dict):
+        raw = filters.get("heatmap_mode") or filters.get("display_mode")
+        if raw:
+            raw_norm = _normalize_heatmap_mode(raw)
+            return "Mismatch" if raw_norm == "mismatch" else "Tipologia de falha"
+    return "Mismatch" if mode == "mismatch" else "Tipologia de falha"
+
+
 def _severity_from_point(code: Any, valid: Any, rca_code_to_sev: Dict[str, str]) -> int:
     try:
         if not bool(valid):
@@ -333,8 +354,8 @@ def _iter_points(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
     irr_tier = _series(payload, "irradiance_tier")
     direct_grid = _series(payload, "direct_grid_evidence")
     zero_inj = _series(payload, "zero_injection_flag")
-    heatmap_cls = _series(payload, "heatmap_class")
-    heatmap_mode = (payload.get("heatmap_mode") or {}).get("selected") or None
+    heatmap_cls = _series(payload, "heatmap_class") or _series(payload, "hm_class_selected") or _series(payload, "hm_class")
+    heatmap_mode = _selected_heatmap_mode(payload)
     rca_code_to_sev = payload.get("rca_code_to_sev") or {}
 
     n = max(len(t_local), len(codes), len(valid), len(mismatch), len(heatmap_cls))
@@ -349,7 +370,7 @@ def _iter_points(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
         raw_label = labels[i] if i < len(labels) else None
         diagnosis_label = diagnosis_labels[i] if i < len(diagnosis_labels) else None
         label = _display_label_for_report(
-            heatmap_mode=heatmap_mode or "fault_type",
+            heatmap_mode=heatmap_mode,
             state=state,
             label=raw_label,
             diagnosis_label=diagnosis_label,
@@ -380,7 +401,7 @@ def _iter_points(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
                 "irradiance_tier": _safe_text(irr_tier[i] if i < len(irr_tier) else None, "-"),
                 "direct_grid": bool(direct_grid[i]) if i < len(direct_grid) else False,
                 "zero_injection": bool(zero_inj[i]) if i < len(zero_inj) else False,
-                "heatmap_mode": heatmap_mode or "fault_type",
+                "heatmap_mode": heatmap_mode,
             }
         )
     return points
@@ -755,7 +776,7 @@ def build_mismatch_pdf_report(
         ["Planta", plant_name, "Período", f"{_safe_text(rng.get('start'))} -> {_safe_text(rng.get('end'))}"],
         ["Bin [min]", _safe_text(filters.get("dt_minutes")), "Pipeline", _safe_text(filters.get("pipeline") or payload.get("pipeline"))],
         ["Detector", _safe_text(versions.get("detector_version")), "source_meteo", _safe_text(sources.get("source_meteo"))],
-        ["Heatmap", _safe_text(filters.get("heatmap_mode") or (payload.get("heatmap_mode") or {}).get("selected_label") or (payload.get("heatmap_mode") or {}).get("selected") or "Tipologia de falha"), "política total", _safe_text(sources.get("total_policy"))],
+        ["Heatmap", _selected_heatmap_label(payload, filters), "política total", _safe_text(sources.get("total_policy"))],
         ["warn_abs", _safe_text(filters.get("warn_abs") or thresholds.get("warn_abs")), "fault_abs", _safe_text(filters.get("fault_abs") or thresholds.get("fault_abs"))],
         ["gpoa_min", _safe_text(filters.get("gpoa_min") or thresholds.get("gpoa_gate")), "pmin_w", _safe_text(filters.get("pmin_w") or thresholds.get("pmin_w"))],
         ["source_oper", _safe_text(filters.get("source_oper")), "Heatmap nota", _safe_text((payload.get("heatmap_mode") or {}).get("selected_note"))],
@@ -790,7 +811,7 @@ def build_mismatch_pdf_report(
 
     story.append(PageBreak())
     story.append(_paragraph("Heatmap do período", styles["section"]))
-    story.append(_paragraph(f"Mapa dia x bin usando o modo de coloração selecionado: <b>{_safe_text((payload.get('heatmap_mode') or {}).get('selected_label') or filters.get('heatmap_mode') or 'Tipologia de falha')}</b>. Cinza = sem diagnóstico útil, verde = normal, âmbar = warn, vermelho = falha.", styles["body"]))
+    story.append(_paragraph(f"Mapa dia x bin usando o modo de coloração selecionado: <b>{_selected_heatmap_label(payload, filters)}</b>. Cinza = sem diagnóstico útil, verde = normal, âmbar = warn, vermelho = falha.", styles["body"]))
     story.append(Spacer(1, 2 * mm))
     story.append(Image(heat_png, width=255 * mm, height=120 * mm))
     story.append(_paragraph("Em intervalos longos, o heatmap deve ser lido como visão de triagem temporal: ele mostra persistência e sazonalidade dos estados, mas não substitui inspeção por evento nem análise com dados locais de referência.", styles["caption"]))

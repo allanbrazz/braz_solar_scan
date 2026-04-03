@@ -487,15 +487,24 @@ def build_mismatch_dashboard_payload(plant: PVPlant, params: MismatchDashboardPa
         sev_selected = sev_typology
         reason_selected = reason_typology
         counts_selected = counts_typology
+        heatmap_label = "Tipologia de falha"
+        heatmap_note = "Classes do heatmap derivadas do diagnóstico/RCa explicável do pipeline."
     else:
         sev_selected = sev_mismatch
         reason_selected = reason_mismatch
         counts_selected = counts_mismatch
+        heatmap_label = "Mismatch"
+        heatmap_note = "Classes do heatmap derivadas da severidade do mismatch/potência no backend."
 
     return {
         "ok": True,
         "pipeline": pipeline["pipeline_name"],
         "display_mode": params.display_mode,
+        "heatmap_mode": {
+            "selected": params.display_mode,
+            "selected_label": heatmap_label,
+            "selected_note": heatmap_note,
+        },
         "plant": {"id": plant.id, "nome": plant.nome, "tz": params.tz_name},
         "range": {
             "start": params.start.isoformat(),
@@ -617,6 +626,8 @@ def build_mismatch_dashboard_payload(plant: PVPlant, params: MismatchDashboardPa
             "hm_reason": reason_selected,
             "hm_class_selected": sev_selected,
             "hm_reason_selected": reason_selected,
+            "heatmap_class": sev_selected,
+            "heatmap_reason": reason_selected,
             "hm_class_typology": sev_typology,
             "hm_reason_typology": reason_typology,
             "hm_class_mismatch": sev_mismatch,

@@ -630,6 +630,37 @@
 <script>
   const $ = (id) => document.getElementById(id);
 
+  const runSyncState = {
+    lastExecutedPayload: null,
+    dirty: true,
+  };
+
+  function stablePayloadSignature(payload){
+    const obj = { ...(payload || {}) };
+    const ordered = Object.keys(obj).sort().reduce((acc, key) => {
+      acc[key] = obj[key];
+      return acc;
+    }, {});
+    return JSON.stringify(ordered);
+  }
+
+  function markRunDirty(){
+    runSyncState.dirty = true;
+    const btn = $("btnExportPdf");
+    if (btn){
+      btn.title = "Reexecute o FDD antes de exportar o PDF para garantir sincronismo com a tela.";
+    }
+  }
+
+  function markRunSynced(payload){
+    runSyncState.lastExecutedPayload = payload ? { ...(payload || {}) } : null;
+    runSyncState.dirty = false;
+    const btn = $("btnExportPdf");
+    if (btn){
+      btn.title = "Exportar relatório PDF do FDD Mismatch";
+    }
+  }
+
   function setStatus(on, txt){
     const box = $("statusBox");
     const t = $("statusTxt");
@@ -2037,6 +2068,18 @@
     }
     try{
       const payload = currentPayloadBase();
+      const currentSig = stablePayloadSignature(payload);
+      const lastSig = runSyncState.lastExecutedPayload ? stablePayloadSignature(runSyncState.lastExecutedPayload) : null;
+
+      if (!hmState.payload || !lastSig){
+        alert("Execute o FDD antes de exportar. O PDF agora é bloqueado quando não existe uma execução sincronizada com a tela.");
+        return;
+      }
+      if (runSyncState.dirty || currentSig !== lastSig){
+        alert("Há parâmetros alterados desde a última execução exibida na tela. Reexecute o FDD antes de exportar o PDF para evitar divergências.");
+        return;
+      }
+
       const params = new URLSearchParams();
       for (const [k, v] of Object.entries(payload)){
         if (v === undefined || v === null || v === "") continue;
@@ -2068,6 +2111,7 @@
 
       const data = await fetchFddData(apiUrl, payload);
 
+      markRunSynced(currentPayloadBase());
       setKpis(data);
       buildCharts(data);
       renderHeatmapCanvas(data);
@@ -2102,6 +2146,7 @@
     $("kpiRange").textContent = "—";
     setStatus(false);
     closeDetailDrawer();
+    markRunDirty();
   }
 
   function bindDetailButtons(){
@@ -2137,6 +2182,15 @@
     $("btnRunSave")?.addEventListener("click", () => runFdd({ save:true }));
     $("btnExportPdf")?.addEventListener("click", exportPdf);
     $("btnReset")?.addEventListener("click", resetUi);
+
+    const syncControls = ["plant_id", "start", "end", "warn_abs", "fault_abs", "gpoa_min", "pmin_w", "dt_minutes", "display_mode"];
+    syncControls.forEach((id) => {
+      const el = $(id);
+      if (!el) return;
+      const evt = (el.tagName === "SELECT") ? "change" : "input";
+      el.addEventListener(evt, () => markRunDirty());
+      if (evt !== "change") el.addEventListener("change", () => markRunDirty());
+    });
 
     $("dt_minutes")?.addEventListener("change", () => {
       if (hmState.payload) renderHeatmapCanvas(hmState.payload);
