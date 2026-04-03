@@ -369,6 +369,13 @@ def run_detection_pipeline(
 
     valid_model = [bool(v) for v in (rs.get("valid_model") or (np.isfinite(pac_real) & np.isfinite(pac_model) & np.isfinite(mismatch)).tolist())]
 
+    residual_channel_map = {
+        "p_ac": list(rs.get("p_ac_residual_rel") or [None] * len(rows)),
+        "p_dc": list(p_dc_residual_rel or [None] * len(rows)),
+        "v_dc": list(v_dc_residual_rel or [None] * len(rows)),
+        "i_dc": list(i_dc_residual_rel or [None] * len(rows)),
+    }
+
     det = detect_anomalies(
         mismatch_rel=[None if not np.isfinite(v) else float(v) for v in mismatch],
         g_poa_wm2=[None if not np.isfinite(v) else float(v) for v in g_used],
@@ -378,6 +385,8 @@ def run_detection_pipeline(
         flag_meteo_interpolated=_bool_list(rows, "flag_meteo_interpolated"),
         flag_inv_missing=_bool_list(rows, "flag_inv_missing"),
         inv_coverage=[None if not np.isfinite(v) else float(v) for v in inv_coverage],
+        residual_channels=residual_channel_map,
+        residual_channel_confidence=channel_confidence if isinstance(channel_confidence, dict) else None,
         params=detection_params,
     )
 
@@ -420,16 +429,23 @@ def run_detection_pipeline(
     )
 
     objs: list[PlantDiagnostic15m] = []
+    detection_signal = list(det.get("detection_signal_rel") or [None] * len(rows))
     for i, row in enumerate(rows):
         ewma_z = det["ewma_z"][i]
         cusum = det["cusum"][i]
         mismatch_i = None if not np.isfinite(mismatch[i]) else float(mismatch[i])
+        detection_signal_i = None
+        try:
+            dv = detection_signal[i]
+            detection_signal_i = None if dv is None else float(dv)
+        except Exception:
+            detection_signal_i = mismatch_i
         pac_real_i = None if not np.isfinite(pac_real[i]) else float(pac_real[i])
         pac_model_i = None if not np.isfinite(pac_model[i]) else float(pac_model[i])
         detector_score = max(
             abs(float(ewma_z)) if ewma_z is not None else 0.0,
             float(cusum) if cusum is not None else 0.0,
-            float(abs(mismatch[i])) if np.isfinite(mismatch[i]) and rca["labels"][i] not in {"ok", "invalid"} else 0.0,
+            abs(float(detection_signal_i)) if detection_signal_i is not None and rca["labels"][i] not in {"ok", "invalid"} else 0.0,
         )
         diagnosis_label = str(rca["diagnosis_labels"][i])
         state_label = str(rca["state_labels"][i])
@@ -452,7 +468,7 @@ def run_detection_pipeline(
             meteo_quality_ok=bool(det["meteo_quality_ok"][i]),
             stable_sky=bool(det["stable_sky"][i]),
             anomaly_flag=bool(anomaly_final),
-            mismatch_rel=mismatch_i,
+            mismatch_rel=detection_signal_i if detection_signal_i is not None else mismatch_i,
             ewma_z=ewma_z,
             cusum_score=cusum,
         )

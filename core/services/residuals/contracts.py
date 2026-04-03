@@ -8,7 +8,8 @@ from typing import Dict
 class ResidualConfig:
     g_poa_min_wm2: float = 50.0
     g_poa_vdc_min_wm2: float = 150.0
-    g_poa_fine_diag_wm2: float = 700.0
+    g_poa_coarse_diag_wm2: float = 700.0
+    g_poa_fine_diag_wm2: float = 800.0
     eps_power_w: float = 50.0
     eps_current_a: float = 0.25
     eps_voltage_v: float = 5.0

@@ -561,10 +561,15 @@ def run_detection_and_rca(
             inv_cov_min=params.get_float("inv_cov_min", 0.30),
         )
 
-        detection_signal = _combined_detection_signal(model["mismatch_rel"], residual_series, base_gate)
+        residual_channel_map = {
+            "p_ac": list((residual_series or {}).get("p_ac_residual_rel") or model["mismatch_rel"]),
+            "p_dc": list((residual_series or {}).get("p_dc_residual_rel") or [None] * n),
+            "v_dc": list((residual_series or {}).get("v_dc_residual_rel") or [None] * n),
+            "i_dc": list((residual_series or {}).get("i_dc_residual_rel") or [None] * n),
+        }
 
         det = detect_anomalies(
-            mismatch_rel=detection_signal,
+            mismatch_rel=model["mismatch_rel"],
             g_poa_wm2=model["g_poa_used"],
             valid_model=base_gate,
             flag_meteo_missing=agg["flag_meteo_missing"],
@@ -572,8 +577,12 @@ def run_detection_and_rca(
             flag_meteo_interpolated=agg["flag_meteo_interpolated"],
             flag_inv_missing=agg["flag_inv_missing_all"],
             inv_coverage=agg["inv_cov"],
+            residual_channels=residual_channel_map,
+            residual_channel_confidence=(residual_series or {}).get("channel_confidence"),
             params=det_params,
         ) or {}
+
+        detection_signal = list(det.get("detection_signal_rel") or model["mismatch_rel"])
 
         valid_period = [bool(v) for v in (det.get("valid_period") or base_gate)]
         anomaly_power = [bool(v) for v in (det.get("anomaly") or [False] * n)]

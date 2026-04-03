@@ -50,11 +50,14 @@ def channel_confidence(row: ResidualInputRow, *, has_expected: bool, channel: st
     irr = row.g_poa_wm2
     irr_component = 0.0
     if irr is not None:
-        if float(irr) >= float(cfg.g_poa_fine_diag_wm2):
+        irr_f = float(irr)
+        if irr_f >= float(cfg.g_poa_fine_diag_wm2):
             irr_component = 1.0
-        elif float(irr) >= float(cfg.g_poa_vdc_min_wm2):
-            irr_component = 0.75
-        elif float(irr) >= float(cfg.g_poa_min_wm2):
+        elif irr_f >= float(cfg.g_poa_coarse_diag_wm2):
+            irr_component = 0.85
+        elif irr_f >= float(cfg.g_poa_vdc_min_wm2):
+            irr_component = 0.70
+        elif irr_f >= float(cfg.g_poa_min_wm2):
             irr_component = 0.50
     score += weights.get("irradiance", 0.20) * irr_component
 
