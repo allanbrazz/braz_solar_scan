@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from core.models import PVPlant
 from core.services.fdd.dashboard_common import DashboardServiceError, as_float
 from core.services.fdd.runtime_types import MismatchDashboardParams
+from core.services.fdd.param_catalog import ADVANCED_PARAM_DEFAULTS
 from core.services.fdd_mismatch import CODE_INVALID, classify_mismatch_series
 
 logger = logging.getLogger(__name__)
@@ -547,18 +548,18 @@ def run_detection_and_rca(
             )
 
         det_params = DetectionParams(
-            sun_available_gpoa_wm2=params.get_float("sun_available_gpoa_wm2", max(180.0, float(params.gpoa_gate))),
-            coarse_diag_gpoa_wm2=params.get_float("coarse_diag_gpoa_wm2", max(320.0, float(params.gpoa_gate))),
-            fine_diag_gpoa_wm2=params.get_float("fine_diag_gpoa_wm2", max(500.0, float(params.gpoa_gate))),
-            stable_cv_max=params.get_float("stable_cv_max", 0.08),
-            stable_ramp_max_wm2=params.get_float("stable_ramp_max_wm2", 120.0),
-            stable_window_points=params.get_int("stable_window_points", 6),
-            ewma_lambda=params.get_float("ewma_lambda", 0.20),
-            ewma_L=params.get_float("ewma_L", 3.0),
-            cusum_k=params.get_float("cusum_k", 0.50),
-            cusum_h=params.get_float("cusum_h", 8.0),
-            min_baseline_points=params.get_int("min_baseline_points", 24),
-            inv_cov_min=params.get_float("inv_cov_min", 0.30),
+            sun_available_gpoa_wm2=params.get_float("sun_available_gpoa_wm2", float(ADVANCED_PARAM_DEFAULTS["sun_available_gpoa_wm2"])),
+            coarse_diag_gpoa_wm2=params.get_float("coarse_diag_gpoa_wm2", float(ADVANCED_PARAM_DEFAULTS["coarse_diag_gpoa_wm2"])),
+            fine_diag_gpoa_wm2=params.get_float("fine_diag_gpoa_wm2", float(ADVANCED_PARAM_DEFAULTS["fine_diag_gpoa_wm2"])),
+            stable_cv_max=params.get_float("stable_cv_max", float(ADVANCED_PARAM_DEFAULTS["stable_cv_max"])),
+            stable_ramp_max_wm2=params.get_float("stable_ramp_max_wm2", float(ADVANCED_PARAM_DEFAULTS["stable_ramp_max_wm2"])),
+            stable_window_points=params.get_int("stable_window_points", int(ADVANCED_PARAM_DEFAULTS["stable_window_points"])),
+            ewma_lambda=params.get_float("ewma_lambda", float(ADVANCED_PARAM_DEFAULTS["ewma_lambda"])),
+            ewma_L=params.get_float("ewma_L", float(ADVANCED_PARAM_DEFAULTS["ewma_L"])),
+            cusum_k=params.get_float("cusum_k", float(ADVANCED_PARAM_DEFAULTS["cusum_k"])),
+            cusum_h=params.get_float("cusum_h", float(ADVANCED_PARAM_DEFAULTS["cusum_h"])),
+            min_baseline_points=params.get_int("min_baseline_points", int(ADVANCED_PARAM_DEFAULTS["min_baseline_points"])),
+            inv_cov_min=params.get_float("inv_cov_min", float(ADVANCED_PARAM_DEFAULTS["inv_cov_min"])),
         )
 
         detection_signal = _combined_detection_signal(model["mismatch_rel"], residual_series, base_gate)
@@ -650,23 +651,23 @@ def run_detection_and_rca(
             pac_cap_w = None
 
         rca_params = RCAParams(
-            sun_available_gpoa_wm2=params.get_float("sun_available_gpoa_wm2", max(180.0, float(params.gpoa_gate))),
+            sun_available_gpoa_wm2=params.get_float("sun_available_gpoa_wm2", float(ADVANCED_PARAM_DEFAULTS["sun_available_gpoa_wm2"])),
             expected_power_min_w=float(params.pmin_w),
-            zero_abs_w=params.get_float("zero_abs_w", 15.0),
-            zero_rel_model=params.get_float("zero_rel_model", 0.02),
-            degraded_rel=params.get_float("degraded_rel", 0.25),
-            severe_rel=params.get_float("severe_rel", 0.65),
-            low_i_ratio_warn=params.get_float("low_i_ratio_warn", 0.35),
-            low_i_ratio_crit=params.get_float("low_i_ratio_crit", 0.15),
-            low_v_ratio_warn=params.get_float("low_v_ratio_warn", 0.80),
-            low_v_ratio_crit=params.get_float("low_v_ratio_crit", 0.60),
-            vac_low_ratio=params.get_float("vac_low_ratio", 0.90),
-            vac_high_ratio=params.get_float("vac_high_ratio", 1.10),
-            vac_abs_margin_v=params.get_float("vac_abs_margin_v", 10.0),
-            freq_abs_tol_hz=params.get_float("freq_abs_tol_hz", 1.0),
-            clip_margin=params.get_float("clip_margin", 0.98),
-            clip_model_margin=params.get_float("clip_model_margin", 1.02),
-            min_baseline_points=params.get_int("rca_min_baseline_points", 24),
+            zero_abs_w=params.get_float("zero_abs_w", float(ADVANCED_PARAM_DEFAULTS["zero_abs_w"])),
+            zero_rel_model=params.get_float("zero_rel_model", float(ADVANCED_PARAM_DEFAULTS["zero_rel_model"])),
+            degraded_rel=params.get_float("degraded_rel", float(ADVANCED_PARAM_DEFAULTS["degraded_rel"])),
+            severe_rel=params.get_float("severe_rel", float(ADVANCED_PARAM_DEFAULTS["severe_rel"])),
+            low_i_ratio_warn=params.get_float("low_i_ratio_warn", float(ADVANCED_PARAM_DEFAULTS["low_i_ratio_warn"])),
+            low_i_ratio_crit=params.get_float("low_i_ratio_crit", float(ADVANCED_PARAM_DEFAULTS["low_i_ratio_crit"])),
+            low_v_ratio_warn=params.get_float("low_v_ratio_warn", float(ADVANCED_PARAM_DEFAULTS["low_v_ratio_warn"])),
+            low_v_ratio_crit=params.get_float("low_v_ratio_crit", float(ADVANCED_PARAM_DEFAULTS["low_v_ratio_crit"])),
+            vac_low_ratio=params.get_float("vac_low_ratio", float(ADVANCED_PARAM_DEFAULTS["vac_low_ratio"])),
+            vac_high_ratio=params.get_float("vac_high_ratio", float(ADVANCED_PARAM_DEFAULTS["vac_high_ratio"])),
+            vac_abs_margin_v=params.get_float("vac_abs_margin_v", float(ADVANCED_PARAM_DEFAULTS["vac_abs_margin_v"])),
+            freq_abs_tol_hz=params.get_float("freq_abs_tol_hz", float(ADVANCED_PARAM_DEFAULTS["freq_abs_tol_hz"])),
+            clip_margin=params.get_float("clip_margin", float(ADVANCED_PARAM_DEFAULTS["clip_margin"])),
+            clip_model_margin=params.get_float("clip_model_margin", float(ADVANCED_PARAM_DEFAULTS["clip_model_margin"])),
+            min_baseline_points=params.get_int("rca_min_baseline_points", int(ADVANCED_PARAM_DEFAULTS["rca_min_baseline_points"])),
         )
 
         alarm_code, alarm_sev = build_alarm_vectors(times_utc, per_ts, selected_sources)

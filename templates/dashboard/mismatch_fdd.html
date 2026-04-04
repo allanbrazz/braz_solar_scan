@@ -197,45 +197,6 @@
       border-radius: 14px;
       color: rgba(233,246,255,.9);
     }
-
-    details.adv-card{
-      padding:0;
-      overflow:hidden;
-    }
-    .adv-summary{
-      list-style:none;
-      cursor:pointer;
-      display:flex;
-      align-items:flex-start;
-      justify-content:space-between;
-      gap:1rem;
-      padding: 1rem 1.1rem;
-      user-select:none;
-    }
-    .adv-summary::-webkit-details-marker{ display:none; }
-    .adv-summary .title{ margin:0; font-size:1rem; font-weight:800; }
-    .adv-summary .sub{ margin:.25rem 0 0; opacity:.78; line-height:1.35; }
-    .adv-summary .meta{ display:flex; gap:.5rem; flex-wrap:wrap; align-items:center; justify-content:flex-end; }
-    .adv-summary .chev{ transition: transform .16s ease; opacity:.85; }
-    details.adv-card[open] .adv-summary{ border-bottom:1px solid rgba(255,255,255,.10); }
-    details.adv-card[open] .adv-summary .chev{ transform: rotate(180deg); }
-    .adv-body{ padding:1rem 1.1rem 1.1rem; display:grid; gap:1rem; }
-    .adv-toolbar{ display:flex; gap:.75rem; align-items:flex-start; justify-content:space-between; flex-wrap:wrap; }
-    .adv-note{ opacity:.78; line-height:1.4; max-width: 980px; }
-    .adv-sections{ display:grid; gap:1rem; }
-    .adv-section{ border:1px solid rgba(255,255,255,.10); border-radius:16px; background: rgba(255,255,255,.03); padding:.9rem; }
-    .adv-section h4{ margin:0; font-size:.96rem; }
-    .adv-section .sub{ margin:.22rem 0 0; opacity:.75; line-height:1.35; }
-    .adv-grid{ display:grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap:.85rem; margin-top:.8rem; }
-    .ctl.adv{ min-width: 0; }
-    .ctl-note{ font-size:.78rem; opacity:.72; line-height:1.35; min-height:2.2em; }
-    .adv-badges{ display:flex; gap:.4rem; flex-wrap:wrap; }
-    .adv-badge{ display:inline-flex; align-items:center; gap:.35rem; padding:.22rem .55rem; border-radius:999px; font-size:.78rem; border:1px solid rgba(255,255,255,.14); background: rgba(255,255,255,.06); }
-    .adv-badge.auto{ border-color: rgba(95,176,255,.40); background: rgba(95,176,255,.12); }
-    .adv-param-input::placeholder{ color: rgba(233,246,255,.48); }
-    .adv-badge.warn{ border-color: rgba(255,210,90,.35); background: rgba(255,210,90,.10); }
-    @media (max-width: 1200px){ .adv-grid{ grid-template-columns: repeat(2, minmax(0,1fr)); } }
-    @media (max-width: 700px){ .adv-grid{ grid-template-columns: 1fr; } }
     .spin{
       width: 14px; height: 14px; border-radius: 999px;
       border: 2px solid rgba(255,255,255,.25);
@@ -392,7 +353,7 @@
 {% endblock %}
 
 {% block content %}
-<div id="fddPage" class="dash" data-api="{% url 'mismatch_fdd_api' %}" data-export="{{ export_pdf_url|default:'' }}">
+<div id="fddPage" class="dash" data-api="{% url 'mismatch_fdd_api' %}" data-export="{{ export_pdf_url|default:'' }}" data-random-search="{{ random_search_url|default:'' }}">
   <div class="card glass span-12">
     <div class="page-head">
       <div style="min-width:0;">
@@ -418,7 +379,7 @@
     <div class="ctl-row">
       <div class="ctl">
         <label>Planta</label>
-        <select id="plant_id" data-param-key="plant_id" data-param-type="int" data-sync-control="1">
+        <select id="plant_id">
           {% for p in plants %}
             <option value="{{ p.id }}"
               {% if plant_id and plant_id|stringformat:"s" == p.id|stringformat:"s" %}selected{% endif %}>
@@ -430,17 +391,17 @@
 
       <div class="ctl sm">
         <label for="start">Início</label>
-        <input id="start" type="date" value="{{ start|default:'' }}" data-param-key="start" data-param-type="string" data-sync-control="1">
+        <input id="start" type="date" value="{{ start|default:'' }}">
       </div>
 
       <div class="ctl sm">
         <label for="end">Fim</label>
-        <input id="end" type="date" value="{{ end|default:'' }}" data-param-key="end" data-param-type="string" data-sync-control="1">
+        <input id="end" type="date" value="{{ end|default:'' }}">
       </div>
 
       <div class="ctl sm">
         <label for="dt_minutes">Bin do heatmap (min)</label>
-        <select id="dt_minutes" data-param-key="dt_minutes" data-param-type="int" data-sync-control="1">
+        <select id="dt_minutes">
           <option value="5"  {% if dt_minutes == 5 %}selected{% endif %}>5</option>
           <option value="10" {% if dt_minutes == 10 %}selected{% endif %}>10</option>
           <option value="15" {% if dt_minutes|default:15 == 15 %}selected{% endif %}>15</option>
@@ -451,12 +412,12 @@
 
       <div class="ctl sm">
         <label for="warn_abs">Limiar WARN (|mismatch|)</label>
-        <input id="warn_abs" type="number" step="0.01" min="0" value="{{ warn_abs_value|default:'' }}" placeholder="Automático: {{ warn_abs_default }}" data-default="{{ warn_abs_default }}" data-param-key="warn_abs" data-param-type="float" data-sync-control="1">
+        <input id="warn_abs" type="number" step="0.01" min="0" value="{{ warn_abs|default_if_none:0.35 }}">
       </div>
 
       <div class="ctl sm">
         <label for="display_mode">Exibir bins por</label>
-        <select id="display_mode" data-param-key="display_mode" data-param-type="string" data-sync-control="1">
+        <select id="display_mode">
           <option value="mismatch" {% if display_mode|default:'mismatch' == 'mismatch' %}selected{% endif %}>Mismatch</option>
           <option value="tipologia" {% if display_mode == 'tipologia' %}selected{% endif %}>Tipologia de falha</option>
         </select>
@@ -466,17 +427,17 @@
 
       <div class="ctl sm">
         <label for="fault_abs">Limiar FALHA (mismatch ≤ −)</label>
-        <input id="fault_abs" type="number" step="0.01" min="0" value="{{ fault_abs_value|default:'' }}" placeholder="Automático: {{ fault_abs_default }}" data-default="{{ fault_abs_default }}" data-param-key="fault_abs" data-param-type="float" data-sync-control="1">
+        <input id="fault_abs" type="number" step="0.01" min="0" value="{{ fault_abs|default_if_none:0.90 }}">
       </div>
 
       <div class="ctl sm">
         <label for="gpoa_min">GPOA gate (W/m²)</label>
-        <input id="gpoa_min" type="number" step="1" min="0" value="{{ gpoa_min_value|default:'' }}" placeholder="Automático: {{ gpoa_min_default }}" data-default="{{ gpoa_min_default }}" data-param-key="gpoa_min" data-param-type="float" data-sync-control="1">
+        <input id="gpoa_min" type="number" step="1" min="0" value="{{ gpoa_min|default_if_none:50 }}">
       </div>
 
       <div class="ctl sm">
         <label for="pmin_w">Potência mínima (W)</label>
-        <input id="pmin_w" type="number" step="1" min="0" value="{{ pmin_w_value|default:'' }}" placeholder="Automático: {{ pmin_w_default }}" data-default="{{ pmin_w_default }}" data-param-key="pmin_w" data-param-type="float" data-sync-control="1">
+        <input id="pmin_w" type="number" step="1" min="0" value="{{ pmin_w|default_if_none:0 }}">
       </div>
 
       <div class="ctl" style="min-width: 320px;">
@@ -527,79 +488,66 @@
     </div>
   </div>
 
-  <details class="card glass span-12 adv-card" id="advancedParamsCard" {% if advanced_params_open %}open{% endif %}>
-    <summary class="adv-summary">
-      <div>
-        <h3 class="title">Parâmetros avançados</h3>
-        <div class="sub">Os campos abaixo espelham os valores hoje usados no backend para detecção, estabilidade, EWMA/CUSUM e RCA. Você pode modificá-los sem alterar a lógica central do servidor.</div>
+  <div class="card glass span-12" id="advancedParamsCard">
+    <div class="page-head">
+      <div style="min-width:0;">
+        <h2 style="margin:0; font-size:1.1rem;">Parâmetros avançados</h2>
+        <div class="sub">Em branco = usa o padrão do backend. O random search atua no fluxo por <b>Tipologia de Falha</b>, carrega a melhor configuração encontrada nos campos abaixo e deixa a execução final sob controle do usuário.</div>
       </div>
-      <div class="meta">
-        <span class="badge"><span class="mono">{{ advanced_param_count }}</span> parâmetros</span>
-        <span class="badge"><span class="mono">backend defaults</span></span>
-        <svg class="chev" width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <path d="m6 9 6 6 6-6" stroke="rgba(233,246,255,.92)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
-      </div>
-    </summary>
+    </div>
 
-    <div class="adv-body">
-      <div class="adv-toolbar">
-        <div class="adv-note">
-          Os campos deixados em branco usam automaticamente o valor implícito do backend. Cada caixa exibe esse comportamento diretamente no placeholder como <b>Automático: valor</b>; os campos marcados como <b>automáticos</b> acompanham o <b>GPOA gate</b> e/ou a <b>potência mínima</b> enquanto não forem editados manualmente.
-        </div>
+    {% for grp in advanced_param_groups %}
+      <div style="height:.35rem"></div>
+      <h3 style="margin:.2rem 0 .4rem; font-size:1rem;">{{ grp.title }}</h3>
+      <div class="ctl-row">
+        {% for ctl in grp.controls %}
+          <div class="ctl sm">
+            <label for="{{ ctl.key }}">{{ ctl.label }}</label>
+            <input
+              id="{{ ctl.key }}"
+              type="number"
+              step="{{ ctl.step }}"
+              {% if ctl.min %}min="{{ ctl.min }}"{% endif %}
+              {% if ctl.max %}max="{{ ctl.max }}"{% endif %}
+              placeholder="Automático: {{ ctl.auto_text }}"
+              data-auto="{{ ctl.auto_text }}"
+            >
+          </div>
+        {% endfor %}
+      </div>
+    {% endfor %}
+
+    <div style="height:.8rem"></div>
+    <div class="ctl-row">
+      <div class="ctl sm">
+        <label for="rs_trials">Random search — tentativas</label>
+        <input id="rs_trials" type="number" step="1" min="1" max="120" value="{{ random_search_defaults.trials }}">
+      </div>
+      <div class="ctl sm">
+        <label for="rs_seed">Random search — semente</label>
+        <input id="rs_seed" type="number" step="1" value="{{ random_search_defaults.seed }}">
+      </div>
+      <div class="ctl" style="min-width:320px;">
+        <label>&nbsp;</label>
         <div class="ctl-actions">
-          <button class="btn-glow secondary" id="btnResetAdvanced" type="button" title="Restaurar defaults avançados do backend">
+          <button class="btn-glow secondary" id="btnRandomSearch" type="button" title="Buscar a melhor configuração de parâmetros para o fluxo por Tipologia de Falha">
             <svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path d="M21 12a9 9 0 1 1-2.64-6.36" stroke="rgba(233,246,255,.92)" stroke-width="2" stroke-linecap="round"/>
-              <path d="M21 4v6h-6" stroke="rgba(233,246,255,.92)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M4 6h16M7 12h10M10 18h4" stroke="rgba(233,246,255,.92)" stroke-width="2" stroke-linecap="round"/>
+              <circle cx="17" cy="6" r="2" fill="rgba(233,246,255,.92)"/>
+              <circle cx="9" cy="12" r="2" fill="rgba(233,246,255,.92)"/>
+              <circle cx="13" cy="18" r="2" fill="rgba(233,246,255,.92)"/>
             </svg>
-            <span class="label">Restaurar defaults avançados</span>
+            <span class="label">Executar Random Search</span>
           </button>
         </div>
       </div>
-
-      <div class="adv-sections">
-        {% for section in advanced_param_sections %}
-          <section class="adv-section">
-            <div>
-              <h4>{{ section.title }}</h4>
-              <div class="sub">{{ section.description }}</div>
-            </div>
-            <div class="adv-grid">
-              {% for field in section.fields %}
-                <div class="ctl adv">
-                  <label for="adv_{{ field.key }}">{{ field.label }}</label>
-                  <input
-                    id="adv_{{ field.key }}"
-                    class="adv-param-input"
-                    type="number"
-                    inputmode="decimal"
-                    step="{{ field.step }}"
-                    min="{{ field.min }}"
-                    {% if field.max %}max="{{ field.max }}"{% endif %}
-                    value="{{ field.value|default:'' }}"
-                    placeholder="{{ field.placeholder }}"
-                    data-param-key="{{ field.key }}"
-                    data-param-type="{{ field.kind }}"
-                    data-sync-control="1"
-                    data-default="{{ field.default }}"
-                    data-default-display="{{ field.default_display }}"
-                    {% if field.auto_derived %}data-auto-derived="1"{% endif %}
-                    {% if field.dirty %}data-user-edited="1"{% endif %}
-                  >
-                  <div class="adv-badges">
-                    {% if field.auto_derived %}<span class="adv-badge auto">backend automático</span>{% endif %}
-                    {% if field.dirty %}<span class="adv-badge warn">ajustado</span>{% endif %}
-                  </div>
-                  <div class="ctl-note">{{ field.help }}</div>
-                </div>
-              {% endfor %}
-            </div>
-          </section>
-        {% endfor %}
-      </div>
     </div>
-  </details>
+
+    <div style="height:.6rem"></div>
+    <div class="status" id="randomSearchResultBox" style="display:none;">
+      <span id="randomSearchResultTxt">—</span>
+    </div>
+  </div>
 
   <div class="card glass span-12">
     <div class="kpi" id="kpiGrid">
@@ -740,40 +688,12 @@
   </div>
 </aside>
 
+{{ advanced_param_keys|json_script:"advancedParamKeysData" }}
+
 <script>
   const $ = (id) => document.getElementById(id);
+  const ADVANCED_PARAM_KEYS = JSON.parse(document.getElementById("advancedParamKeysData")?.textContent || "[]");
 
-  const runSyncState = {
-    lastExecutedPayload: null,
-    dirty: true,
-  };
-  let suspendAdvancedParamSync = false;
-
-  function stablePayloadSignature(payload){
-    const obj = { ...(payload || {}) };
-    const ordered = Object.keys(obj).sort().reduce((acc, key) => {
-      acc[key] = obj[key];
-      return acc;
-    }, {});
-    return JSON.stringify(ordered);
-  }
-
-  function markRunDirty(){
-    runSyncState.dirty = true;
-    const btn = $("btnExportPdf");
-    if (btn){
-      btn.title = "Reexecute o FDD antes de exportar o PDF para garantir sincronismo com a tela.";
-    }
-  }
-
-  function markRunSynced(payload){
-    runSyncState.lastExecutedPayload = payload ? { ...(payload || {}) } : null;
-    runSyncState.dirty = false;
-    const btn = $("btnExportPdf");
-    if (btn){
-      btn.title = "Exportar relatório PDF do FDD Mismatch";
-    }
-  }
 
   function setStatus(on, txt){
     const box = $("statusBox");
@@ -805,6 +725,48 @@
     raw = raw.replace(",", ".");
     const v = Number(raw);
     return Number.isFinite(v) ? v : fallback;
+  }
+
+  function getOptionalNum(id){
+    const el = $(id);
+    if (!el) return null;
+    let raw = String(el.value ?? "").trim();
+    if (!raw) return null;
+    raw = raw.replace(",", ".");
+    const v = Number(raw);
+    return Number.isFinite(v) ? v : null;
+  }
+
+  function collectAdvancedPayload(){
+    const payload = {};
+    for (const key of ADVANCED_PARAM_KEYS){
+      const v = getOptionalNum(key);
+      if (v !== null) payload[key] = v;
+    }
+    return payload;
+  }
+
+  function applyParamsToForm(params){
+    if (!params || typeof params !== "object") return;
+    for (const [k, v] of Object.entries(params)){
+      const el = $(k);
+      if (!el || v === undefined || v === null) continue;
+      el.value = String(v);
+    }
+  }
+
+  function renderRandomSearchResult(data){
+    const box = $("randomSearchResultBox");
+    const txt = $("randomSearchResultTxt");
+    if (!box || !txt) return;
+    if (!data || !data.best_metrics){
+      box.style.display = "none";
+      txt.textContent = "";
+      return;
+    }
+    const m = data.best_metrics || {};
+    txt.textContent = `Melhor score=${fmtN(m.score, 2)} • valid=${m.valid_n ?? "—"} • warn=${m.warn ?? "—"} • falha=${m.crit ?? "—"} • conf.det=${fmtPct(m.detection_confidence_mean ?? null, 1)} • conf.diag=${fmtPct(m.diagnosis_confidence_mean ?? null, 1)} • unknown_shutdown=${m.unknown_shutdown_with_sun ?? "—"}`;
+    box.style.display = "";
   }
 
   function fmtN(x, nd=2){
@@ -863,171 +825,10 @@
       if (!hasS) s.value = toYMD(start);
     }
 
-    syncBasicAutoPlaceholders();
-    syncAdvancedDefaultPlaceholders();
-    refreshAutoDerivedAdvancedParams(false);
-  }
-
-  function backendAdvancedDefaultsFromCurrentBasics(){
-    const gpoaGate = Math.max(0, getNum("gpoa_min", 180));
-    const pminW = Math.max(0, getNum("pmin_w", 0));
-    return {
-      meteo_pos_abs: 0.25,
-      shading_std_abs: 0.22,
-      shading_window_points: 6,
-      max_gap_minutes: 30.0,
-      gpoa_plot_min: Math.max(700.0, gpoaGate),
-      pmodel_plot_min: Math.max(200.0, pminW),
-      mismatch_clip_abs: 2.0,
-      sun_available_gpoa_wm2: Math.max(180.0, gpoaGate),
-      coarse_diag_gpoa_wm2: Math.max(320.0, gpoaGate),
-      fine_diag_gpoa_wm2: Math.max(500.0, gpoaGate),
-      stable_cv_max: 0.08,
-      stable_ramp_max_wm2: 120.0,
-      stable_window_points: 6,
-      ewma_lambda: 0.20,
-      ewma_L: 3.0,
-      cusum_k: 0.50,
-      cusum_h: 8.0,
-      min_baseline_points: 24,
-      inv_cov_min: 0.30,
-      zero_abs_w: 15.0,
-      zero_rel_model: 0.02,
-      degraded_rel: 0.25,
-      severe_rel: 0.65,
-      low_i_ratio_warn: 0.35,
-      low_i_ratio_crit: 0.15,
-      low_v_ratio_warn: 0.80,
-      low_v_ratio_crit: 0.60,
-      vac_low_ratio: 0.90,
-      vac_high_ratio: 1.10,
-      vac_abs_margin_v: 10.0,
-      freq_abs_tol_hz: 1.0,
-      clip_margin: 0.98,
-      clip_model_margin: 1.02,
-      rca_min_baseline_points: 24,
-    };
-  }
-
-  function setControlValue(el, value){
-    if (!el) return;
-    suspendAdvancedParamSync = true;
-    el.value = String(value);
-    suspendAdvancedParamSync = false;
-  }
-
-  function clearControlValue(el){
-    if (!el) return;
-    suspendAdvancedParamSync = true;
-    el.value = "";
-    suspendAdvancedParamSync = false;
-  }
-
-  function formatAutoValue(value, typ="float"){
-    if (value === null || value === undefined || value === "") return "—";
-    const n = Number(value);
-    if (!Number.isFinite(n)) return String(value);
-    if (String(typ || "").toLowerCase() === "int") return String(Math.round(n));
-    if (Math.abs(n - Math.round(n)) < 1e-9) return String(Math.round(n));
-    return String(Number(n.toFixed(6)));
-  }
-
-  function setAutomaticPlaceholder(el, value){
-    if (!el) return;
-    const typ = String(el.dataset.paramType || "float").toLowerCase();
-    const txt = `Automático: ${formatAutoValue(value, typ)}`;
-    el.placeholder = txt;
-    el.title = txt;
-  }
-
-  function syncBasicAutoPlaceholders(){
-    [["warn_abs", 0.35], ["fault_abs", 0.90], ["gpoa_min", 50], ["pmin_w", 0]].forEach(([id, fallback]) => {
-      const el = $(id);
-      if (!el) return;
-      const rawDefault = (el.dataset.default ?? fallback);
-      setAutomaticPlaceholder(el, rawDefault);
-    });
-  }
-
-  function syncAdvancedDefaultPlaceholders(){
-    const defaults = backendAdvancedDefaultsFromCurrentBasics();
-    document.querySelectorAll(".adv-param-input[data-param-key]").forEach((el) => {
-      const key = el.dataset.paramKey;
-      if (!key) return;
-      const auto = el.dataset.autoDerived === "1";
-      const fallback = auto && Object.prototype.hasOwnProperty.call(defaults, key)
-        ? defaults[key]
-        : (el.dataset.default ?? defaults[key]);
-      if (auto && Object.prototype.hasOwnProperty.call(defaults, key)){
-        el.dataset.currentDefault = String(defaults[key]);
-      }
-      setAutomaticPlaceholder(el, fallback);
-    });
-  }
-
-  function refreshAutoDerivedAdvancedParams(_force){
-    const defaults = backendAdvancedDefaultsFromCurrentBasics();
-    document.querySelectorAll(".adv-param-input[data-auto-derived='1']").forEach((el) => {
-      const key = el.dataset.paramKey;
-      if (!key || !Object.prototype.hasOwnProperty.call(defaults, key)) return;
-      el.dataset.currentDefault = String(defaults[key]);
-      setAutomaticPlaceholder(el, defaults[key]);
-    });
-  }
-
-  function resetAdvancedParamsToBackendDefaults(){
-    document.querySelectorAll(".adv-param-input[data-param-key]").forEach((el) => {
-      clearControlValue(el);
-      delete el.dataset.userEdited;
-    });
-    syncAdvancedDefaultPlaceholders();
-    markRunDirty();
-  }
-
-  function parseParamControlValue(el){
-    if (!el) return null;
-    const raw = String(el.value ?? "").trim();
-    const typ = String(el.dataset.paramType || "string").toLowerCase();
-    if (!raw) return null;
-    if (typ === "int"){
-      const v = Number.parseInt(raw.replace(",", "."), 10);
-      return Number.isFinite(v) ? v : null;
-    }
-    if (typ === "float"){
-      const v = Number(raw.replace(",", "."));
-      return Number.isFinite(v) ? v : null;
-    }
-    return raw;
-  }
-
-  function collectControlPayload(){
-    const out = {};
-    document.querySelectorAll("#fddPage [data-param-key]").forEach((el) => {
-      const key = String(el.dataset.paramKey || "").trim();
-      if (!key) return;
-      const value = parseParamControlValue(el);
-      if (value === null || value === undefined || value === "") return;
-      out[key] = value;
-    });
-    return out;
-  }
-
-  function handleSyncControlMutation(el){
-    if (!el) return;
-    if (!suspendAdvancedParamSync && el.classList && el.classList.contains("adv-param-input")){
-      const raw = String(el.value ?? "").trim();
-      if (raw){
-        el.dataset.userEdited = "1";
-      } else {
-        delete el.dataset.userEdited;
-      }
-      syncAdvancedDefaultPlaceholders();
-    }
-    if (!suspendAdvancedParamSync && (el.id === "gpoa_min" || el.id === "pmin_w")){
-      syncBasicAutoPlaceholders();
-      refreshAutoDerivedAdvancedParams(false);
-    }
-    markRunDirty();
+    normalizeNumberInput("warn_abs", 0.35);
+    normalizeNumberInput("fault_abs", 0.90);
+    normalizeNumberInput("gpoa_min", 50);
+    normalizeNumberInput("pmin_w", 0);
   }
 
   const FIELD_LABELS = {
@@ -2314,14 +2115,25 @@
   }
 
   function currentPayloadBase(){
-    const payload = collectControlPayload();
+    const plantId = $("plant_id")?.value;
+    const start = $("start")?.value;
+    const end   = $("end")?.value;
 
-    if (!payload.plant_id){ throw new Error("Informe plant_id"); }
-    if (!payload.start || !payload.end){ throw new Error("Informe start e end"); }
+    if (!plantId){ throw new Error("Informe plant_id"); }
+    if (!start || !end){ throw new Error("Informe start e end"); }
 
-    payload.plant_id = Number(payload.plant_id);
-    payload.dt_minutes = Math.max(1, Number(payload.dt_minutes || 15));
-    payload.display_mode = currentDisplayMode();
+    const payload = {
+      plant_id: Number(plantId),
+      start,
+      end,
+      warn_abs: getNum("warn_abs", 0.35),
+      fault_abs: getNum("fault_abs", 0.90),
+      gpoa_min: getNum("gpoa_min", 50),
+      pmin_w: getNum("pmin_w", 0),
+      dt_minutes: Math.max(1, Number($("dt_minutes")?.value || 15)),
+      display_mode: currentDisplayMode(),
+    };
+    Object.assign(payload, collectAdvancedPayload());
     return payload;
   }
 
@@ -2334,18 +2146,6 @@
     }
     try{
       const payload = currentPayloadBase();
-      const currentSig = stablePayloadSignature(payload);
-      const lastSig = runSyncState.lastExecutedPayload ? stablePayloadSignature(runSyncState.lastExecutedPayload) : null;
-
-      if (!hmState.payload || !lastSig){
-        alert("Execute o FDD antes de exportar. O PDF agora é bloqueado quando não existe uma execução sincronizada com a tela.");
-        return;
-      }
-      if (runSyncState.dirty || currentSig !== lastSig){
-        alert("Há parâmetros alterados desde a última execução exibida na tela. Reexecute o FDD antes de exportar o PDF para evitar divergências.");
-        return;
-      }
-
       const params = new URLSearchParams();
       for (const [k, v] of Object.entries(payload)){
         if (v === undefined || v === null || v === "") continue;
@@ -2377,7 +2177,6 @@
 
       const data = await fetchFddData(apiUrl, payload);
 
-      markRunSynced(currentPayloadBase());
       setKpis(data);
       buildCharts(data);
       renderHeatmapCanvas(data);
@@ -2390,6 +2189,38 @@
     }finally{
       setBtnLoading(btnRun, false, "Executar", "Executando...");
       setBtnLoading(btnSave, false, "Executar + Salvar", "Salvando...");
+    }
+  }
+
+  async function runRandomSearch(){
+    const page = $("fddPage");
+    const apiUrl = page ? page.dataset.randomSearch : null;
+    if (!apiUrl){ alert("API de random search não configurada."); return; }
+
+    const btn = $("btnRandomSearch");
+    try{
+      const payload = currentPayloadBase();
+      payload.display_mode = "tipologia";
+      payload.rs_trials = Math.max(1, Number($("rs_trials")?.value || 24));
+      payload.rs_seed = Number($("rs_seed")?.value || 42);
+
+      setBtnLoading(btn, true, "Executar Random Search", "Buscando...");
+      setStatus(true, "Executando random search para o fluxo por Tipologia de Falha…");
+
+      const data = await fetchFddData(apiUrl, payload);
+      if (!data || !data.ok){
+        throw new Error((data && data.error) ? data.error : "Falha no random search.");
+      }
+      applyParamsToForm(data.best_params || {});
+      if ($("display_mode")) $("display_mode").value = "tipologia";
+      renderRandomSearchResult(data);
+      setStatus(true, "Random search concluído. A melhor configuração foi carregada nos parâmetros; execute o FDD para avaliar o resultado.");
+    }catch(err){
+      console.error(err);
+      renderRandomSearchResult(null);
+      setStatus(true, `Erro random search: ${String(err.message || err)}`);
+    }finally{
+      setBtnLoading(btn, false, "Executar Random Search", "Buscando...");
     }
   }
 
@@ -2411,8 +2242,8 @@
     $("kpiNoData").textContent = "—";
     $("kpiRange").textContent = "—";
     setStatus(false);
+    renderRandomSearchResult(null);
     closeDetailDrawer();
-    markRunDirty();
   }
 
   function bindDetailButtons(){
@@ -2448,16 +2279,7 @@
     $("btnRunSave")?.addEventListener("click", () => runFdd({ save:true }));
     $("btnExportPdf")?.addEventListener("click", exportPdf);
     $("btnReset")?.addEventListener("click", resetUi);
-    $("btnResetAdvanced")?.addEventListener("click", resetAdvancedParamsToBackendDefaults);
-
-    document.querySelectorAll("#fddPage [data-sync-control='1']").forEach((el) => {
-      const evt = (el.tagName === "SELECT" || String(el.type || "").toLowerCase() === "date") ? "change" : "input";
-      el.addEventListener(evt, () => handleSyncControlMutation(el));
-      if (evt !== "change") el.addEventListener("change", () => handleSyncControlMutation(el));
-      if (el.classList && el.classList.contains("adv-param-input") && el.dataset.userEdited === "1"){
-        el.dataset.userEdited = "1";
-      }
-    });
+    $("btnRandomSearch")?.addEventListener("click", runRandomSearch);
 
     $("dt_minutes")?.addEventListener("change", () => {
       if (hmState.payload) renderHeatmapCanvas(hmState.payload);
