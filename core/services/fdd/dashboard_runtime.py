@@ -10,6 +10,7 @@ from core.models import PVPlant, PVPlantStringConfig
 from core.services.fdd.dashboard_common import (
     MISMATCH_VERSION_SUMMARY,
     DashboardServiceError,
+    canonical_source_oper,
     mean_none,
     parse_date,
     runtime_severity,
@@ -23,6 +24,7 @@ from core.services.fdd.source_selection import ensure_plant_configuration, group
 from core.services.fdd.runtime_types import MismatchDashboardParams
 from core.services.fdd_mismatch import MismatchThresholds
 from core.services.residuals.facade import compute_residual_series_from_observations
+from core.services.fdd.validation import build_dashboard_validation_context
 
 
 def get_mismatch_backend_param_defaults(gpoa_gate: float = 180.0, pmin_w: float = 0.0) -> Dict[str, Any]:
@@ -643,6 +645,26 @@ def build_mismatch_dashboard_payload(plant: PVPlant, params: MismatchDashboardPa
         residual_series=residual_series,
     )
 
+    canonical_oper = canonical_source_oper(selected_sources)
+    pred_positive_runtime = [
+        bool(a) or bool(g) or str(d or "").strip().lower() not in {"ok", "normal", "invalid", "low_irradiance", ""}
+        for a, g, d in zip(pipeline["anomaly"], confidence["diag_direct_grid"], confidence["diag_diagnosis_labels"])
+    ]
+    validation_ctx = build_dashboard_validation_context(
+        plant_id=plant.id,
+        tz=params.tz,
+        times_utc=times_utc,
+        pred_anomaly_flags=pred_positive_runtime,
+        pred_labels=confidence["diag_diagnosis_labels"],
+        g_poa=model["g_poa_used"],
+        meteo_quality_ok=pipeline["meteo_quality_ok"],
+        detector_version=str(MISMATCH_VERSION_SUMMARY.get("detector_version") or "mismatch_runtime_v1"),
+        source_oper=canonical_oper,
+        source_meteo=src_meteo,
+    )
+    for tkey, block in dump_by_tkey.items():
+        block["validation"] = (validation_ctx.get("overlay_by_tkey") or {}).get(tkey, {})
+
     sev_typology, reason_typology, counts_typology = _build_typology_classes(times_utc, confidence, pipeline)
     sev_mismatch, reason_mismatch, counts_mismatch = _build_mismatch_classes(times_utc, model, pipeline, params)
 
@@ -809,7 +831,8 @@ def build_mismatch_dashboard_payload(plant: PVPlant, params: MismatchDashboardPa
                 "tipologia": counts_typology,
                 "mismatch": counts_mismatch,
             },
-            "events": [],
+            "events": validation_ctx.get("events") or [],
+            "validation": validation_ctx.get("summary") or {},
             "n_points": len(times_utc),
             "n_oper_sources": len(selected_sources),
             "persist": persist,

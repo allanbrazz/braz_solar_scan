@@ -1,6 +1,10 @@
 #core/admin.py
 from django.contrib import admin
-from .models import ShineCredential, ShineDevice, ShineProtocolSchema, ShineReading, InverterOperationalData, MeteoRecord, PVPlantDetails, PVPlantStringConfig, PVPlantMergedRecord15m
+from .models import (
+    ShineCredential, ShineDevice, ShineProtocolSchema, ShineReading,
+    InverterOperationalData, MeteoRecord, PVPlantDetails, PVPlantStringConfig,
+    PVPlantMergedRecord15m, GroundTruthEvent, FaultEvent, PlantDiagnostic15m,
+)
 from django.utils import timezone as dj_tz
 from zoneinfo import ZoneInfo
 
@@ -115,3 +119,26 @@ class ShineReadingAdmin(admin.ModelAdmin):
     list_display = ("device", "ts_utc")
     list_filter = ("device",)
     date_hierarchy = "ts_utc"
+
+@admin.register(PlantDiagnostic15m)
+class PlantDiagnostic15mAdmin(admin.ModelAdmin):
+    list_display = ("plant", "ts_utc", "source_oper", "source_meteo", "detector_version", "anomaly_flag", "diagnosis_label")
+    list_filter = ("plant", "source_oper", "source_meteo", "detector_version", "anomaly_flag", "diagnosis_label")
+    search_fields = ("plant__nome", "diagnosis_label", "rca_label")
+    ordering = ("-ts_utc",)
+
+
+@admin.register(FaultEvent)
+class FaultEventAdmin(admin.ModelAdmin):
+    list_display = ("plant", "ts_start_utc", "ts_end_utc", "status", "event_label_prelim", "final_label", "known_vs_unknown")
+    list_filter = ("plant", "status", "source_oper", "source_meteo", "detector_version", "known_vs_unknown")
+    search_fields = ("plant__nome", "event_label_prelim", "final_label")
+    ordering = ("-ts_start_utc",)
+
+
+@admin.register(GroundTruthEvent)
+class GroundTruthEventAdmin(admin.ModelAdmin):
+    list_display = ("plant", "ts_start_utc", "ts_end_utc", "truth_state", "truth_label", "annotation_source", "annotation_confidence")
+    list_filter = ("plant", "truth_state", "truth_label", "truth_group", "annotation_source")
+    search_fields = ("plant__nome", "truth_label", "notes", "created_by")
+    ordering = ("-ts_start_utc",)

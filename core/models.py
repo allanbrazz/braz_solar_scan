@@ -1091,6 +1091,81 @@ class FaultEvent(models.Model):
         return f"event {self.plant_id} {self.ts_start_utc.isoformat()}..{self.ts_end_utc.isoformat()}"
 
 
+class GroundTruthEvent(models.Model):
+    """
+    Verdade de referência mínima para a campanha de validação do FDD mismatch.
+
+    A anotação nasce em nível de evento e é posteriormente discretizada para bins
+    de 15 minutos pelo serviço de validação. O objeto pode representar tanto um
+    evento de falha confirmado quanto uma janela normal revisada manualmente.
+    """
+
+    STATE_CONFIRMED = "confirmed"
+    STATE_NORMAL = "normal"
+    STATE_UNCERTAIN = "uncertain"
+    STATE_DISMISSED = "dismissed"
+
+    STATE_CHOICES = [
+        (STATE_CONFIRMED, "Confirmed fault"),
+        (STATE_NORMAL, "Normal window"),
+        (STATE_UNCERTAIN, "Uncertain"),
+        (STATE_DISMISSED, "Dismissed"),
+    ]
+
+    plant = models.ForeignKey(
+        "core.PVPlant",
+        on_delete=models.CASCADE,
+        related_name="ground_truth_events",
+        db_index=True,
+    )
+    source_oper = models.CharField(max_length=30, blank=True, default="", db_index=True)
+    source_meteo = models.CharField(max_length=20, blank=True, default="", db_index=True)
+    detector_version = models.CharField(max_length=64, default="mismatch_runtime_v1", blank=True)
+
+    ts_start_utc = models.DateTimeField(db_index=True)
+    ts_end_utc = models.DateTimeField(db_index=True)
+
+    truth_state = models.CharField(max_length=16, choices=STATE_CHOICES, default=STATE_CONFIRMED, db_index=True)
+    truth_label = models.CharField(max_length=64, default="unknown", blank=True, db_index=True)
+    truth_group = models.CharField(max_length=32, default="unknown", blank=True, db_index=True)
+
+    annotation_source = models.CharField(max_length=32, default="specialist_review", blank=True)
+    annotation_confidence = models.CharField(max_length=8, default="B", blank=True)
+    created_by = models.CharField(max_length=128, default="", blank=True)
+    notes = models.TextField(blank=True, default="")
+    meta = models.JSONField(null=True, blank=True)
+
+    linked_fault_event = models.ForeignKey(
+        "core.FaultEvent",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="linked_ground_truth_events",
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Ground Truth Event"
+        verbose_name_plural = "Ground Truth Events"
+        constraints = [
+            models.CheckConstraint(
+                condition=Q(ts_end_utc__gte=F("ts_start_utc")),
+                name="chk_groundtruth_end_after_start",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["plant", "ts_start_utc"], name="idx_gt_event_plant_start"),
+            models.Index(fields=["plant", "truth_state", "ts_start_utc"], name="idx_gt_event_state_start"),
+            models.Index(fields=["plant", "truth_label", "ts_start_utc"], name="idx_gt_event_label_start"),
+        ]
+        ordering = ["plant_id", "ts_start_utc"]
+
+    def __str__(self) -> str:
+        return f"gt {self.plant_id} {self.truth_state} {self.truth_label} {self.ts_start_utc.isoformat()}..{self.ts_end_utc.isoformat()}"
+
+
 class FaultEventMPPT(models.Model):
     """
     Diagnóstico por MPPT associado a um FaultEvent.

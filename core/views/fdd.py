@@ -17,11 +17,12 @@ from django.urls import reverse
 from django.views.decorators.http import require_GET, require_http_methods
 from django.contrib.auth.decorators import login_required
 
-from core.models import PVPlant
+from core.models import PVPlant, FaultEvent, GroundTruthEvent
 from core.services.fdd.dashboard_common import MISMATCH_VERSION_SUMMARY, DashboardServiceError
 from core.services.fdd.dashboard_runtime import build_mismatch_dashboard_payload, parse_dashboard_params
 from core.services.fdd.param_catalog import BASIC_PARAM_DEFAULTS, ADVANCED_PARAM_KEYS, advanced_groups, RANDOM_SEARCH_DEFAULT_TRIALS, RANDOM_SEARCH_DEFAULT_SEED
 from core.services.fdd.random_search import run_typology_random_search
+from core.services.fdd.validation import compute_validation_report_from_db, infer_truth_group
 
 try:
     from core.services.fdd.report_pdf import build_mismatch_pdf_report  # type: ignore
@@ -102,6 +103,105 @@ def _build_payload_from_request(request: HttpRequest, *, allow_post: bool) -> Tu
     return plant, params, payload
 
 
+
+
+def _read_request_data(request: HttpRequest) -> Dict[str, Any]:
+    if request.content_type and "application/json" in request.content_type.lower():
+        try:
+            body = request.body.decode("utf-8") if request.body else "{}"
+            parsed = json.loads(body or "{}")
+            return parsed if isinstance(parsed, dict) else {}
+        except Exception:
+            return {}
+    if request.method == "POST":
+        return dict(request.POST.items())
+    return dict(request.GET.items())
+
+
+def _parse_iso_dt(value: Any, *, field_name: str) -> datetime:
+    raw = str(value or "").strip()
+    if not raw:
+        raise DashboardServiceError(f"{field_name} obrigatório", status_code=400)
+    try:
+        if raw.endswith("Z"):
+            raw = raw[:-1] + "+00:00"
+        dt = datetime.fromisoformat(raw)
+    except Exception:
+        raise DashboardServiceError(f"{field_name} inválido; use ISO-8601", status_code=400)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=ZoneInfo("UTC"))
+    return dt.astimezone(ZoneInfo("UTC"))
+
+
+def _update_fault_event_review(*, event: FaultEvent, review_state: str, final_label: str, notes: str, annotation_source: str, annotation_confidence: str, reviewer: str) -> FaultEvent:
+    review_state = str(review_state or "pending").strip().lower()
+    if review_state not in {"pending", "confirmed", "dismissed", "uncertain"}:
+        raise DashboardServiceError("review_state inválido", status_code=400)
+
+    meta = dict(event.meta or {})
+    meta["review"] = {
+        "review_state": review_state,
+        "annotated_by": reviewer,
+        "annotation_source": annotation_source or "specialist_review",
+        "annotation_confidence": annotation_confidence or "B",
+        "notes": notes or "",
+        "reviewed_at": datetime.now(ZoneInfo("UTC")).isoformat(),
+    }
+    event.meta = meta
+
+    if review_state == "dismissed":
+        event.status = FaultEvent.STATUS_DISMISSED
+        event.known_vs_unknown = "dismissed"
+    elif review_state == "confirmed":
+        event.status = FaultEvent.STATUS_REVIEWED
+        event.known_vs_unknown = "known" if (final_label and final_label != "unknown") else "unknown"
+    elif review_state == "uncertain":
+        event.status = FaultEvent.STATUS_REVIEWED
+        event.known_vs_unknown = "unknown"
+    else:
+        event.status = FaultEvent.STATUS_OPEN
+        event.known_vs_unknown = "pending"
+
+    if final_label:
+        event.final_label = final_label
+    event.save(update_fields=["status", "known_vs_unknown", "final_label", "meta", "updated_at"])
+    return event
+
+
+def _upsert_truth_from_review(*, event: FaultEvent, review_state: str, final_label: str, notes: str, annotation_source: str, annotation_confidence: str, reviewer: str) -> Optional[GroundTruthEvent]:
+    if review_state not in {"confirmed", "uncertain", "dismissed"}:
+        return None
+    truth_state = {
+        "confirmed": GroundTruthEvent.STATE_CONFIRMED,
+        "uncertain": GroundTruthEvent.STATE_UNCERTAIN,
+        "dismissed": GroundTruthEvent.STATE_DISMISSED,
+    }[review_state]
+    defaults = {
+        "plant": event.plant,
+        "source_oper": event.source_oper,
+        "source_meteo": event.source_meteo,
+        "detector_version": event.detector_version or "mismatch_runtime_v1",
+        "ts_start_utc": event.ts_start_utc,
+        "ts_end_utc": event.ts_end_utc,
+        "truth_state": truth_state,
+        "truth_label": final_label or event.final_label or event.event_label_prelim or "unknown",
+        "truth_group": infer_truth_group(final_label or event.final_label or event.event_label_prelim or "unknown", truth_state),
+        "annotation_source": annotation_source or "specialist_review",
+        "annotation_confidence": annotation_confidence or "B",
+        "created_by": reviewer,
+        "notes": notes or "",
+        "linked_fault_event": event,
+        "meta": {"origin": "fault_event_review", "fault_event_id": event.id},
+    }
+    gt = GroundTruthEvent.objects.filter(linked_fault_event=event).first()
+    if gt is None:
+        gt = GroundTruthEvent.objects.create(**defaults)
+    else:
+        for key, value in defaults.items():
+            setattr(gt, key, value)
+        gt.save()
+    return gt
+
 @require_GET
 @login_required
 def mismatch_fdd_view(request: HttpRequest):
@@ -162,6 +262,142 @@ def mismatch_fdd_random_search_api(request: HttpRequest) -> JsonResponse:
         return _json_response_strict({"ok": False, "error": exc.message}, status=exc.status_code)
     except Exception as exc:
         logger.exception("mismatch_fdd_random_search_api failed")
+        return _json_response_strict({"ok": False, "error": f"Erro interno: {type(exc).__name__}: {exc}"}, status=500)
+
+
+
+
+@require_http_methods(["POST"])
+@login_required
+def mismatch_fdd_review_event_api(request: HttpRequest) -> JsonResponse:
+    try:
+        data = _read_request_data(request)
+        event_id = int(str(data.get("fault_event_id") or data.get("event_id") or "0").strip())
+        event = FaultEvent.objects.select_related("plant").filter(id=event_id).first()
+        if event is None:
+            raise DashboardServiceError("Evento não encontrado", status_code=404)
+        _load_authorized_plant(request, event.plant_id)
+
+        review_state = str(data.get("review_state") or "pending").strip().lower()
+        final_label = str(data.get("final_label") or event.final_label or event.event_label_prelim or "").strip()
+        notes = str(data.get("notes") or "").strip()
+        annotation_source = str(data.get("annotation_source") or "specialist_review").strip()
+        annotation_confidence = str(data.get("annotation_confidence") or "B").strip()
+        reviewer = str(getattr(request.user, "username", "") or getattr(request.user, "email", "") or request.user.pk)
+
+        event = _update_fault_event_review(
+            event=event,
+            review_state=review_state,
+            final_label=final_label,
+            notes=notes,
+            annotation_source=annotation_source,
+            annotation_confidence=annotation_confidence,
+            reviewer=reviewer,
+        )
+        gt = _upsert_truth_from_review(
+            event=event,
+            review_state=review_state,
+            final_label=final_label,
+            notes=notes,
+            annotation_source=annotation_source,
+            annotation_confidence=annotation_confidence,
+            reviewer=reviewer,
+        )
+        return _json_response_strict({
+            "ok": True,
+            "fault_event_id": event.id,
+            "status": event.status,
+            "known_vs_unknown": event.known_vs_unknown,
+            "final_label": event.final_label,
+            "ground_truth_event_id": gt.id if gt else None,
+        }, status=200)
+    except DashboardServiceError as exc:
+        return _json_response_strict({"ok": False, "error": exc.message}, status=exc.status_code)
+    except Exception as exc:
+        logger.exception("mismatch_fdd_review_event_api failed")
+        return _json_response_strict({"ok": False, "error": f"Erro interno: {type(exc).__name__}: {exc}"}, status=500)
+
+
+@require_http_methods(["POST"])
+@login_required
+def mismatch_fdd_create_truth_event_api(request: HttpRequest) -> JsonResponse:
+    try:
+        data = _read_request_data(request)
+        plant = _load_authorized_plant(request, _parse_plant_id(data))
+        gt_id_raw = str(data.get("ground_truth_event_id") or "").strip()
+        fault_event_id_raw = str(data.get("fault_event_id") or "").strip()
+        linked_fault_event = None
+        if fault_event_id_raw:
+            linked_fault_event = FaultEvent.objects.filter(id=int(fault_event_id_raw), plant_id=plant.id).first()
+
+        ts_start_utc = _parse_iso_dt(data.get("ts_start_utc") or data.get("ts_start") or data.get("start"), field_name="ts_start_utc")
+        ts_end_utc = _parse_iso_dt(data.get("ts_end_utc") or data.get("ts_end") or data.get("end"), field_name="ts_end_utc")
+        truth_state = str(data.get("truth_state") or GroundTruthEvent.STATE_CONFIRMED).strip().lower()
+        if truth_state not in {GroundTruthEvent.STATE_CONFIRMED, GroundTruthEvent.STATE_NORMAL, GroundTruthEvent.STATE_UNCERTAIN, GroundTruthEvent.STATE_DISMISSED}:
+            raise DashboardServiceError("truth_state inválido", status_code=400)
+        truth_label = str(data.get("truth_label") or ("normal" if truth_state == GroundTruthEvent.STATE_NORMAL else "unknown")).strip()
+        annotation_source = str(data.get("annotation_source") or "specialist_review").strip()
+        annotation_confidence = str(data.get("annotation_confidence") or "B").strip()
+        notes = str(data.get("notes") or "").strip()
+        reviewer = str(getattr(request.user, "username", "") or getattr(request.user, "email", "") or request.user.pk)
+        defaults = {
+            "plant": plant,
+            "source_oper": str(data.get("source_oper") or getattr(linked_fault_event, "source_oper", "") or "").strip(),
+            "source_meteo": str(data.get("source_meteo") or getattr(linked_fault_event, "source_meteo", "") or "").strip(),
+            "detector_version": str(data.get("detector_version") or getattr(linked_fault_event, "detector_version", "mismatch_runtime_v1") or "mismatch_runtime_v1").strip(),
+            "ts_start_utc": ts_start_utc,
+            "ts_end_utc": ts_end_utc,
+            "truth_state": truth_state,
+            "truth_label": truth_label,
+            "truth_group": infer_truth_group(truth_label, truth_state),
+            "annotation_source": annotation_source,
+            "annotation_confidence": annotation_confidence,
+            "created_by": reviewer,
+            "notes": notes,
+            "linked_fault_event": linked_fault_event,
+            "meta": {"origin": "manual_truth_event"},
+        }
+        if gt_id_raw:
+            gt = GroundTruthEvent.objects.filter(id=int(gt_id_raw), plant_id=plant.id).first()
+            if gt is None:
+                raise DashboardServiceError("Ground truth event não encontrado", status_code=404)
+            for key, value in defaults.items():
+                setattr(gt, key, value)
+            gt.save()
+        else:
+            gt = GroundTruthEvent.objects.create(**defaults)
+        return _json_response_strict({"ok": True, "ground_truth_event_id": gt.id, "truth_state": gt.truth_state, "truth_label": gt.truth_label}, status=200)
+    except DashboardServiceError as exc:
+        return _json_response_strict({"ok": False, "error": exc.message}, status=exc.status_code)
+    except Exception as exc:
+        logger.exception("mismatch_fdd_create_truth_event_api failed")
+        return _json_response_strict({"ok": False, "error": f"Erro interno: {type(exc).__name__}: {exc}"}, status=500)
+
+
+@require_http_methods(["GET", "POST"])
+@login_required
+def mismatch_fdd_validation_api(request: HttpRequest) -> JsonResponse:
+    try:
+        data = request.POST if request.method == "POST" else request.GET
+        plant = _load_authorized_plant(request, _parse_plant_id(data))
+        tz_name = getattr(plant, "timezone", "UTC") or "UTC"
+        params = parse_dashboard_params(data, tz_name)
+        detector_version = str(data.get("detector_version") or "mismatch_runtime_v1").strip()
+        source_oper = str(data.get("source_oper") or data.get("src_oper") or "").strip()
+        source_meteo = str(data.get("source_meteo") or data.get("src_meteo") or "").strip()
+        report = compute_validation_report_from_db(
+            plant_id=plant.id,
+            ts_start_utc=params.dt0_utc,
+            ts_end_utc=params.dt1_utc,
+            detector_version=detector_version,
+            source_oper=source_oper,
+            source_meteo=source_meteo,
+        )
+        return _json_response_strict({"ok": True, "validation": report}, status=200)
+    except DashboardServiceError as exc:
+        return _json_response_strict({"ok": False, "error": exc.message}, status=exc.status_code)
+    except Exception as exc:
+        logger.exception("mismatch_fdd_validation_api failed")
         return _json_response_strict({"ok": False, "error": f"Erro interno: {type(exc).__name__}: {exc}"}, status=500)
 
 

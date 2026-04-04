@@ -184,6 +184,8 @@
     :root{
       --hm-none: #a0a2a786;
       --hm-ok:   #46e68c;
+      --hm-softok: #8fe57a;
+      --hm-softwarn: #dff06a;
       --hm-warn: #ffd25a;
       --hm-crit: #ff5a6e;
       --hm-sel:  rgba(90,200,255,.95);
@@ -349,11 +351,107 @@
     table.compare-kv tr:last-child td{ border-bottom:0; }
     table.compare-kv th{ text-align:left; opacity:.85; font-size:.84rem; background: rgba(10,20,40,.25); }
 
+
+    .validation-grid{
+      display:grid;
+      grid-template-columns: repeat(2, minmax(0,1fr));
+      gap:.8rem;
+    }
+    .validation-block{
+      border:1px solid rgba(255,255,255,.12);
+      border-radius:14px;
+      background: rgba(255,255,255,.035);
+      padding:.85rem .9rem;
+      min-width:0;
+    }
+    .validation-block h4{ margin:.1rem 0 .6rem; font-size:.95rem; }
+    .validation-empty{ opacity:.75; }
+    .validation-events-list{
+      display:grid;
+      gap:.55rem;
+      max-height: 340px;
+      overflow:auto;
+    }
+    .validation-event-item{
+      border:1px solid rgba(255,255,255,.10);
+      border-radius:12px;
+      background: rgba(10,20,40,.22);
+      padding:.65rem .7rem;
+      display:grid;
+      gap:.35rem;
+    }
+    .validation-row{ display:flex; gap:.6rem; flex-wrap:wrap; align-items:center; }
+    .validation-row.tight{ gap:.45rem; }
+    .pill{
+      display:inline-flex; align-items:center; gap:.35rem;
+      padding:.22rem .55rem; border-radius:999px;
+      font-size:.79rem; font-weight:800;
+      border:1px solid rgba(255,255,255,.14); background: rgba(255,255,255,.06);
+    }
+    .pill.ok{ border-color: rgba(70,230,140,.35); background: rgba(70,230,140,.10); }
+    .pill.warn{ border-color: rgba(255,210,90,.35); background: rgba(255,210,90,.10); }
+    .pill.crit{ border-color: rgba(255,90,110,.35); background: rgba(255,90,110,.10); }
+    .pill.neutral{ border-color: rgba(255,255,255,.14); background: rgba(255,255,255,.06); }
+    .pill.info{ border-color: rgba(90,200,255,.35); background: rgba(90,200,255,.10); }
+    .form-grid{
+      display:grid;
+      grid-template-columns: repeat(2, minmax(0,1fr));
+      gap:.7rem;
+    }
+    .form-grid .full{ grid-column: 1 / -1; }
+    .form-field{ display:flex; flex-direction:column; gap:.3rem; min-width:0; }
+    .form-field label{ font-size:.82rem; opacity:.82; }
+    .input-glass, .textarea-glass, .select-glass{
+      width:100%;
+      padding:.55rem .7rem;
+      border-radius:12px;
+      background: rgba(10,20,40,.35);
+      border:1px solid rgba(255,255,255,.16);
+      color:#e9f6ff;
+      outline:none;
+    }
+    .textarea-glass{ min-height: 84px; resize: vertical; }
+    .select-glass option{ color:#111; }
+    .validation-actions{ display:flex; gap:.55rem; flex-wrap:wrap; }
+    .validation-help{ margin:.25rem 0 0; opacity:.76; font-size:.83rem; line-height:1.35; }
+    .validation-banner{
+      margin-top:.7rem;
+      padding:.6rem .75rem;
+      border-radius:12px;
+      border:1px solid rgba(255,255,255,.12);
+      background: rgba(255,255,255,.05);
+    }
+    .validation-banner.ok{ border-color: rgba(70,230,140,.35); background: rgba(70,230,140,.08); }
+    .validation-banner.warn{ border-color: rgba(255,210,90,.35); background: rgba(255,210,90,.08); }
+    .validation-banner.crit{ border-color: rgba(255,90,110,.35); background: rgba(255,90,110,.08); }
+    .validation-matrix{
+      width:100%;
+      border-collapse: collapse;
+      border:1px solid rgba(255,255,255,.12);
+      border-radius:14px;
+      overflow:hidden;
+      background: rgba(255,255,255,.03);
+      font-size:.86rem;
+    }
+    .validation-matrix th, .validation-matrix td{
+      padding:.45rem .55rem;
+      border-bottom:1px solid rgba(255,255,255,.08);
+      border-right:1px solid rgba(255,255,255,.06);
+      text-align:left;
+      vertical-align:top;
+    }
+    .validation-matrix tr:last-child td{ border-bottom:0; }
+    .validation-matrix th:last-child, .validation-matrix td:last-child{ border-right:0; }
+    .validation-matrix th{ background: rgba(10,20,40,.25); opacity:.88; }
+    @media (max-width: 900px){
+      .validation-grid, .form-grid{ grid-template-columns: 1fr; }
+    }
+
   </style>
 {% endblock %}
 
 {% block content %}
-<div id="fddPage" class="dash" data-api="{% url 'mismatch_fdd_api' %}" data-export="{{ export_pdf_url|default:'' }}" data-random-search="{{ random_search_url|default:'' }}">
+<div id="fddPage" class="dash" data-api="{% url 'mismatch_fdd_api' %}" data-export="{{ export_pdf_url|default:'' }}" data-random-search="{{ random_search_url|default:'' }}" data-review-api="{% url 'mismatch_fdd_review_event_api' %}" data-truth-api="{% url 'mismatch_fdd_create_truth_event_api' %}" data-validation-api="{% url 'mismatch_fdd_validation_api' %}">
   <div class="card glass span-12">
     <div class="page-head">
       <div style="min-width:0;">
@@ -560,6 +658,55 @@
     </div>
   </div>
 
+  <div class="card glass span-12" id="validationSummaryCard">
+    <div class="page-head">
+      <div style="min-width:0;">
+        <h3 style="margin:0">Validação do FDD mismatch</h3>
+        <div class="sub">Métricas por evento e por amostra a partir da camada de revisão/ground truth. Após revisar ou criar um evento real, execute ou atualize novamente o FDD para refletir os novos números.</div>
+      </div>
+    </div>
+
+    <div style="height:.8rem"></div>
+
+    <div class="kpi" id="validationKpiGrid">
+      <div class="tile"><p class="t">Precisão evento</p><p class="v" id="valEventPrecision">—</p><p class="s">TP / (TP + FP)</p></div>
+      <div class="tile"><p class="t">Recall evento</p><p class="v" id="valEventRecall">—</p><p class="s">TP / (TP + FN)</p></div>
+      <div class="tile"><p class="t">F1 evento</p><p class="v" id="valEventF1">—</p><p class="s">campanha por evento</p></div>
+      <div class="tile"><p class="t">Falso alarme evento</p><p class="v" id="valEventFarDay">—</p><p class="s">eventos FP / dia</p></div>
+      <div class="tile"><p class="t">Precisão amostra</p><p class="v" id="valSamplePrecision">—</p><p class="s">bins rotulados</p></div>
+      <div class="tile"><p class="t">Recall amostra</p><p class="v" id="valSampleRecall">—</p><p class="s">bins de falha</p></div>
+    </div>
+
+    <div style="height:.8rem"></div>
+
+    <div class="validation-grid">
+      <div class="validation-block">
+        <h4>Cobertura da campanha</h4>
+        <div id="validationCoverageText" class="validation-empty">Execute o FDD para carregar o resumo da validação.</div>
+      </div>
+      <div class="validation-block">
+        <h4>Atraso e taxas de falso alarme</h4>
+        <div id="validationDelayText" class="validation-empty">—</div>
+      </div>
+      <div class="validation-block">
+        <h4>Matriz de confusão diagnóstica</h4>
+        <div id="validationConfusionWrap" class="validation-empty">—</div>
+      </div>
+      <div class="validation-block">
+        <h4>Análise por faixa de irradiância</h4>
+        <div id="validationIrradianceWrap" class="validation-empty">—</div>
+      </div>
+      <div class="validation-block">
+        <h4>Análise por qualidade meteorológica</h4>
+        <div id="validationMeteoWrap" class="validation-empty">—</div>
+      </div>
+      <div class="validation-block">
+        <h4>Eventos previstos no intervalo</h4>
+        <div id="validationEventsList" class="validation-events-list"><div class="validation-empty">Sem eventos carregados.</div></div>
+      </div>
+    </div>
+  </div>
+
   <div class="card glass span-12">
     <h3 style="margin-top:0">Potência (Real vs Modelo)</h3>
     <div class="chart-wrap sm"><canvas id="chartPower"></canvas></div>
@@ -578,6 +725,8 @@
       <div class="legend">
         <span class="badge"><span class="dot" style="background:var(--hm-none)"></span>sem operativos</span>
         <span class="badge"><span class="dot" style="background:var(--hm-ok)"></span>normal</span>
+        <span class="badge"><span class="dot" style="background:var(--hm-softok)"></span>perda parcial provável</span>
+        <span class="badge"><span class="dot" style="background:var(--hm-softwarn)"></span>desempenho persistentemente baixo</span>
         <span class="badge"><span class="dot" style="background:var(--hm-warn)"></span>warn</span>
         <span class="badge"><span class="dot" style="background:var(--hm-crit)"></span>falha</span>
         <span class="badge"><span class="mono" id="hmBadgeTxt">—</span></span>
@@ -640,6 +789,7 @@
       <button type="button" class="drawer-tab-btn" data-tab="ac">Saída do inversor (AC)</button>
       <button type="button" class="drawer-tab-btn" data-tab="compare">Modelo × medido</button>
       <button type="button" class="drawer-tab-btn" data-tab="curve">Curva do dia</button>
+      <button type="button" class="drawer-tab-btn" data-tab="validation">Validação</button>
       <button type="button" class="drawer-tab-btn" data-tab="dump">Dump</button>
     </div>
 
@@ -676,6 +826,14 @@
     <div class="drawer-tab-panel" data-panel="curve">
       <h4 style="margin:.2rem 0 .6rem;">Curva do dia</h4>
       <div class="chart-wrap sm"><canvas id="chartDetailDay"></canvas></div>
+      <div style="height:.9rem"></div>
+      <h4 style="margin:.2rem 0 .6rem;">Irradiância do dia</h4>
+      <div class="chart-wrap sm"><canvas id="chartDetailIrrDay"></canvas></div>
+    </div>
+
+    <div class="drawer-tab-panel" data-panel="validation">
+      <h4 style="margin:.2rem 0 .6rem;">Validação do ponto / evento</h4>
+      <div id="detailValidation"></div>
     </div>
 
     <div class="drawer-tab-panel" data-panel="dump">
@@ -1020,9 +1178,215 @@
     return human ? `${human} (${s})` : s;
   }
 
+
+  function escHtml(value){
+    return String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
+  function escAttr(value){
+    return escHtml(value).replace(/`/g, "&#96;");
+  }
+
+  function getCookie(name){
+    const cookies = String(document.cookie || "").split(";");
+    for (const part of cookies){
+      const [k, ...rest] = part.trim().split("=");
+      if (k === name) return decodeURIComponent(rest.join("="));
+    }
+    return "";
+  }
+
+  async function postJson(url, body){
+    const csrftoken = getCookie("csrftoken");
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        ...(csrftoken ? { "X-CSRFToken": csrftoken } : {}),
+      },
+      credentials: "same-origin",
+      body: JSON.stringify(body || {}),
+    });
+    const txt = await res.text();
+    let data = null;
+    try{ data = JSON.parse(txt); }catch(_e){}
+    if (!res.ok || !data || data.ok === false){
+      const msg = (data && (data.error || data.detail)) ? (data.error || data.detail) : (txt || `HTTP ${res.status}`);
+      throw new Error(msg);
+    }
+    return data;
+  }
+
+  function pillClassForState(state){
+    const s = String(state || "").toLowerCase();
+    if (["confirmed","tp","ok","normal"].includes(s)) return "ok";
+    if (["pending","uncertain","partial","warn"].includes(s)) return "warn";
+    if (["dismissed","fp","fn","crit"].includes(s)) return "crit";
+    return "neutral";
+  }
+
+  function renderMetricRows(obj, mode){
+    const entries = Object.entries(obj || {});
+    if (!entries.length) return `<div class="validation-empty">Sem dados.</div>`;
+    const rows = entries.map(([key, vals]) => {
+      const precision = fmtPct(vals?.precision ?? null, 1);
+      const recall = fmtPct(vals?.recall ?? null, 1);
+      const f1 = fmtPct(vals?.f1 ?? null, 1);
+      const support = (vals?.tp ?? 0) + (vals?.fn ?? 0);
+      const fp = vals?.fp ?? 0;
+      const label = mode === "meteo" ? (key === "meteo_ok" ? "Meteo OK" : key === "meteo_low_quality" ? "Meteo baixa qualidade" : key) : key;
+      return `<tr><td class="mono">${escHtml(label)}</td><td class="mono">${precision}</td><td class="mono">${recall}</td><td class="mono">${f1}</td><td class="mono">${support}</td><td class="mono">${fp}</td></tr>`;
+    }).join("");
+    return `<table class="validation-matrix"><thead><tr><th>Bucket</th><th>Precisão</th><th>Recall</th><th>F1</th><th>Support</th><th>FP</th></tr></thead><tbody>${rows}</tbody></table>`;
+  }
+
+  function renderMatrixTable(matrix){
+    const rows = Object.keys(matrix || {});
+    if (!rows.length) return `<div class="validation-empty">Sem observações suficientes.</div>`;
+    const colsSet = new Set();
+    rows.forEach((r)=>Object.keys(matrix[r] || {}).forEach((c)=>colsSet.add(c)));
+    const cols = Array.from(colsSet);
+    const head = cols.map((c)=>`<th class="mono">${escHtml(c)}</th>`).join("");
+    const body = rows.map((r)=>{
+      const cells = cols.map((c)=>`<td class="mono">${fmtAny((matrix[r] || {})[c] ?? 0)}</td>`).join("");
+      return `<tr><th class="mono">${escHtml(r)}</th>${cells}</tr>`;
+    }).join("");
+    return `<table class="validation-matrix"><thead><tr><th>Verdade</th>${head}</tr></thead><tbody>${body}</tbody></table>`;
+  }
+
+  function getPredEventList(payload){
+    return Array.isArray(payload?.summary?.events) ? payload.summary.events : [];
+  }
+
+  function findPredEvent(payload, eventId){
+    const eid = Number(eventId);
+    if (!Number.isFinite(eid)) return null;
+    return getPredEventList(payload).find((ev)=>Number(ev?.id) === eid) || null;
+  }
+
+  function isoToMillis(isoText){
+    const d = new Date(String(isoText || ""));
+    const ms = d.getTime();
+    return Number.isFinite(ms) ? ms : null;
+  }
+
+  function parsePositiveInt(value){
+    const raw = (value === null || value === undefined) ? "" : String(value).trim();
+    if (!raw) return null;
+    const n = Number(raw);
+    return Number.isInteger(n) && n > 0 ? n : null;
+  }
+
+  const VALIDATION_LABEL_OPTIONS = [
+    "grid_overvoltage_trip",
+    "grid_overvoltage_derating",
+    "grid_undervoltage_trip",
+    "grid_undervoltage_derating",
+    "grid_overfrequency_trip",
+    "grid_underfrequency_trip",
+    "inverter_off_under_sun",
+    "unknown_shutdown_with_sun",
+    "dc_side_partial_loss_probable",
+    "dc_side_voltage_anomaly_probable",
+    "partial_generation_loss_probable",
+    "persistent_underperformance",
+    "curtailment_clipping",
+    "normal",
+    "unknown",
+  ];
+
+  function buildLabelOptions(selectedValue, { allowBlank=false, preferred=[] } = {}){
+    const values = [];
+    const pushValue = (v)=>{
+      const s = String(v || "").trim();
+      if (!s) return;
+      if (!values.includes(s)) values.push(s);
+    };
+    preferred.forEach(pushValue);
+    VALIDATION_LABEL_OPTIONS.forEach(pushValue);
+    pushValue(selectedValue);
+    let html = allowBlank ? `<option value="">— selecionar —</option>` : "";
+    html += values.map((v)=>`<option value="${escAttr(v)}" ${String(selectedValue || "") === v ? "selected" : ""}>${escHtml(v)}</option>`).join("");
+    return html;
+  }
+
+  function resolvePredEventContext(payload, cellObj, validationBlock){
+    const directId = parsePositiveInt(validationBlock?.pred_event_id);
+    const directEvent = directId ? findPredEvent(payload, directId) : null;
+    if (directEvent || directId){
+      return { predEventId: directId || null, predEvent: directEvent, source: "overlay" };
+    }
+
+    const selectedTsUtc = String(
+      validationBlock?.selected_ts_utc
+      || cellObj?.dumpPoint?.ts_utc
+      || payload?.dump_by_tkey?.[cellObj?.tkey]?.ts_utc
+      || ""
+    );
+    const selectedMs = isoToMillis(selectedTsUtc);
+    if (!Number.isFinite(selectedMs)) return { predEventId: null, predEvent: null, source: null };
+
+    const selectedReason = String(
+      validationBlock?.pred_event_label_prelim
+      || cellObj?.reason
+      || cellObj?.dumpPoint?.reason
+      || ""
+    ).trim().toLowerCase();
+
+    const candidates = getPredEventList(payload).filter((ev)=>{
+      const startMs = isoToMillis(ev?.ts_start_utc);
+      const endMs = isoToMillis(ev?.ts_end_utc);
+      if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return false;
+      return startMs <= selectedMs && selectedMs <= endMs;
+    });
+    if (!candidates.length) return { predEventId: null, predEvent: null, source: null };
+
+    candidates.sort((a,b)=>{
+      const aLabel = String(a?.event_label_prelim || a?.pred_label || "").trim().toLowerCase();
+      const bLabel = String(b?.event_label_prelim || b?.pred_label || "").trim().toLowerCase();
+      const aScore = (selectedReason && aLabel === selectedReason ? 10 : 0) + (a?.match_type === 'TP' ? 1 : 0);
+      const bScore = (selectedReason && bLabel === selectedReason ? 10 : 0) + (b?.match_type === 'TP' ? 1 : 0);
+      if (bScore !== aScore) return bScore - aScore;
+      return (isoToMillis(a?.ts_start_utc) || 0) - (isoToMillis(b?.ts_start_utc) || 0);
+    });
+
+    const best = candidates[0] || null;
+    return { predEventId: parsePositiveInt(best?.id), predEvent: best, source: best ? "summary_inference" : null };
+  }
+
+  function addMinutesIso(isoText, minutes){
+    const d = new Date(String(isoText || ""));
+    if (!Number.isFinite(d.getTime())) return "";
+    return new Date(d.getTime() + Number(minutes || 0) * 60000).toISOString();
+  }
+
+  function buildTruthDefaults(payload, cellObj, validationBlock){
+    const predCtx = resolvePredEventContext(payload, cellObj, validationBlock);
+    const predEvent = predCtx?.predEvent || null;
+    const dtm = Math.max(1, Number($("dt_minutes")?.value || hmState.dtm || 15));
+    const selectedTsUtc = String(cellObj?.dumpPoint?.ts_utc || validationBlock?.selected_ts_utc || payload?.dump_by_tkey?.[cellObj?.tkey]?.ts_utc || "");
+    return {
+      startUtc: String(predEvent?.ts_start_utc || selectedTsUtc || ""),
+      endUtc: String(predEvent?.ts_end_utc || addMinutesIso(selectedTsUtc, dtm) || ""),
+    };
+  }
+
+  function refreshValidationBanner(message, tone="ok"){
+    const box = $("validationCoverageText");
+    if (!box || !message) return;
+    box.innerHTML = `<div class="validation-banner ${tone}">${escHtml(message)}</div>` + box.innerHTML;
+  }
+
   /* Charts */
   let chartPower = null;
   let chartDetailDay = null;
+  let chartDetailIrrDay = null;
 
   function chartCommonOptions(){
     return {
@@ -1052,6 +1416,7 @@
   function destroyCharts(){
     if(chartPower){ chartPower.destroy(); chartPower = null; }
     if(chartDetailDay){ chartDetailDay.destroy(); chartDetailDay = null; }
+    if(chartDetailIrrDay){ chartDetailIrrDay.destroy(); chartDetailIrrDay = null; }
   }
 
   function buildCharts(payload){
@@ -1144,6 +1509,21 @@
     return "warn";
   }
 
+  function toneFromCell(obj){
+    const cls = normalizeClass(obj?.cls);
+    if (cls !== "warn") return cls;
+    const reason = String(obj?.reason || "").trim().toLowerCase();
+    const lbl = String(obj?.lbl || "").trim().toLowerCase();
+    const code = String(obj?.code || "").trim().toLowerCase();
+    if (reason === "partial_generation_loss_probable" || lbl === "partial_generation_loss_probable" || code === "partial_generation_loss_probable") {
+      return "softok";
+    }
+    if (reason === "persistent_underperformance" || lbl === "persistent_underperformance" || code === "persistent_underperformance") {
+      return "softwarn";
+    }
+    return cls;
+  }
+
   function classRank(cls){
     if (cls === "crit") return 3;
     if (cls === "warn") return 2;
@@ -1151,11 +1531,13 @@
     return 0; // none
   }
 
-  function sevColor(cls){
+  function sevColor(tone){
     const cs = getComputedStyle(document.documentElement);
-    if (cls === "crit") return cs.getPropertyValue("--hm-crit").trim();
-    if (cls === "warn") return cs.getPropertyValue("--hm-warn").trim();
-    if (cls === "ok")   return cs.getPropertyValue("--hm-ok").trim();
+    if (tone === "crit") return cs.getPropertyValue("--hm-crit").trim();
+    if (tone === "warn") return cs.getPropertyValue("--hm-warn").trim();
+    if (tone === "softwarn") return cs.getPropertyValue("--hm-softwarn").trim();
+    if (tone === "softok") return cs.getPropertyValue("--hm-softok").trim();
+    if (tone === "ok")   return cs.getPropertyValue("--hm-ok").trim();
     return cs.getPropertyValue("--hm-none").trim();
   }
 
@@ -1406,7 +1788,7 @@
 
       const localIso = (typeof t[i] === "string") ? t[i] : null;
       const tkey = localIso ? String(localIso).slice(0,16) : null;
-      cell.set(key, {
+      const cellObj = {
         idx: i,
         has_any: true,
         has_oper: hasOper,
@@ -1419,7 +1801,9 @@
         minute: Number(minutes),
         tkey,
         exact_ts_local: localIso,
-      });
+      };
+      cellObj.tone = toneFromCell(cellObj);
+      cell.set(key, cellObj);
     }
 
     return { days, nBins, cell };
@@ -1505,10 +1889,10 @@
       for (let ti=0; ti<nBins; ti++){
         const key = `${di}|${ti}`;
         const obj = hmState.cell.get(key);
-        const cls = obj ? obj.cls : "none";
+        const tone = obj ? (obj.tone || obj.cls) : "none";
         const x = pad + leftW + ti*(cellSz+gap);
 
-        ctx.fillStyle = sevColor(cls);
+        ctx.fillStyle = sevColor(tone);
         ctx.fillRect(x, y, cellSz, cellSz);
       }
     }
@@ -1800,10 +2184,31 @@
     tbl.innerHTML = `<tr><th>Variável</th><th>Modelo</th><th>Medido</th></tr>` + rows.map(([label, m, o]) => `<tr><td class="k mono">${label}</td><td class="v mono">${fmtAny(m)}</td><td class="v mono">${fmtAny(o)}</td></tr>`).join("");
   }
 
+  function pickDayIrradianceSeries(series){
+    const candidates = [
+      ["g_poa_used", "Irradiância POA usada (W/m²)"],
+      ["g_poa", "Irradiância POA (W/m²)"],
+      ["g_poa_wm2", "Irradiância POA (W/m²)"],
+      ["gpoa", "Irradiância POA (W/m²)"],
+      ["gti", "GTI (W/m²)"],
+      ["ghi", "GHI (W/m²)"],
+    ];
+    for (const [key, label] of candidates){
+      const arr = series?.[key];
+      if (Array.isArray(arr) && arr.some((v) => Number.isFinite(Number(v)))){
+        return { key, label, values: arr };
+      }
+    }
+    return { key: null, label: "Irradiância (W/m²)", values: [] };
+  }
+
   function renderSelectedDayCurve(payload, cellObj){
-    const canvas = $("chartDetailDay");
-    if (!canvas || !window.Chart) return;
+    const canvasPower = $("chartDetailDay");
+    const canvasIrr = $("chartDetailIrrDay");
+    if ((!canvasPower && !canvasIrr) || !window.Chart) return;
     if (chartDetailDay){ chartDetailDay.destroy(); chartDetailDay = null; }
+    if (chartDetailIrrDay){ chartDetailIrrDay.destroy(); chartDetailIrrDay = null; }
+    if (chartDetailIrrDay){ chartDetailIrrDay.destroy(); chartDetailIrrDay = null; }
     const dayKey = cellObj?.day || cellObj?.ds || null;
     if (!payload || !cellObj || !dayKey) return;
 
@@ -1812,6 +2217,8 @@
     const days = s.hm_day_local || [];
     const prAll = s.p_ac_real_w || s.p_ac_w || [];
     const pmAll = s.p_ac_model_w || [];
+    const irrSeries = pickDayIrradianceSeries(s);
+    const irrAll = irrSeries.values || [];
 
     const idxs = [];
     for (let i=0; i<days.length; i++) if (days[i] === dayKey) idxs.push(i);
@@ -1823,20 +2230,63 @@
     });
     const pr = idxs.map(i => prAll[i]);
     const pm = idxs.map(i => pmAll[i]);
+    const irr = idxs.map(i => irrAll[i]);
     const selectedIndex = idxs.indexOf(cellObj.idx);
     const pointR = localLabels.map((_,k)=>k===selectedIndex?4:0);
+    const pointHoverR = localLabels.map((_,k)=>k===selectedIndex?6:3);
 
-    chartDetailDay = new Chart(canvas, {
-      type: "line",
-      data: {
-        labels: localLabels,
-        datasets: [
-          { label: "P AC real (W)", data: pr, borderWidth: 2, pointRadius: pointR, tension: 0.15 },
-          { label: "P AC modelo (W)", data: pm, borderWidth: 2, pointRadius: pointR, tension: 0.15 },
-        ]
-      },
-      options: chartCommonOptions(),
-    });
+    if (canvasPower){
+      chartDetailDay = new Chart(canvasPower, {
+        type: "line",
+        data: {
+          labels: localLabels,
+          datasets: [
+            { label: "P AC real (W)", data: pr, borderWidth: 2, pointRadius: pointR, pointHoverRadius: pointHoverR, tension: 0.15 },
+            { label: "P AC modelo (W)", data: pm, borderWidth: 2, pointRadius: pointR, pointHoverRadius: pointHoverR, tension: 0.15 },
+          ]
+        },
+        options: chartCommonOptions(),
+      });
+    }
+
+    if (canvasIrr && irr.some((v) => Number.isFinite(Number(v)))){
+      const irrOpts = chartCommonOptions();
+      irrOpts.scales = {
+        x: irrOpts.scales?.x || {},
+        y: {
+          ...(irrOpts.scales?.y || {}),
+          title: {
+            display: true,
+            text: irrSeries.label || "Irradiância (W/m²)",
+            color: "rgba(233,246,255,.88)",
+            font: { size: 12, weight: "700" }
+          }
+        }
+      };
+      chartDetailIrrDay = new Chart(canvasIrr, {
+        type: "line",
+        data: {
+          labels: localLabels,
+          datasets: [
+            {
+              label: irrSeries.label || "Irradiância (W/m²)",
+              data: irr,
+              borderWidth: 2,
+              tension: 0.15,
+              pointRadius: pointR,
+              pointHoverRadius: pointHoverR,
+              borderColor: "#ffd25a",
+              backgroundColor: "rgba(255, 210, 90, 0.22)",
+              pointBackgroundColor: localLabels.map((_,k)=>k===selectedIndex?"#ffd25a":"rgba(255, 210, 90, 0.22)"),
+              pointBorderColor: localLabels.map((_,k)=>k===selectedIndex?"#fff3b0":"#ffd25a"),
+              pointBorderWidth: localLabels.map((_,k)=>k===selectedIndex?2:1),
+              spanGaps: true,
+            },
+          ]
+        },
+        options: irrOpts,
+      });
+    }
   }
 
   function buildSeriesDumpFallback(payload, idx){
@@ -1913,6 +2363,289 @@
     };
   }
 
+  function renderValidationDashboard(payload){
+    const summary = payload?.summary?.validation || {};
+    const coverage = summary?.coverage || {};
+    const eventMetrics = summary?.event_metrics || {};
+    const sampleMetrics = summary?.sample_metrics || {};
+
+    const setTxt = (id, value) => { const el = $(id); if (el) el.textContent = value; };
+    setTxt("valEventPrecision", fmtPct(eventMetrics.precision ?? null, 1));
+    setTxt("valEventRecall", fmtPct(eventMetrics.recall ?? null, 1));
+    setTxt("valEventF1", fmtPct(eventMetrics.f1 ?? null, 1));
+    setTxt("valEventFarDay", fmtN(eventMetrics.false_alarm_events_per_day ?? null, 2));
+    setTxt("valSamplePrecision", fmtPct(sampleMetrics.precision ?? null, 1));
+    setTxt("valSampleRecall", fmtPct(sampleMetrics.recall ?? null, 1));
+
+    const cov = $("validationCoverageText");
+    if (cov){
+      cov.innerHTML = `
+        <div class="validation-row">
+          <span class="pill info">Eventos previstos: <span class="mono">${fmtAny(coverage.predicted_events)}</span></span>
+          <span class="pill ok">Eventos reais confirmados: <span class="mono">${fmtAny(coverage.truth_events_confirmed)}</span></span>
+          <span class="pill neutral">Janelas normais: <span class="mono">${fmtAny(coverage.truth_windows_normal)}</span></span>
+          <span class="pill warn">Incertos: <span class="mono">${fmtAny(coverage.truth_events_uncertain)}</span></span>
+          <span class="pill crit">Descartados: <span class="mono">${fmtAny(coverage.truth_events_dismissed)}</span></span>
+          <span class="pill neutral">Dias rotulados: <span class="mono">${fmtAny(coverage.labeled_days)}</span></span>
+          <span class="pill neutral">Bins rotulados: <span class="mono">${fmtAny(coverage.labeled_bins)}</span></span>
+        </div>`;
+    }
+
+    const delay = $("validationDelayText");
+    if (delay){
+      delay.innerHTML = `
+        <div class="validation-row tight">
+          <span class="pill neutral">Delay médio: <span class="mono">${fmtN(eventMetrics.mean_detection_delay_min ?? null, 1)} min</span></span>
+          <span class="pill neutral">Delay mediano: <span class="mono">${fmtN(eventMetrics.median_detection_delay_min ?? null, 1)} min</span></span>
+          <span class="pill neutral">P90 delay: <span class="mono">${fmtN(eventMetrics.p90_detection_delay_min ?? null, 1)} min</span></span>
+          <span class="pill crit">FA evento/dia: <span class="mono">${fmtN(eventMetrics.false_alarm_events_per_day ?? null, 2)}</span></span>
+          <span class="pill crit">FA evento/semana: <span class="mono">${fmtN(eventMetrics.false_alarm_events_per_week ?? null, 2)}</span></span>
+          <span class="pill crit">FA bin/dia: <span class="mono">${fmtN(sampleMetrics.false_alarm_bins_per_day ?? null, 2)}</span></span>
+        </div>`;
+    }
+
+    const confWrap = $("validationConfusionWrap");
+    if (confWrap) confWrap.innerHTML = renderMatrixTable(summary?.event_confusion_matrix || summary?.confusion_matrix || {});
+    const irrWrap = $("validationIrradianceWrap");
+    if (irrWrap) irrWrap.innerHTML = renderMetricRows(summary?.by_irradiance_bucket || {}, "irr");
+    const metWrap = $("validationMeteoWrap");
+    if (metWrap) metWrap.innerHTML = renderMetricRows(summary?.by_meteo_quality || {}, "meteo");
+
+    const listBox = $("validationEventsList");
+    if (listBox){
+      const rows = getPredEventList(payload);
+      if (!rows.length){
+        listBox.innerHTML = `<div class="validation-empty">Nenhum evento previsto no intervalo atual.</div>`;
+      } else {
+        listBox.innerHTML = rows.map((ev)=>{
+          const reviewState = String(ev?.review_state || ev?.known_vs_unknown || "pending");
+          return `
+            <div class="validation-event-item">
+              <div class="validation-row tight">
+                <span class="pill ${pillClassForState(reviewState)}">${escHtml(reviewState)}</span>
+                <span class="pill neutral mono">id=${fmtAny(ev?.id)}</span>
+                <span class="pill info">${escHtml(ev?.match_type || "—")}</span>
+              </div>
+              <div><b>Previsto:</b> <span class="mono">${escHtml(ev?.pred_label || ev?.event_label_prelim || "—")}</span></div>
+              <div><b>Final:</b> <span class="mono">${escHtml(ev?.final_label || "—")}</span></div>
+              <div><b>Verdade associada:</b> <span class="mono">${escHtml(ev?.matched_truth_label || "—")}</span></div>
+              <div class="mono">${escHtml(ev?.ts_start_utc || "—")} → ${escHtml(ev?.ts_end_utc || "—")}</div>
+            </div>`;
+        }).join("");
+      }
+    }
+  }
+
+  function renderValidationPanel(validationBlock, cellObj, payload){
+    const predCtx = resolvePredEventContext(payload, cellObj, validationBlock || {});
+    const predEvent = predCtx?.predEvent || null;
+    const effectivePredEventId = predCtx?.predEventId;
+    const truthDefaults = buildTruthDefaults(payload, cellObj, validationBlock || {});
+    const reviewState = String(validationBlock?.pred_event_review_state || predEvent?.review_state || predEvent?.known_vs_unknown || "pending");
+    const finalLabel = String(validationBlock?.pred_event_final_label || predEvent?.final_label || validationBlock?.pred_event_label_prelim || predEvent?.pred_label || "");
+    const truthLabel = String(validationBlock?.truth_label || finalLabel || "");
+    const truthState = String(validationBlock?.bin_truth_state === "normal" ? "normal" : (validationBlock?.truth_event_id ? "confirmed" : "confirmed"));
+    const predExists = !!parsePositiveInt(effectivePredEventId);
+
+    const predInfo = predExists ? `
+      <div class="validation-row tight">
+        <span class="pill info mono">Evento previsto #${fmtAny(effectivePredEventId)}</span>
+        <span class="pill ${pillClassForState(reviewState)}">${escHtml(reviewState)}</span>
+        <span class="pill neutral">status=${escHtml(validationBlock?.pred_event_status || predEvent?.status || "—")}</span>
+        ${predCtx?.source === "summary_inference" ? `<span class="pill warn">vinculado por inferência temporal</span>` : ``}
+      </div>
+      <div class="validation-help mono">${escHtml(predEvent?.ts_start_utc || "—")} → ${escHtml(predEvent?.ts_end_utc || "—")}</div>
+      <table class="kv">
+        <tr><td class="k">Rótulo preliminar</td><td class="v mono">${escHtml(validationBlock?.pred_event_label_prelim || predEvent?.event_label_prelim || "—")}</td></tr>
+        <tr><td class="k">Rótulo final salvo</td><td class="v mono">${escHtml(validationBlock?.pred_event_final_label || predEvent?.final_label || "—")}</td></tr>
+        <tr><td class="k">Match atual</td><td class="v mono">${escHtml(predEvent?.match_type || "—")}</td></tr>
+      </table>` : `
+      <div class="validation-banner warn">Este bin não veio associado a um <b>FaultEvent</b> previsto no overlay do backend. Se houver um evento compatível em <code>summary.events</code>, a interface tentará vinculá-lo automaticamente; caso contrário, você ainda pode registrar um evento real manualmente logo abaixo.</div>`;
+
+    const truthInfo = `
+      <div class="validation-row tight" style="margin-top:.6rem;">
+        <span class="pill ${pillClassForState(validationBlock?.bin_truth_state)}">bin truth=${escHtml(validationBlock?.bin_truth_state || "unlabeled")}</span>
+        <span class="pill neutral mono">truth_event_id=${fmtAny(validationBlock?.truth_event_id)}</span>
+      </div>
+      <div class="validation-help">Rótulo de verdade atual para o bin selecionado: <span class="mono">${escHtml(validationBlock?.bin_truth_label || "—")}</span></div>`;
+
+    return `
+      <div class="validation-block">
+        <h4 style="margin-top:0;">Estado atual da validação</h4>
+        ${predInfo}
+        ${truthInfo}
+      </div>
+      <div style="height:.8rem"></div>
+      <div class="validation-block">
+        <h4 style="margin-top:0;">Revisar evento previsto</h4>
+        <div class="validation-help">Use esta ação quando o sistema gerou um <b>FaultEvent</b> para o bin. A revisão atualiza o evento previsto e, quando aplicável, cria/atualiza automaticamente o ground truth associado.</div>
+        <div class="form-grid" style="margin-top:.75rem;">
+          <div class="form-field">
+            <label for="reviewState">Estado da revisão</label>
+            <select id="reviewState" class="select-glass" ${predExists ? "" : "disabled"}>
+              <option value="pending" ${reviewState === "pending" ? "selected" : ""}>pending</option>
+              <option value="confirmed" ${reviewState === "confirmed" ? "selected" : ""}>confirmed</option>
+              <option value="dismissed" ${reviewState === "dismissed" ? "selected" : ""}>dismissed</option>
+              <option value="uncertain" ${reviewState === "uncertain" ? "selected" : ""}>uncertain</option>
+            </select>
+          </div>
+          <div class="form-field">
+            <label for="reviewFinalLabel">Rótulo final</label>
+            <select id="reviewFinalLabel" class="select-glass mono" ${predExists ? "" : "disabled"}>
+              ${buildLabelOptions(finalLabel, { allowBlank:true, preferred:[validationBlock?.pred_event_label_prelim, predEvent?.event_label_prelim, predEvent?.pred_label] })}
+            </select>
+          </div>
+          <div class="form-field">
+            <label for="reviewAnnotationSource">Fonte da anotação</label>
+            <select id="reviewAnnotationSource" class="select-glass" ${predExists ? "" : "disabled"}>
+              <option value="specialist_review" selected>specialist_review</option>
+              <option value="client_report_plus_specialist_review">client_report_plus_specialist_review</option>
+              <option value="maintenance_ticket">maintenance_ticket</option>
+              <option value="utility_confirmation">utility_confirmation</option>
+            </select>
+          </div>
+          <div class="form-field">
+            <label for="reviewAnnotationConfidence">Confiança</label>
+            <select id="reviewAnnotationConfidence" class="select-glass" ${predExists ? "" : "disabled"}>
+              <option value="A">A</option>
+              <option value="B" selected>B</option>
+              <option value="C">C</option>
+            </select>
+          </div>
+          <div class="form-field full">
+            <label for="reviewNotes">Notas da revisão</label>
+            <textarea id="reviewNotes" class="textarea-glass" ${predExists ? "" : "disabled"}></textarea>
+          </div>
+        </div>
+        <div class="validation-actions" style="margin-top:.75rem;">
+          <button type="button" class="btn-glow" id="btnSaveReview" ${predExists ? "" : "disabled"}>Salvar revisão</button>
+        </div>
+      </div>
+      <div style="height:.8rem"></div>
+      <div class="validation-block">
+        <h4 style="margin-top:0;">Registrar / atualizar evento real (ground truth)</h4>
+        <div class="validation-help">Use esta seção para registrar um evento real confirmado, uma janela normal ou um evento incerto, mesmo que o sistema não tenha detectado nada.</div>
+        <div class="form-grid" style="margin-top:.75rem;">
+          <div class="form-field">
+            <label for="truthState">Truth state</label>
+            <select id="truthState" class="select-glass">
+              <option value="confirmed" ${truthState === "confirmed" ? "selected" : ""}>confirmed</option>
+              <option value="normal" ${truthState === "normal" ? "selected" : ""}>normal</option>
+              <option value="uncertain" ${truthState === "uncertain" ? "selected" : ""}>uncertain</option>
+              <option value="dismissed" ${truthState === "dismissed" ? "selected" : ""}>dismissed</option>
+            </select>
+          </div>
+          <div class="form-field">
+            <label for="truthLabel">Truth label</label>
+            <select id="truthLabel" class="select-glass mono">
+              ${buildLabelOptions(truthLabel, { allowBlank:false, preferred:[truthLabel, finalLabel, validationBlock?.truth_label, validationBlock?.pred_event_label_prelim, predEvent?.event_label_prelim, predEvent?.pred_label] })}
+            </select>
+          </div>
+          <div class="form-field">
+            <label for="truthStartUtc">Início UTC</label>
+            <input id="truthStartUtc" class="input-glass mono" type="text" value="${escHtml(truthDefaults.startUtc)}" placeholder="2026-03-18T14:00:00Z">
+          </div>
+          <div class="form-field">
+            <label for="truthEndUtc">Fim UTC</label>
+            <input id="truthEndUtc" class="input-glass mono" type="text" value="${escHtml(truthDefaults.endUtc)}" placeholder="2026-03-18T15:00:00Z">
+          </div>
+          <div class="form-field">
+            <label for="truthAnnotationSource">Fonte da anotação</label>
+            <select id="truthAnnotationSource" class="select-glass">
+              <option value="specialist_review" selected>specialist_review</option>
+              <option value="client_report_plus_specialist_review">client_report_plus_specialist_review</option>
+              <option value="maintenance_ticket">maintenance_ticket</option>
+              <option value="utility_confirmation">utility_confirmation</option>
+            </select>
+          </div>
+          <div class="form-field">
+            <label for="truthAnnotationConfidence">Confiança</label>
+            <select id="truthAnnotationConfidence" class="select-glass">
+              <option value="A">A</option>
+              <option value="B" selected>B</option>
+              <option value="C">C</option>
+            </select>
+          </div>
+          <div class="form-field full">
+            <label for="truthNotes">Notas do evento real</label>
+            <textarea id="truthNotes" class="textarea-glass"></textarea>
+          </div>
+        </div>
+        <div class="validation-actions" style="margin-top:.75rem;">
+          <button type="button" class="btn-glow secondary" id="btnSaveTruthEvent">Salvar evento real</button>
+        </div>
+      </div>`;
+  }
+
+  function bindValidationActions(payload, cellObj, validationBlock){
+    const page = $("fddPage");
+    const reviewUrl = page?.dataset?.reviewApi;
+    const truthUrl = page?.dataset?.truthApi;
+    const selectedDump = cellObj?.dumpPoint || payload?.dump_by_tkey?.[cellObj?.tkey] || {};
+    const predCtx = resolvePredEventContext(payload, cellObj, validationBlock || {});
+
+    $("btnSaveReview")?.addEventListener("click", async ()=>{
+      const faultEventId = parsePositiveInt(predCtx?.predEventId);
+      if (!faultEventId){
+        alert("Este bin não possui FaultEvent previsto para revisão.");
+        return;
+      }
+      try{
+        await postJson(reviewUrl, {
+          fault_event_id: faultEventId,
+          review_state: $("reviewState")?.value || "pending",
+          final_label: $("reviewFinalLabel")?.value || "",
+          annotation_source: $("reviewAnnotationSource")?.value || "specialist_review",
+          annotation_confidence: $("reviewAnnotationConfidence")?.value || "B",
+          notes: $("reviewNotes")?.value || "",
+        });
+        await runFdd({ save:false, preserveSelection:true });
+        setStatus(true, "Revisão salva com sucesso.");
+        setTimeout(()=>setStatus(false), 2200);
+      }catch(err){
+        alert(`Erro ao salvar revisão: ${String(err.message || err)}`);
+      }
+    });
+
+    const truthStateEl = $("truthState");
+    const truthLabelEl = $("truthLabel");
+    truthStateEl?.addEventListener("change", ()=>{
+      const state = String(truthStateEl.value || "confirmed");
+      if (!truthLabelEl) return;
+      if (state === "normal"){
+        truthLabelEl.value = "normal";
+      } else if (state === "dismissed" && (!truthLabelEl.value || truthLabelEl.value === "normal")){
+        truthLabelEl.value = "unknown";
+      }
+    });
+
+    $("btnSaveTruthEvent")?.addEventListener("click", async ()=>{
+      try{
+        const body = {
+          plant_id: Number($("plant_id")?.value || 0),
+          fault_event_id: parsePositiveInt(predCtx?.predEventId) || undefined,
+          ts_start_utc: $("truthStartUtc")?.value || "",
+          ts_end_utc: $("truthEndUtc")?.value || "",
+          truth_state: $("truthState")?.value || "confirmed",
+          truth_label: $("truthLabel")?.value || "unknown",
+          annotation_source: $("truthAnnotationSource")?.value || "specialist_review",
+          annotation_confidence: $("truthAnnotationConfidence")?.value || "B",
+          notes: $("truthNotes")?.value || "",
+          source_oper: String(payload?.sources?.selected_source || ""),
+          source_meteo: String(payload?.sources?.source_meteo || ""),
+          detector_version: String(payload?.version_summary?.detector_version || "mismatch_runtime_v1"),
+        };
+        if (!body.ts_start_utc || !body.ts_end_utc) throw new Error("Informe início e fim UTC do evento real.");
+        await postJson(truthUrl, body);
+        await runFdd({ save:false, preserveSelection:true });
+        setStatus(true, "Evento real salvo com sucesso.");
+        setTimeout(()=>setStatus(false), 2200);
+      }catch(err){
+        alert(`Erro ao salvar evento real: ${String(err.message || err)}`);
+      }
+    });
+  }
+
   function setDrawerTab(name){
     document.querySelectorAll('.drawer-tab-btn').forEach((el)=>el.classList.toggle('active', el.dataset.tab===name));
     document.querySelectorAll('.drawer-tab-panel').forEach((el)=>el.classList.toggle('active', el.dataset.panel===name));
@@ -1929,13 +2662,16 @@
     const tblCompare = $("detailCompare");
     const dump = $("detailDump");
     const meteoHealth = $("detailMeteoHealth");
+    const detailValidation = $("detailValidation");
 
     if (!cellObj || !payload){
       if (meta) meta.textContent = '—';
       [tblAll,tblMppt,tblMeteo,tblConf,tblDet,tblAC,tblCompare].forEach((el)=>{ if(el) el.innerHTML=''; });
       if (dump) dump.textContent = '{}';
       if (meteoHealth) meteoHealth.innerHTML = '';
+      if (detailValidation) detailValidation.innerHTML = '';
       if (chartDetailDay){ chartDetailDay.destroy(); chartDetailDay = null; }
+      if (chartDetailIrrDay){ chartDetailIrrDay.destroy(); chartDetailIrrDay = null; }
       closeDetailDrawer();
       return;
     }
@@ -1956,6 +2692,8 @@
     const acBlock = mergeDefined(fallbackPoint?.chosen_total || {}, dumpPoint?.chosen_total || {});
     const modelBlock = mergeDefined(fallbackPoint?.model || {}, dumpPoint?.model || {});
     const residualBlock = mergeDefined(fallbackPoint?.residuals || {}, dumpPoint?.residuals || {});
+    const validationBlock = mergeDefined(fallbackPoint?.validation || {}, dumpPoint?.validation || {});
+    validationBlock.selected_ts_utc = dumpPoint?.ts_utc || '';
     // flat fallbacks adicionais
     detBlock.ewma_z = pickDumpValue(dumpPoint, fallbackPoint, payload, idx, ["detection.ewma_z","ewma_z"]);
     detBlock.cusum_score = pickDumpValue(dumpPoint, fallbackPoint, payload, idx, ["detection.cusum_score","cusum_score"]);
@@ -2008,6 +2746,10 @@
     dumpObj.__heatmap = { day: ds, time_bin: ts, dt_minutes: hmState.dtm, has_any: !!cellObj.has_any, idx: (idx >= 0 ? idx : null), has_oper: !!cellObj.has_oper, class: clsTxt, reason: cellObj.reason };
     hmState.selectedSnapshot = dumpObj;
     if (dump) dump.textContent = JSON.stringify(dumpObj, null, 2);
+    if (detailValidation){
+      detailValidation.innerHTML = renderValidationPanel(validationBlock, { ...cellObj, dumpPoint }, payload);
+      bindValidationActions(payload, { ...cellObj, dumpPoint }, validationBlock);
+    }
     renderSelectedDayCurve(payload, cellObj);
     setDrawerTab(document.querySelector('.drawer-tab-btn.active')?.dataset.tab || 'mppt');
     openDetailDrawer();
@@ -2017,6 +2759,7 @@
     hmState.selectedKey = null;
     hmState.selectedSnapshot = null;
     if (chartDetailDay){ chartDetailDay.destroy(); chartDetailDay = null; }
+    if (chartDetailIrrDay){ chartDetailIrrDay.destroy(); chartDetailIrrDay = null; }
     renderDetail(null, null);
     drawHeatmapCanvas();
   }
@@ -2159,7 +2902,7 @@
     }
   }
 
-  async function runFdd(opts = { save:false }){
+  async function runFdd(opts = { save:false, preserveSelection:false }){
     const page = $("fddPage");
     const apiUrl = page ? page.dataset.api : null;
     if (!apiUrl){ alert("API URL não configurada."); return; }
@@ -2180,7 +2923,13 @@
       setKpis(data);
       buildCharts(data);
       renderHeatmapCanvas(data);
+      renderValidationDashboard(data);
       bindHeatmapHoverAndClick();
+
+      if (opts && opts.preserveSelection && hmState.selectedKey){
+        const obj = hmState.cell.get(hmState.selectedKey);
+        if (obj) renderDetail(hmState.payload, obj);
+      }
 
       setStatus(false);
     }catch(err){
@@ -2243,6 +2992,7 @@
     $("kpiRange").textContent = "—";
     setStatus(false);
     renderRandomSearchResult(null);
+    renderValidationDashboard({ summary: { validation: {}, events: [] } });
     closeDetailDrawer();
   }
 
@@ -2294,6 +3044,7 @@
 
     bindDetailButtons();
     bindHeatmapFit();
+    renderValidationDashboard({ summary: { validation: {}, events: [] } });
 
     document.addEventListener("keydown", (ev) => {
       if (ev.key === "Escape") closeDetailDrawer();

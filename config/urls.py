@@ -51,6 +51,9 @@ from core.views.fdd import (
     mismatch_fdd_view,
     mismatch_fdd_export_pdf,
     mismatch_fdd_random_search_api,
+    mismatch_fdd_review_event_api,
+    mismatch_fdd_create_truth_event_api,
+    mismatch_fdd_validation_api,
 )
 
 from core.views.mppt_gnn_fdd import (
@@ -122,6 +125,9 @@ urlpatterns = [
     path("dashboard/fdd/mismatch/api/", mismatch_fdd_api, name="mismatch_fdd_api"),
     path("dashboard/fdd/mismatch/export-pdf/", mismatch_fdd_export_pdf, name="mismatch_fdd_export_pdf"),
     path("dashboard/fdd/mismatch/random-search/", mismatch_fdd_random_search_api, name="mismatch_fdd_random_search_api"),
+    path("dashboard/fdd/mismatch/review-event/", mismatch_fdd_review_event_api, name="mismatch_fdd_review_event_api"),
+    path("dashboard/fdd/mismatch/truth-event/", mismatch_fdd_create_truth_event_api, name="mismatch_fdd_create_truth_event_api"),
+    path("dashboard/fdd/mismatch/validation/", mismatch_fdd_validation_api, name="mismatch_fdd_validation_api"),
     path("dashboard/fdd/mppt-gnn/", mppt_gnn_fdd_view, name="mppt_gnn_fdd_view"),
     path("dashboard/fdd/mppt-gnn/api/", mppt_gnn_fdd_api, name="mppt_gnn_fdd_api"),
     path("dashboard/fdd/mppt-gnn/dump/", mppt_gnn_fdd_dump_api, name="mppt_gnn_fdd_dump_api"),
