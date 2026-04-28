@@ -1,38 +1,42 @@
-# core/services/openmeteo.py
+# core/services/dados_satelite/openmeteo.py
+
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple, Iterable
+from urllib.parse import urlencode
 
 import requests
 import pandas as pd
 from django.db import transaction
 
-from core.models import MeteoRecord, MeteoSource, PVPlant
+from core.models import (
+    MeteoRecord,
+    MeteoSource,
+    MeteoImportBatch,
+    MeteoDataTypology,
+    PVPlant,
+)
 from core.services.meteo_qc import MeteoQCConfig, apply_meteo_qc
 
 FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
-
-# Para 15-min no passado (>= 2022): host separado, API idêntica ao Forecast
 HISTORICAL_FORECAST_URL = "https://historical-forecast-api.open-meteo.com/v1/forecast"
 HISTORICAL_FORECAST_MIN_DATE = date(2022, 1, 1)
 
 SUPPORTED_INTERVALS_MIN = {60, 15}
 
-# Variáveis para hourly e minutely_15 (nomes são os mesmos na API)
 DEFAULT_TIME_VARS = [
-    "shortwave_radiation",          # GHI
-    "direct_normal_irradiance",     # DNI
-    "diffuse_radiation",            # DHI
+    "shortwave_radiation",
+    "direct_normal_irradiance",
+    "diffuse_radiation",
     "temperature_2m",
     "wind_speed_10m",
     "relative_humidity_2m",
     "surface_pressure",
 ]
 
-# Opcional: GTI exige tilt/azimuth
 GTI_VAR = "global_tilted_irradiance"
 
 
@@ -47,9 +51,6 @@ def _utc_today() -> date:
 
 
 def _daterange_chunks(start_d: date, end_d: date, chunk_days: int) -> Iterable[Tuple[date, date]]:
-    """
-    Gera intervalos [s, e] inclusivos.
-    """
     if chunk_days < 1:
         raise ValueError("chunk_days deve ser >= 1")
 
@@ -61,27 +62,16 @@ def _daterange_chunks(start_d: date, end_d: date, chunk_days: int) -> Iterable[T
 
 
 def _choose_endpoint(end_d: date, interval_min: int, start_d: date) -> str:
-    """
-    60 min:
-      - Se encosta no agora: Forecast
-      - Senão: Archive (reanalysis)
-    15 min:
-      - Se encosta no agora: Forecast
-      - Senão: Historical Forecast (>= 2022)
-    """
     if interval_min == 15:
         if start_d < HISTORICAL_FORECAST_MIN_DATE:
             raise ValueError(
                 f"interval_min=15 exige dados a partir de {HISTORICAL_FORECAST_MIN_DATE.isoformat()} "
                 f"(Historical Forecast API)."
             )
-
-        # buffer de 3 dias para evitar buracos por atualização/latência
         if end_d >= (_utc_today() - timedelta(days=3)):
             return FORECAST_URL
         return HISTORICAL_FORECAST_URL
 
-    # interval_min == 60
     if end_d >= (_utc_today() - timedelta(days=3)):
         return FORECAST_URL
     return ARCHIVE_URL
@@ -102,9 +92,6 @@ def _to_float_or_none(v: Any) -> Optional[float]:
 
 
 def _clamp_tilt_deg(v: Optional[float]) -> Optional[float]:
-    """
-    Open-Meteo: tilt 0..90.
-    """
     x = _to_float_or_none(v)
     if x is None:
         return None
@@ -116,26 +103,27 @@ def _clamp_tilt_deg(v: Optional[float]) -> Optional[float]:
 
 
 def azimuth_0N_to_openmeteo(az_deg_0_359: Any) -> Optional[float]:
-    """
-    Converte azimute padrão bússola (0=N, 90=E, 180=S, 270=W)
-    para o padrão Open-Meteo:
-        0=S, -90=E, +90=W, ±180=N
-
-    Entrada: 0..359 (aceita qualquer valor e aplica mod 360)
-    Saída: [-180, +180]
-    """
     x = _to_float_or_none(az_deg_0_359)
     if x is None:
         return None
 
-    az = x % 360.0  # garante 0..360
-    om = ((az - 180.0 + 540.0) % 360.0) - 180.0  # [-180, 180)
-
-    # opcional: preferir +180 ao invés de -180 (equivalentes)
+    az = x % 360.0
+    om = ((az - 180.0 + 540.0) % 360.0) - 180.0
     if abs(om + 180.0) < 1e-12:
         om = 180.0
-
     return float(om)
+
+
+def _normalize_dataset_model(model: Optional[str]) -> str:
+    raw = (model or "").strip()
+    return raw if raw else "best_match"
+
+
+def _build_request_url(endpoint: str, params: Dict[str, Any]) -> str:
+    try:
+        return f"{endpoint}?{urlencode(params, doseq=True)}"
+    except Exception:
+        return ""
 
 
 def fetch_openmeteo_hourly(
@@ -151,29 +139,12 @@ def fetch_openmeteo_hourly(
     model: Optional[str] = None,
     timeout_s: int = 60,
 ) -> OpenMeteoFetchResult:
-    """
-    Busca séries do Open-Meteo e normaliza timestamps em UTC.
-    Suporta:
-      - interval_min=60  -> payload["hourly"]
-      - interval_min=15  -> payload["minutely_15"]
-
-    Para interval_min=15:
-      - usa Forecast para período recente
-      - usa Historical Forecast API para passado (>= 2022)
-
-    IMPORTANTE (correção aplicada aqui):
-      - azimuth_deg recebido do seu sistema é 0..359 com convenção 0=N, 90=E, 180=S, 270=W
-      - Open-Meteo exige: 0=S, -90=E, +90=W, ±180=N
-      -> convertemos automaticamente via azimuth_0N_to_openmeteo()
-    """
     if interval_min not in SUPPORTED_INTERVALS_MIN:
         raise ValueError(f"interval_min={interval_min} inválido. Use {sorted(SUPPORTED_INTERVALS_MIN)}.")
 
     endpoint = _choose_endpoint(end_date, interval_min, start_date)
-
     vars_ = list(DEFAULT_TIME_VARS)
 
-    # Normaliza tilt/azimuth para GTI
     tilt_val = _clamp_tilt_deg(tilt_deg)
     az_in_0n = _to_float_or_none(azimuth_deg)
     az_val = azimuth_0N_to_openmeteo(az_in_0n) if az_in_0n is not None else None
@@ -182,7 +153,6 @@ def fetch_openmeteo_hourly(
     if add_gti and GTI_VAR not in vars_:
         vars_.append(GTI_VAR)
 
-    # chave do bloco no JSON e parâmetro de request
     if interval_min == 60:
         block_key = "hourly"
         series_param_key = "hourly"
@@ -196,7 +166,7 @@ def fetch_openmeteo_hourly(
         "start_date": start_date.isoformat(),
         "end_date": end_date.isoformat(),
         series_param_key: ",".join(vars_),
-        "timezone": "UTC",             # garanta UTC no retorno
+        "timezone": "UTC",
         "timeformat": "iso8601",
         "wind_speed_unit": "ms",
         "temperature_unit": "celsius",
@@ -207,8 +177,6 @@ def fetch_openmeteo_hourly(
         params["azimuth"] = float(az_val)
 
     if model:
-        # nos endpoints /forecast e /historical-forecast, o parâmetro é "models"
-        # (no /archive também é aceito conforme doc atual do Open-Meteo)
         params["models"] = model
 
     r = requests.get(endpoint, params=params, timeout=timeout_s)
@@ -226,6 +194,7 @@ def fetch_openmeteo_hourly(
             meta={
                 "endpoint": endpoint,
                 "params": params,
+                "request_url": _build_request_url(endpoint, params),
                 "payload": payload,
                 "block_key": block_key,
                 "gti_requested": add_gti,
@@ -240,18 +209,15 @@ def fetch_openmeteo_hourly(
     def _col(name: str) -> List[Any]:
         return block.get(name) or [None] * len(df)
 
-    # Radiação
     df["ghi"] = _col("shortwave_radiation")
     df["dni"] = _col("direct_normal_irradiance")
     df["dhi"] = _col("diffuse_radiation")
     df["gti"] = _col(GTI_VAR) if add_gti else None
 
-    # Meteorologia
     df["temp_air"] = _col("temperature_2m")
     df["wind_speed"] = _col("wind_speed_10m")
     df["rh"] = _col("relative_humidity_2m")
 
-    # surface_pressure vem em hPa -> Pa
     sp_hpa = pd.to_numeric(pd.Series(_col("surface_pressure")), errors="coerce")
     df["pressure"] = (sp_hpa * 100.0).where(sp_hpa.notna(), other=None)
 
@@ -260,6 +226,7 @@ def fetch_openmeteo_hourly(
     meta = {
         "endpoint": endpoint,
         "params": params,
+        "request_url": _build_request_url(endpoint, params),
         "block_key": block_key,
         "latitude": payload.get("latitude"),
         "longitude": payload.get("longitude"),
@@ -285,24 +252,31 @@ def ingest_openmeteo_range(
     model: Optional[str] = None,
     timeout_s: int = 60,
 ) -> Tuple[int, Dict[str, Any]]:
-    """
-    Baixa e grava MeteoRecord (source=OPENMETEO) para um período.
-    Suporta interval_min=60 e 15. Para 15 min, faz chunking automaticamente.
-    Retorna (qtd_inserida_ou_atualizada, meta).
-    """
     if interval_min not in SUPPORTED_INTERVALS_MIN:
         raise ValueError(f"interval_min={interval_min} inválido. Use {sorted(SUPPORTED_INTERVALS_MIN)}.")
 
     details = getattr(plant, "details", None)
     tilt = float(details.tilt_deg) if details and getattr(details, "tilt_deg", None) is not None else None
-
-    # IMPORTANTÍSSIMO:
-    # details.azimuth_deg no seu sistema está em 0..359 (0=N, 90=E, 180=S, 270=W).
-    # A conversão para Open-Meteo é feita dentro de fetch_openmeteo_hourly.
     azim_0n = float(details.azimuth_deg) if details and getattr(details, "azimuth_deg", None) is not None else None
 
-    # chunking recomendado para 15 min (evita payload muito grande)
     chunk_days = 31 if interval_min == 15 else 370
+
+    dataset_model = _normalize_dataset_model(model)
+
+    batch = MeteoImportBatch.objects.create(
+        plant=plant,
+        source=MeteoSource.OPENMETEO,
+        source_endpoint="",
+        dataset_model=dataset_model,
+        data_typology=MeteoDataTypology.REANALYSIS_MODELED,
+        interval_min=interval_min,
+        start_date=start_date,
+        end_date=end_date,
+        request_url="",
+        request_params={},
+        response_meta={},
+        imported_rows=0,
+    )
 
     total_count = 0
     metas: List[Dict[str, Any]] = []
@@ -315,7 +289,7 @@ def ingest_openmeteo_range(
             end_date=e,
             interval_min=interval_min,
             tilt_deg=tilt,
-            azimuth_deg=azim_0n,  # 0..359 (0=N) -> convertida internamente
+            azimuth_deg=azim_0n,
             include_gti=include_gti,
             model=model,
             timeout_s=timeout_s,
@@ -341,6 +315,10 @@ def ingest_openmeteo_range(
                 MeteoRecord(
                     plant=plant,
                     source=MeteoSource.OPENMETEO,
+                    import_batch=batch,
+                    source_endpoint=str(res.meta.get("endpoint") or ""),
+                    dataset_model=dataset_model,
+                    data_typology=MeteoDataTypology.REANALYSIS_MODELED,
                     ts_utc=row.ts_utc.to_pydatetime(),
                     interval_min=int(row.interval_min),
                     ghi=_to_float_or_none(row.ghi),
@@ -367,24 +345,55 @@ def ingest_openmeteo_range(
                     update_conflicts=True,
                     unique_fields=["plant", "source", "ts_utc"],
                     update_fields=[
-                        "interval_min", "ghi", "dni", "dhi", "gti",
-                        "temp_air", "wind_speed", "rh", "pressure",
-                        "meteo_qc_score", "flag_meteo_low_confidence", "flag_meteo_interpolated",
-                        "flag_meteo_outlier", "flag_meteo_artifact",
+                        "import_batch",
+                        "source_endpoint",
+                        "dataset_model",
+                        "data_typology",
+                        "interval_min",
+                        "ghi",
+                        "dni",
+                        "dhi",
+                        "gti",
+                        "temp_air",
+                        "wind_speed",
+                        "rh",
+                        "pressure",
+                        "meteo_qc_score",
+                        "flag_meteo_low_confidence",
+                        "flag_meteo_interpolated",
+                        "flag_meteo_outlier",
+                        "flag_meteo_artifact",
                     ],
                 )
                 total_count += len(objs)
             except TypeError:
-                # Django < 4.1 (sem update_conflicts)
                 MeteoRecord.objects.bulk_create(objs, batch_size=2000, ignore_conflicts=True)
                 total_count += len(objs)
 
     meta_out: Dict[str, Any] = {
         "chunks": len(metas),
         "interval_min": interval_min,
+        "dataset_model": dataset_model,
         "endpoints_used": sorted({m.get("endpoint") for m in metas if m.get("endpoint")}),
         "block_keys": sorted({m.get("block_key") for m in metas if m.get("block_key")}),
         "first_chunk": metas[0] if metas else None,
         "last_chunk": metas[-1] if metas else None,
     }
+
+    first_meta = metas[0] if metas else {}
+    batch.source_endpoint = str(first_meta.get("endpoint") or "")
+    batch.request_params = dict(first_meta.get("params") or {})
+    batch.request_url = str(first_meta.get("request_url") or "")
+    batch.response_meta = meta_out
+    batch.imported_rows = total_count
+    batch.save(
+        update_fields=[
+            "source_endpoint",
+            "request_params",
+            "request_url",
+            "response_meta",
+            "imported_rows",
+        ]
+    )
+
     return total_count, meta_out

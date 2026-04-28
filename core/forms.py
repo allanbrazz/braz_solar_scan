@@ -466,3 +466,55 @@ class TimeseriesDashboardForm(forms.Form):
         self.fields["start_date"].initial = today - timedelta(days=2)
         self.fields["end_date"].initial = today
 
+
+
+OPENMETEO_MODEL_CHOICES = [
+    ("", "Best Match (padrão)"),
+    ("era5", "ERA5"),
+    ("era5_land", "ERA5-Land"),
+    ("cerra", "CERRA"),
+]
+
+
+class MeteoRequestForm(forms.Form):
+    plant = forms.ModelChoiceField(
+        queryset=PVPlant.objects.all(),
+        label="Planta",
+        widget=forms.Select(attrs={"class": "form-control"})
+    )
+
+    start_date = forms.DateField(
+        label="Data inicial",
+        widget=forms.DateInput(attrs={"type": "date", "class": "form-control"})
+    )
+
+    end_date = forms.DateField(
+        label="Data final",
+        widget=forms.DateInput(attrs={"type": "date", "class": "form-control"})
+    )
+
+    include_gti = forms.BooleanField(
+        label="Incluir GTI (POA) usando tilt/azimuth da planta",
+        required=False,
+        initial=True,
+        widget=forms.CheckboxInput(attrs={"class": "form-check-input"})
+    )
+
+    model = forms.ChoiceField(
+        label="Modelo meteorológico",
+        required=False,
+        initial="",
+        choices=OPENMETEO_MODEL_CHOICES,
+        help_text="Modelo requisitado à Open-Meteo. Em branco, usa o modo padrão (Best Match).",
+        widget=forms.Select(attrs={"class": "form-control"})
+    )
+
+    def clean(self):
+        cleaned = super().clean()
+        s = cleaned.get("start_date")
+        e = cleaned.get("end_date")
+        if s and e and e < s:
+            raise forms.ValidationError("Data final deve ser >= data inicial.")
+        if s and e and (e - s).days > 370:
+            raise forms.ValidationError("Intervalo muito grande. Quebre em janelas (ex.: 60-120 dias).")
+        return cleaned

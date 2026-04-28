@@ -6,62 +6,68 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
     <title>{% block title %}Solar Scan{% endblock %}</title>
 
+    <script>
+      (function () {
+        try {
+          var saved = localStorage.getItem('solar-scan-theme');
+          var theme = (saved === 'dark') ? 'dark' : 'light';
+          document.documentElement.setAttribute('data-theme', theme);
+        } catch (e) {
+          document.documentElement.setAttribute('data-theme', 'light');
+        }
+      })();
+    </script>
+
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;600;700&family=Orbitron:wght@600;700&display=swap" rel="stylesheet">
 
     <link rel="stylesheet" href="{% static 'app.css' %}">
     <link rel="stylesheet" href="{% static 'style.css' %}">
+    <link rel="stylesheet" href="{% static 'theme_solar_dual.css' %}">
 
     <link rel="icon" href="{% static 'img/logo.svg' %}" type="image/svg+xml">
     <link rel="icon" href="{% static 'img/favicon-32.png' %}" sizes="32x32" type="image/png">
     <link rel="apple-touch-icon" href="{% static 'img/apple-touch-icon.png' %}">
 
-    <!-- Flash messages (estilos) -->
     <style>
-      .flash-wrap{position:relative; z-index: 5; max-width: 1100px; margin: 12px auto;}
+      .flash-wrap{position:relative; z-index:5; max-width:1100px; margin:12px auto;}
       .flash{
-        padding:.6rem .9rem; border-radius:12px; margin-bottom:.5rem;
-        background:rgba(30,60,120,.40); color:#e9f6ff; border:1px solid rgba(255,255,255,.18);
-        backdrop-filter: blur(6px);
+        padding:.65rem .95rem;
+        border-radius:12px;
+        margin-bottom:.5rem;
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
       }
       .flash-success{border-color:rgba(80,255,160,.45)}
-      .flash-error,.flash-danger{border-color:rgba(255,120,120,.5)}
-      .flash-warning{border-color:rgba(255,220,120,.5)}
-      .flash-info{border-color:rgba(120,180,255,.5)}
+      .flash-error,.flash-danger{border-color:rgba(255,120,120,.55)}
+      .flash-warning{border-color:rgba(255,220,120,.55)}
+      .flash-info{border-color:rgba(120,180,255,.55)}
 
-      /* ====== Marca na NAVBAR (substitui o nome) ====== */
       .sidenav-brand a.brand-link{
         display:flex;
         align-items:center;
         gap:.65rem;
         text-decoration:none;
-        color: inherit;
+        color:inherit;
       }
       .sidenav-brand img.brand-logo{
-        height: 40px;
-        width: auto;
+        height:40px;
+        width:auto;
         display:block;
       }
       .sidenav-brand .brand-name{
-        font-family: "Orbitron", "Chakra Petch", system-ui, sans-serif;
-        font-weight: 700;
-        letter-spacing: .4px;
-        line-height: 1.05;
-      }
-      .sidenav-brand .brand-sub{
-        font-family: "Chakra Petch", system-ui, sans-serif;
-        font-size: .82rem;
-        opacity: .85;
-        margin-top: 2px;
+        font-family:"Orbitron", "Chakra Petch", system-ui, sans-serif;
+        font-weight:700;
+        letter-spacing:.4px;
+        line-height:1.05;
       }
       .brand-text{
         display:flex;
         flex-direction:column;
       }
-
       @media (max-width: 520px){
-        .sidenav-brand img.brand-logo{ height: 34px; }
+        .sidenav-brand img.brand-logo{ height:34px; }
       }
     </style>
 
@@ -69,17 +75,14 @@
   </head>
 
 <body class="{% block body_class %}app-body{% endblock %}">
-  <!-- Tema global (aparece em todas as páginas) -->
-  <div class="theme-bg">
+  <div class="theme-bg" aria-hidden="true">
     <div class="sun"></div>
     <div class="solar-grid"></div>
   </div>
 
 {% block navbar %}
 <aside class="sidenav">
-  <!-- topo / marca -->
   <div class="sidenav-brand">
-    <!-- Logo + Nome do sistema (no lugar do texto puro) -->
     <a class="brand-link" href="{% url 'home' %}" aria-label="Braz Solar Scan (Início)">
       <img src="{% static 'img/logo_navbar.png' %}" alt="Braz Solar Scan" class="brand-logo">
       <span class="brand-text">
@@ -88,16 +91,13 @@
     </a>
   </div>
 
-  <!-- itens -->
   <nav class="sidenav-nav">
-    {# Ajuda: resolver_match pode não existir em algum contexto #}
     {% with rm=request.resolver_match %}
 
     <a href="{% url 'home' %}"
        class="nav-item {% if rm and rm.url_name == 'home' %}active{% endif %}"
        {% if rm and rm.url_name == 'home' %}aria-current="page"{% endif %}
        aria-label="Início">
-      <!-- ícone: Sol + painel -->
       <svg class="icon" viewBox="0 0 64 64" aria-hidden="true">
         <circle cx="18" cy="18" r="8" fill="#ffd95e"/>
         <rect x="30" y="30" width="28" height="14" rx="2" fill="#5fb0ff"/>
@@ -124,7 +124,6 @@
         aria-current="page"
       {% endif %}
       aria-label="Módulos FV">
-      <!-- ícone: grade de módulos -->
       <svg class="icon" viewBox="0 0 64 64" aria-hidden="true">
         <rect x="8" y="10" width="48" height="44" rx="4" fill="#4aa3ff"/>
         <path d="M8 24h48M8 38h48M24 10v44M40 10v44"
@@ -133,7 +132,6 @@
       <span>Módulos</span>
     </a>
 
-    {# --- PLANTAS --- #}
     {% url 'plants:list' as plants_url %}
     <a href="{{ plants_url }}"
       class="nav-item
@@ -152,7 +150,6 @@
         aria-current="page"
       {% endif %}
       aria-label="Plantas">
-      <!-- ícone: sol + fileira de painéis (planta) -->
       <svg class="icon" viewBox="0 0 64 64" aria-hidden="true">
         <circle cx="50" cy="12" r="6" fill="#ffd95e"/>
         <rect x="8" y="34" width="48" height="14" rx="2" fill="#4aa3ff"/>
@@ -162,19 +159,14 @@
       <span>Plantas</span>
     </a>
 
-    {# --- METEOROLOGIA (Open-Meteo) --- #}
     <a href="{% url 'open_meteo_view' %}"
        class="nav-item {% if rm and rm.url_name == 'open_meteo_view' %}active{% endif %}"
        {% if rm and rm.url_name == 'open_meteo_view' %}aria-current="page"{% endif %}
        aria-label="Registros meteorológicos (Open-Meteo)">
-      <!-- ícone: nuvem + sol -->
       <svg class="icon" viewBox="0 0 64 64" aria-hidden="true">
-        <!-- sol -->
         <circle cx="46" cy="18" r="6" fill="#ffd95e"/>
         <path d="M46 6v6M46 24v6M34 18h6M52 18h6M38 10l4 4M50 22l4 4M38 26l4-4M50 14l4-4"
               stroke="#ffd95e" stroke-width="2" stroke-linecap="round" opacity=".9"/>
-
-        <!-- nuvem -->
         <path d="M22 44h22a10 10 0 0 0 0-20 14 14 0 0 0-27-2A9 9 0 0 0 22 44z"
               fill="#5fb0ff" opacity=".9"/>
         <path d="M18 44h28" stroke="#e6f2ff" stroke-width="2" opacity=".7"/>
@@ -206,11 +198,8 @@
       class="nav-item {% if request.resolver_match.url_name == 'inverter_list' or request.resolver_match.url_name == 'inverter_create' %}active{% endif %}"
       aria-label="Inversores">
       <svg class="icon" viewBox="0 0 64 64" aria-hidden="true">
-        <!-- corpo do inversor -->
         <rect x="14" y="14" width="36" height="36" rx="6" fill="#4aa3ff"/>
-        <!-- display -->
         <rect x="22" y="22" width="20" height="10" rx="2" fill="#e6f2ff" opacity="0.95"/>
-        <!-- “entradas/saídas” -->
         <path d="M20 40H44" stroke="#e6f2ff" stroke-width="3" stroke-linecap="round"/>
         <path d="M24 46H24M32 46H32M40 46H40"
               stroke="#e6f2ff" stroke-width="3" stroke-linecap="round"/>
@@ -233,8 +222,19 @@
     {% endwith %}
   </nav>
 
-  <!-- footer / ações -->
   <div class="sidenav-footer">
+    <button type="button" class="nav-item theme-toggle-btn" aria-label="Alternar tema" aria-pressed="false">
+      <svg class="icon theme-icon-sun" viewBox="0 0 64 64" aria-hidden="true">
+        <circle cx="32" cy="32" r="10" fill="#ffd95e"></circle>
+        <path d="M32 8v8M32 48v8M8 32h8M48 32h8M15 15l6 6M43 43l6 6M15 49l6-6M43 21l6-6"
+              stroke="#e6f2ff" stroke-width="3" stroke-linecap="round"></path>
+      </svg>
+      <svg class="icon theme-icon-moon" viewBox="0 0 64 64" aria-hidden="true">
+        <path d="M42 10c-3 10-1 20 6 27 4 4 9 7 14 8-4 6-11 10-19 10-13 0-24-11-24-24 0-10 6-18 15-22 2-1 5-2 8-2z" fill="#dbe9ff"></path>
+      </svg>
+      <span class="theme-toggle-label">Modo escuro</span>
+    </button>
+
     <a href="#" class="nav-item" aria-label="Configurações">
       <svg class="icon" viewBox="0 0 64 64" aria-hidden="true">
         <circle cx="32" cy="32" r="7" fill="#ffd95e"/>
@@ -259,8 +259,6 @@
 {% endblock %}
 
   <main class="page page--with-sidenav {% block page_class %}{% endblock %}">
-
-    <!-- Flash messages (render) -->
     {% if messages %}
       <div class="flash-wrap" role="status" aria-live="polite">
         {% for message in messages %}
@@ -271,5 +269,7 @@
 
     {% block content %}{% endblock %}
   </main>
+
+  <script src="{% static 'theme_toggle.js' %}"></script>
 </body>
 </html>

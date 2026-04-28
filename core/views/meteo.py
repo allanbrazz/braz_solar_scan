@@ -102,12 +102,19 @@ def open_meteo_view(request):
                 include_gti=include_gti,
                 model=model,
             )
-            messages.success(request, f"Open-Meteo: {count} registros ingeridos/atualizados.")
+            model_label = model or "best_match"
+            messages.success(
+                request,
+                (
+                    f"Open-Meteo: {count} registros ingeridos/atualizados. "
+                    f"Modelo: {model_label}. "
+                    f"Intervalo: {start_date} a {end_date}."
+                )
+            )
         except Exception as e:
-            messages.error(request, f"Falha ao ingerir Open-Meteo: {e}")
+            messages.error(request, f"Falha ao ingerir dados meteorológicos da Open-Meteo: {e}")
 
     return render(request, "meteo/open_meteo_request.html", {"form": form})
-
 
 def open_meteo_view_api_json(request):
     """

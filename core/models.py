@@ -512,10 +512,92 @@ class ShineReading(models.Model):
 #--------------------------- M E T E O
 #---------------------------
 
+# core/models.py
+
+from django.db import models
+from django.core.validators import MinValueValidator, MaxValueValidator
+from django.conf import settings
+from django.core.exceptions import ValidationError
+from django.utils import timezone
+from decimal import Decimal
+from django.db.models import Q, F
+
+# ... resto do arquivo permanece igual ...
+
 
 class MeteoSource(models.TextChoices):
     OPENMETEO = "OPENMETEO", "Open-Meteo"
-    NSRDB = "NSRDB", "NSRDB (NREL)"  # pode manter para histórico/legado
+    NSRDB = "NSRDB", "NSRDB (NREL)"
+
+
+class MeteoDataTypology(models.TextChoices):
+    REANALYSIS_MODELED = "REANALYSIS_MODELED", "Reanálise / modelado"
+    DERIVED_MODELED = "DERIVED_MODELED", "Derivado / modelado"
+    MEASURED = "MEASURED", "Medido"
+    OTHER = "OTHER", "Outro"
+
+
+class MeteoImportBatch(models.Model):
+    """
+    Lote de importação meteorológica.
+    Guarda a proveniência da requisição feita ao provedor.
+    """
+    plant = models.ForeignKey(
+        "core.PVPlant",
+        on_delete=models.CASCADE,
+        related_name="meteo_import_batches",
+    )
+
+    source = models.CharField(
+        max_length=20,
+        choices=MeteoSource.choices,
+        default=MeteoSource.OPENMETEO,
+        db_index=True,
+    )
+
+    source_endpoint = models.CharField(max_length=255, blank=True, default="")
+    dataset_model = models.CharField(
+        max_length=64,
+        blank=True,
+        default="best_match",
+        db_index=True,
+        help_text="Modelo requisitado à Open-Meteo, ex.: best_match, era5, era5_land, cerra.",
+    )
+    data_typology = models.CharField(
+        max_length=32,
+        choices=MeteoDataTypology.choices,
+        default=MeteoDataTypology.REANALYSIS_MODELED,
+    )
+
+    interval_min = models.PositiveSmallIntegerField(
+        default=15,
+        validators=[MinValueValidator(1)],
+    )
+
+    start_date = models.DateField()
+    end_date = models.DateField()
+
+    request_url = models.TextField(blank=True, default="")
+    request_params = models.JSONField(default=dict, blank=True)
+    response_meta = models.JSONField(default=dict, blank=True)
+
+    imported_rows = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["plant", "source", "created_at"]),
+            models.Index(fields=["plant", "dataset_model", "created_at"]),
+        ]
+        verbose_name = "Lote de importação meteorológica"
+        verbose_name_plural = "Lotes de importação meteorológica"
+
+    def __str__(self):
+        return (
+            f"{self.plant.nome} | {self.source} | {self.dataset_model} | "
+            f"{self.start_date}..{self.end_date}"
+        )
 
 
 class MeteoRecord(models.Model):
@@ -531,23 +613,45 @@ class MeteoRecord(models.Model):
         default=MeteoSource.OPENMETEO,
     )
 
+    import_batch = models.ForeignKey(
+        "core.MeteoImportBatch",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="records",
+    )
+
+    source_endpoint = models.CharField(max_length=255, blank=True, default="")
+    dataset_model = models.CharField(
+        max_length=64,
+        blank=True,
+        default="best_match",
+        db_index=True,
+        help_text="Modelo meteorológico requisitado ao provedor.",
+    )
+    data_typology = models.CharField(
+        max_length=32,
+        choices=MeteoDataTypology.choices,
+        default=MeteoDataTypology.REANALYSIS_MODELED,
+    )
+
     # CANÔNICO: timestamp em UTC
     ts_utc = models.DateTimeField(db_index=True)
     interval_min = models.PositiveSmallIntegerField(default=60, validators=[MinValueValidator(1)])
 
-    # Radiação (W/m²) - Open-Meteo fornece esses diretamente
+    # Radiação (W/m²)
     ghi = models.FloatField(null=True, blank=True)
     dni = models.FloatField(null=True, blank=True)
     dhi = models.FloatField(null=True, blank=True)
 
-    # OPCIONAL (RECOMENDADO): GTI/POA (W/m²) a partir de tilt/azimuth
+    # Opcional
     gti = models.FloatField(null=True, blank=True)
 
     # Meteorologia
-    temp_air = models.FloatField(null=True, blank=True)     # °C
-    wind_speed = models.FloatField(null=True, blank=True)   # m/s
-    rh = models.FloatField(null=True, blank=True)           # %
-    pressure = models.FloatField(null=True, blank=True)     # Pa (armazenar em Pa para consistência)
+    temp_air = models.FloatField(null=True, blank=True)
+    wind_speed = models.FloatField(null=True, blank=True)
+    rh = models.FloatField(null=True, blank=True)
+    pressure = models.FloatField(null=True, blank=True)
 
     # Qualidade meteo / audit trail para FDD
     meteo_qc_score = models.FloatField(null=True, blank=True)
@@ -567,12 +671,11 @@ class MeteoRecord(models.Model):
         ]
         indexes = [
             models.Index(fields=["plant", "source", "ts_utc"]),
+            models.Index(fields=["plant", "dataset_model", "ts_utc"]),
         ]
 
     def __str__(self):
         return f"{self.plant.nome} {self.source} {self.ts_utc.isoformat()}"
-
-
 #---------------------------
 #--------------------------- S I N C R O N I Z A Ç Ã O
 #---------------------------

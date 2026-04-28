@@ -87,7 +87,7 @@ def inverter_create_view(request: HttpRequest) -> HttpResponse:
     else:
         form = PVInverterForm()
 
-    return render(request, "inverters/form.html", {"form": form})
+    return render(request, "inverters/inverter_form.html", {"form": form})
 
 @login_required
 @require_http_methods(["GET", "POST"])

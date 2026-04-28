@@ -1,0 +1,581 @@
+/*
+  Solar Scan — SCADA Blue Pulse Theme
+  ------------------------------------------------------------
+  Objetivo:
+  - Manter a arquitetura visual existente do projeto.
+  - Não reescrever a lógica da sidebar definida em app.css.
+  - Criar uma identidade baseada na logo: painel FV escuro,
+    núcleo âmbar, raio branco e feixe elétrico azul.
+
+  Arquivo novo:
+  static/theme_scada_bluepulse.css
+
+  Carregamento recomendado no base.html:
+  depois de app.css e style.css.
+*/
+
+:root{
+  --bp-black: #020612;
+  --bp-ink: #04101f;
+  --bp-navy-1: #061426;
+  --bp-navy-2: #0a213d;
+  --bp-navy-3: #123b68;
+
+  --bp-panel: rgba(6, 18, 34, .70);
+  --bp-panel-strong: rgba(9, 27, 50, .82);
+  --bp-panel-line: rgba(95, 176, 255, .22);
+  --bp-panel-line-soft: rgba(95, 176, 255, .12);
+
+  --bp-blue: #1e90ff;
+  --bp-blue-2: #5fb0ff;
+  --bp-blue-3: #a7d8ff;
+  --bp-blue-rgb: 95, 176, 255;
+
+  --bp-amber: #ffb000;
+  --bp-amber-2: #ffd95e;
+  --bp-orange: #ff7a1a;
+  --bp-amber-rgb: 255, 176, 0;
+
+  --bp-red: #ff5f6d;
+  --bp-text: #f4fbff;
+  --bp-muted: #b7d7f8;
+  --bp-dim: #83a6c9;
+
+  --bp-glass-bg: rgba(6, 20, 38, .48);
+  --bp-glass-bg-strong: rgba(6, 20, 38, .68);
+  --bp-glass-border: rgba(95, 176, 255, .24);
+  --bp-glass-border-strong: rgba(167, 216, 255, .36);
+
+  --bp-sidebar-reference-width: var(--nav-w, 84px);
+
+  /* Sobrescreve variáveis do app.css sem alterar a estrutura. */
+  --bg1: #04101f;
+  --bg2: #071a31;
+  --bg3: #123b68;
+  --ink: var(--bp-text);
+  --ink-dim: var(--bp-muted);
+  --surface: rgba(6, 20, 38, .50);
+  --surface-bd: rgba(95, 176, 255, .25);
+
+  --nav-bg: rgba(3, 10, 22, .66);
+  --nav-bd: rgba(95, 176, 255, .23);
+  --nav-ink: #eef8ff;
+  --nav-ink-dim: #b7d7f8;
+  --nav-accent: var(--bp-blue-2);
+  --nav-highlight: var(--bp-amber-2);
+}
+
+html{
+  background: var(--bp-black);
+}
+
+body.theme-bluepulse,
+body.theme-bluepulse.app-body{
+  min-height: 100vh;
+  color: var(--bp-text);
+  background:
+    radial-gradient(circle at 76% 48%, rgba(var(--bp-amber-rgb), .20) 0%, rgba(255, 122, 26, .08) 16rem, rgba(255, 122, 26, 0) 36rem),
+    radial-gradient(circle at 22% 18%, rgba(var(--bp-blue-rgb), .18) 0%, rgba(var(--bp-blue-rgb), .055) 24rem, transparent 46rem),
+    linear-gradient(145deg, var(--bp-black) 0%, var(--bp-navy-1) 30%, var(--bp-navy-2) 68%, var(--bp-navy-3) 100%) !important;
+  background-attachment: fixed;
+  font-family: "Chakra Petch", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  overflow-x: hidden;
+}
+
+body.theme-bluepulse::before{
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(90deg, rgba(2, 6, 17, .84) 0%, rgba(2, 6, 17, .54) 18%, rgba(2, 6, 17, .14) 50%, rgba(2, 6, 17, .32) 100%),
+    radial-gradient(circle at 46% 26%, rgba(var(--bp-blue-rgb), .08) 0%, transparent 38rem);
+}
+
+body.theme-bluepulse::after{
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(var(--bp-blue-rgb), .038) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(var(--bp-blue-rgb), .034) 1px, transparent 1px),
+    radial-gradient(circle, rgba(255, 255, 255, .14) 0 1px, transparent 1.2px);
+  background-size: 92px 92px, 92px 92px, 148px 148px;
+  background-position: 0 0, 0 0, 40px 58px;
+  opacity: .24;
+  mask-image: linear-gradient(to bottom, black 0%, black 62%, transparent 95%);
+  -webkit-mask-image: linear-gradient(to bottom, black 0%, black 62%, transparent 95%);
+}
+
+/* ============================================================
+   CAMADAS GLOBAIS DO FUNDO
+============================================================ */
+
+.theme-bluepulse .theme-bg{
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+  background: transparent !important;
+}
+
+.theme-bluepulse .page,
+.theme-bluepulse .page--with-sidenav{
+  position: relative;
+  z-index: 1;
+  background: transparent !important;
+}
+
+.theme-bluepulse .sidenav{
+  z-index: 6;
+}
+
+/* Matriz de módulos FV no fundo, inspirada diretamente na logo. */
+.theme-bluepulse .scada-panel-field{
+  position: absolute;
+  top: 5vh;
+  right: -8vw;
+  width: 62vw;
+  max-width: 920px;
+  height: 72vh;
+  border-radius: 34px;
+  background:
+    linear-gradient(90deg, rgba(255, 255, 255, .065) 0 1px, transparent 1px 16.66%),
+    linear-gradient(180deg, rgba(255, 255, 255, .055) 0 1px, transparent 1px 33.33%),
+    radial-gradient(circle at center, rgba(var(--bp-blue-rgb), .14) 0%, rgba(var(--bp-blue-rgb), .055) 34%, rgba(2, 7, 18, .16) 100%),
+    linear-gradient(145deg, rgba(8, 22, 42, .78), rgba(4, 13, 26, .44));
+  border: 1px solid rgba(var(--bp-blue-rgb), .18);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, .045),
+    inset 0 0 80px rgba(30, 144, 255, .08),
+    0 24px 80px rgba(0, 0, 0, .28);
+  opacity: .50;
+  transform: perspective(960px) rotateY(-9deg) rotateX(2deg);
+  transform-origin: center;
+  mask-image: linear-gradient(to left, black 0%, black 60%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to left, black 0%, black 60%, transparent 100%);
+}
+
+/* Feixe elétrico azul horizontal, elemento principal da logo. */
+.theme-bluepulse .scada-beam{
+  position: absolute;
+  left: var(--bp-sidebar-reference-width);
+  right: 0;
+  top: 50%;
+  height: 82px;
+  transform: translateY(-50%);
+  background:
+    radial-gradient(ellipse at 74% center, rgba(255, 255, 255, .96) 0%, rgba(167, 216, 255, .84) 2.4%, rgba(var(--bp-blue-rgb), .40) 7%, transparent 18%),
+    radial-gradient(ellipse at 30% center, rgba(255, 255, 255, .74) 0%, rgba(167, 216, 255, .54) 2.4%, rgba(var(--bp-blue-rgb), .30) 7%, transparent 17%),
+    linear-gradient(90deg, transparent 0%, rgba(30, 144, 255, 0) 8%, rgba(30, 144, 255, .24) 25%, rgba(255, 255, 255, .82) 49%, rgba(30, 144, 255, .28) 70%, rgba(30, 144, 255, 0) 94%, transparent 100%);
+  box-shadow:
+    0 0 18px rgba(var(--bp-blue-rgb), .36),
+    0 0 46px rgba(30, 144, 255, .22);
+  opacity: .72;
+  mask-image: linear-gradient(to bottom, transparent 0%, black 40%, black 60%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 40%, black 60%, transparent 100%);
+}
+
+/* Núcleo energético âmbar. Mantém a classe .sun para compatibilidade com app.css. */
+.theme-bluepulse .theme-bg .sun{
+  position: absolute !important;
+  top: 50% !important;
+  right: 15vw !important;
+  width: 265px !important;
+  height: 265px !important;
+  transform: translateY(-50%) !important;
+  border-radius: 30px !important;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, .20) 0%, transparent 22%, rgba(255, 255, 255, .10) 50%, transparent 74%),
+    radial-gradient(circle at 42% 38%, rgba(255, 255, 255, .98) 0%, rgba(255, 217, 94, .96) 12%, rgba(255, 176, 0, .92) 34%, rgba(255, 122, 26, .76) 62%, rgba(255, 122, 26, .18) 100%) !important;
+  border: 1px solid rgba(255, 217, 94, .46);
+  box-shadow:
+    inset 0 0 0 2px rgba(255, 255, 255, .12),
+    inset 0 0 46px rgba(255, 255, 255, .14),
+    0 0 36px rgba(255, 217, 94, .54),
+    0 0 92px rgba(255, 176, 0, .36),
+    0 0 160px rgba(255, 122, 26, .22) !important;
+  opacity: .96 !important;
+  filter: none !important;
+  animation: none !important;
+}
+
+.theme-bluepulse .theme-bg .sun::before{
+  content: "";
+  position: absolute;
+  inset: -38px;
+  border-radius: 38px;
+  border: 1px solid rgba(var(--bp-blue-rgb), .22);
+  background:
+    conic-gradient(from 180deg, transparent 0deg, rgba(var(--bp-blue-rgb), .15) 32deg, transparent 64deg, transparent 118deg, rgba(255, 217, 94, .14) 152deg, transparent 190deg, transparent 236deg, rgba(var(--bp-blue-rgb), .12) 268deg, transparent 312deg, transparent 360deg) !important;
+  box-shadow:
+    0 0 0 14px rgba(var(--bp-blue-rgb), .045),
+    0 0 0 34px rgba(255, 217, 94, .025),
+    0 0 64px rgba(var(--bp-blue-rgb), .14);
+  opacity: .94;
+  animation: none !important;
+}
+
+/* Raio interno da logo. */
+.theme-bluepulse .theme-bg .sun::after{
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 92px;
+  height: 154px;
+  transform: translate(-50%, -50%) skewX(-8deg);
+  background: #ffffff !important;
+  clip-path: polygon(58% 0%, 18% 50%, 48% 50%, 32% 100%, 86% 38%, 56% 38%);
+  filter:
+    drop-shadow(0 0 10px rgba(255, 255, 255, .78))
+    drop-shadow(0 0 24px rgba(255, 217, 94, .58));
+  opacity: .98;
+  border: 0 !important;
+  box-shadow: none !important;
+  animation: none !important;
+}
+
+/* HUD circular ao redor do núcleo. */
+.theme-bluepulse .scada-hud{
+  position: absolute;
+  top: calc(50% - 205px);
+  right: calc(15vw - 72px);
+  width: 410px;
+  height: 410px;
+  border-radius: 50%;
+  background:
+    conic-gradient(from 190deg, transparent 0deg, rgba(var(--bp-blue-rgb), .18) 22deg, transparent 50deg, transparent 92deg, rgba(255, 217, 94, .18) 130deg, transparent 166deg, transparent 224deg, rgba(var(--bp-blue-rgb), .14) 264deg, transparent 312deg, transparent 360deg);
+  opacity: .66;
+  filter: blur(.15px);
+}
+
+/* Grade inferior: campo FV / malha SCADA. */
+.theme-bluepulse .theme-bg .solar-grid{
+  position: absolute !important;
+  left: var(--bp-sidebar-reference-width) !important;
+  right: -12vw !important;
+  bottom: -12vh !important;
+  width: auto !important;
+  height: 45vh !important;
+  opacity: .30 !important;
+  transform: perspective(900px) rotateX(66deg) !important;
+  transform-origin: bottom !important;
+  background:
+    radial-gradient(ellipse at center top, rgba(var(--bp-blue-rgb), .22) 0%, rgba(30, 144, 255, .08) 32%, transparent 66%),
+    linear-gradient(to top, rgba(30, 144, 255, .22) 0%, rgba(30, 144, 255, .08) 36%, transparent 82%),
+    repeating-linear-gradient(90deg, rgba(var(--bp-blue-rgb), .44) 0, rgba(var(--bp-blue-rgb), .44) 1px, transparent 1px, transparent 70px),
+    repeating-linear-gradient(0deg, rgba(var(--bp-blue-rgb), .28) 0, rgba(var(--bp-blue-rgb), .28) 1px, transparent 1px, transparent 70px) !important;
+  mask-image: linear-gradient(to top, black, transparent 90%) !important;
+  -webkit-mask-image: linear-gradient(to top, black, transparent 90%) !important;
+  animation: none !important;
+  filter: none !important;
+}
+
+.theme-bluepulse .theme-bg .solar-grid::before{
+  opacity: .25 !important;
+  mix-blend-mode: normal !important;
+}
+
+/* Linha operacional sutil sob a área útil. */
+.theme-bluepulse .page::after{
+  content: "";
+  position: fixed;
+  left: var(--bp-sidebar-reference-width);
+  right: 0;
+  bottom: 24%;
+  height: 1px;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(90deg, transparent 0%, rgba(var(--bp-blue-rgb), .18) 20%, rgba(255, 217, 94, .13) 52%, rgba(var(--bp-blue-rgb), .12) 76%, transparent 100%);
+  opacity: .72;
+}
+
+/* ============================================================
+   NAVBAR: só refinamento visual, sem alterar a mecânica do app.css
+============================================================ */
+
+.theme-bluepulse .sidenav{
+  background:
+    linear-gradient(180deg, rgba(3, 10, 22, .82), rgba(2, 8, 18, .64)) !important;
+  border-right-color: rgba(var(--bp-blue-rgb), .23) !important;
+  box-shadow:
+    18px 0 46px rgba(0, 0, 0, .26),
+    inset -1px 0 0 rgba(167, 216, 255, .06);
+  backdrop-filter: blur(12px) saturate(125%);
+  -webkit-backdrop-filter: blur(12px) saturate(125%);
+}
+
+.theme-bluepulse .sidenav-brand{
+  border-bottom-color: rgba(var(--bp-blue-rgb), .12) !important;
+}
+
+.theme-bluepulse .sidenav-brand img.brand-logo{
+  filter:
+    drop-shadow(0 0 12px rgba(var(--bp-blue-rgb), .38))
+    drop-shadow(0 0 20px rgba(255, 176, 0, .16))
+    drop-shadow(0 5px 12px rgba(0, 0, 0, .36));
+}
+
+.theme-bluepulse .sidenav-brand .brand-name{
+  color: #ffffff;
+  text-shadow:
+    0 0 12px rgba(var(--bp-blue-rgb), .42),
+    0 0 26px rgba(30, 144, 255, .26);
+}
+
+.theme-bluepulse .nav-item{
+  color: var(--nav-ink) !important;
+}
+
+.theme-bluepulse .nav-item.active{
+  background:
+    linear-gradient(180deg, rgba(var(--bp-blue-rgb), .18), rgba(30, 110, 210, .12)) !important;
+  border-left-color: var(--bp-blue-2) !important;
+  box-shadow:
+    inset 0 0 0 1px rgba(var(--bp-blue-rgb), .20),
+    0 0 14px rgba(var(--bp-blue-rgb), .18) !important;
+}
+
+.theme-bluepulse .nav-item:hover{
+  background: rgba(var(--bp-blue-rgb), .085) !important;
+}
+
+.theme-bluepulse .nav-item:hover .icon path,
+.theme-bluepulse .nav-item:hover .icon circle,
+.theme-bluepulse .nav-item:hover .icon rect{
+  filter: drop-shadow(0 0 7px rgba(255, 217, 94, .62));
+}
+
+/* ============================================================
+   CARDS, PAINÉIS E FORMULÁRIOS
+============================================================ */
+
+.theme-bluepulse .card,
+.theme-bluepulse .card.glass,
+.theme-bluepulse .glass,
+.theme-bluepulse .glass-card,
+.theme-bluepulse .dashboard-card,
+.theme-bluepulse .metric-card,
+.theme-bluepulse .chart-card,
+.theme-bluepulse .table-card,
+.theme-bluepulse .panel,
+.theme-bluepulse .filter-card{
+  color: var(--bp-text);
+  background:
+    linear-gradient(180deg, rgba(7, 21, 39, .62), rgba(5, 15, 30, .42));
+  border-color: var(--bp-glass-border);
+  box-shadow:
+    0 18px 42px rgba(0, 0, 0, .26),
+    inset 0 1px 0 rgba(255, 255, 255, .07),
+    inset 0 0 0 1px rgba(var(--bp-blue-rgb), .04);
+  backdrop-filter: blur(10px) saturate(120%);
+  -webkit-backdrop-filter: blur(10px) saturate(120%);
+}
+
+.theme-bluepulse .card:hover,
+.theme-bluepulse .glass:hover,
+.theme-bluepulse .card.glass:hover{
+  border-color: var(--bp-glass-border-strong);
+}
+
+.theme-bluepulse .accent-cyan{ --accent: var(--bp-blue-2) !important; }
+.theme-bluepulse .accent-amber{ --accent: var(--bp-amber-2) !important; }
+.theme-bluepulse .accent-red{ --accent: var(--bp-red) !important; }
+
+.theme-bluepulse h1,
+.theme-bluepulse h2,
+.theme-bluepulse h3,
+.theme-bluepulse h4,
+.theme-bluepulse .card h1,
+.theme-bluepulse .card h2,
+.theme-bluepulse .card h3,
+.theme-bluepulse .card h4{
+  color: #ffffff;
+}
+
+.theme-bluepulse p,
+.theme-bluepulse .muted,
+.theme-bluepulse .card p,
+.theme-bluepulse .card .mini-sub{
+  color: rgba(244, 251, 255, .84);
+}
+
+.theme-bluepulse input,
+.theme-bluepulse select,
+.theme-bluepulse textarea,
+.theme-bluepulse .input-glass,
+.theme-bluepulse .textarea-glass,
+.theme-bluepulse .select-glass{
+  color: var(--bp-text) !important;
+  background: rgba(7, 20, 38, .62) !important;
+  border-color: rgba(var(--bp-blue-rgb), .25) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .04);
+}
+
+.theme-bluepulse input:focus,
+.theme-bluepulse select:focus,
+.theme-bluepulse textarea:focus,
+.theme-bluepulse .input-glass:focus,
+.theme-bluepulse .textarea-glass:focus,
+.theme-bluepulse .select-glass:focus{
+  border-color: rgba(167, 216, 255, .55) !important;
+  box-shadow:
+    0 0 0 3px rgba(var(--bp-blue-rgb), .18),
+    0 0 18px rgba(var(--bp-blue-rgb), .10) !important;
+}
+
+.theme-bluepulse input::placeholder,
+.theme-bluepulse textarea::placeholder{
+  color: rgba(183, 215, 248, .72);
+}
+
+.theme-bluepulse select option{
+  color: #071426;
+}
+
+.theme-bluepulse .btn-primary,
+.theme-bluepulse button.btn-primary,
+.theme-bluepulse a.btn-primary{
+  background: linear-gradient(90deg, var(--bp-blue), var(--bp-blue-2)) !important;
+  color: #03101f !important;
+  border: 0 !important;
+  box-shadow:
+    0 10px 24px rgba(30, 144, 255, .22),
+    inset 0 1px 0 rgba(255, 255, 255, .28);
+}
+
+.theme-bluepulse table{
+  color: var(--bp-text);
+}
+
+.theme-bluepulse th{
+  color: #ffffff;
+}
+
+.theme-bluepulse td{
+  color: rgba(244, 251, 255, .88);
+}
+
+/* ============================================================
+   FLASH MESSAGES
+============================================================ */
+
+.theme-bluepulse .flash-wrap{
+  position: relative;
+  z-index: 5;
+  max-width: 1100px;
+  margin: 12px auto;
+}
+
+.theme-bluepulse .flash{
+  padding: .65rem .95rem;
+  border-radius: 12px;
+  margin-bottom: .5rem;
+  background: rgba(7, 20, 38, .66) !important;
+  color: #e9f6ff !important;
+  border: 1px solid rgba(var(--bp-blue-rgb), .26) !important;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow:
+    0 14px 34px rgba(0, 0, 0, .25),
+    inset 0 1px 0 rgba(255, 255, 255, .08);
+}
+
+.theme-bluepulse .flash-success{ border-color: rgba(80, 255, 160, .45) !important; }
+.theme-bluepulse .flash-error,
+.theme-bluepulse .flash-danger{ border-color: rgba(255, 120, 120, .55) !important; }
+.theme-bluepulse .flash-warning{ border-color: rgba(255, 217, 94, .58) !important; }
+.theme-bluepulse .flash-info{ border-color: rgba(var(--bp-blue-rgb), .58) !important; }
+
+/* ============================================================
+   RESPONSIVO E ACESSIBILIDADE
+============================================================ */
+
+@media (max-width: 980px){
+  .theme-bluepulse .scada-panel-field{
+    right: -18vw;
+    width: 78vw;
+    opacity: .38;
+  }
+
+  .theme-bluepulse .scada-beam{
+    left: 0;
+    opacity: .56;
+  }
+
+  .theme-bluepulse .theme-bg .sun{
+    right: -34px !important;
+    width: 218px !important;
+    height: 218px !important;
+    border-radius: 24px !important;
+    opacity: .88 !important;
+  }
+
+  .theme-bluepulse .theme-bg .sun::after{
+    width: 72px;
+    height: 120px;
+  }
+
+  .theme-bluepulse .scada-hud{
+    right: 20px;
+    top: calc(50% - 145px);
+    width: 290px;
+    height: 290px;
+    opacity: .48;
+  }
+
+  .theme-bluepulse .theme-bg .solar-grid{
+    left: 0 !important;
+    right: -20vw !important;
+    height: 38vh !important;
+    opacity: .24 !important;
+  }
+
+  .theme-bluepulse .page::after{
+    left: 0;
+  }
+}
+
+@media (max-width: 520px){
+  .theme-bluepulse .theme-bg .sun{
+    right: -84px !important;
+    width: 190px !important;
+    height: 190px !important;
+    border-radius: 22px !important;
+    opacity: .78 !important;
+  }
+
+  .theme-bluepulse .theme-bg .sun::after{
+    width: 60px;
+    height: 100px;
+  }
+
+  .theme-bluepulse .scada-hud{
+    right: -18px;
+    top: calc(50% - 105px);
+    width: 210px;
+    height: 210px;
+    opacity: .36;
+  }
+
+  .theme-bluepulse .theme-bg .solar-grid{
+    height: 32vh !important;
+    opacity: .20 !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce){
+  .theme-bluepulse *,
+  .theme-bluepulse *::before,
+  .theme-bluepulse *::after{
+    animation-duration: .001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .001ms !important;
+  }
+}
